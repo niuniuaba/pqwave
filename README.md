@@ -1,6 +1,6 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 
-![Version](https://img.shields.io/badge/version-0.2.1.1-blue)
+![Version](https://img.shields.io/badge/version-0.2.1.2-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -47,7 +47,7 @@ python pqwave.py --help
 
 ## 🔧 Architecture
 ```
-pqwave.py (2293 lines)
+pqwave.py 
 ├── LogAxisItem    # Custom logarithmic axis display
 ├── RawFile        # SPICE RAW file parser, support pure SPICE, ngspice/xyce, LTspice, and QSPICE .qraw
 ├── ExprEvaluator  # Mathematical expression evaluator, infix notation and built-in math functions

@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pqwave"
-version = "0.2.1.1"
+version = "0.2.1.2"
 authors = [
-    {name = "niuniuaba", email = "your.email@example.com"}
+    {name = "niuniuaba", email = "liuyongjin@petalmail.com"}
 ]
 description = "A Wave Viewer for SPICE raw data using spicelib and PyQtGraph"
 readme = "README.md"

@@ -11,7 +11,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="pqwave",
-    version="0.2.1.1",
+    version="0.2.1.2",
     author="niuniuaba",
     author_email="your.email@example.com",
     description="A Wave Viewer for SPICE raw data using spicelib and PyQtGraph",

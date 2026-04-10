@@ -6,7 +6,7 @@ pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 - History: CHANGELOG.md
 - TODO: TODO.md
 
-Version 0.2.1.1
+Version 0.2.1.2
 - Legend formatted to show variable-Y-axis connection
 - Add Open New File from menu
 - Add trace properties edit (color, line width)
@@ -41,9 +41,10 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMenuBar, QMenu,
     QVBoxLayout, QHBoxLayout, QWidget, QComboBox, QPushButton, QLineEdit,
-    QLabel, QCheckBox, QDoubleSpinBox, QGridLayout, QSpacerItem, QSizePolicy
+    QLabel, QCheckBox, QDoubleSpinBox, QGridLayout, QSpacerItem, QSizePolicy,
+    QToolBar, QStatusBar, QStyle
 )
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtCore import Qt
 from pyqtgraph import AxisItem
 
@@ -732,9 +733,137 @@ class WaveViewer(QMainWindow):
         edit_menu.addAction(settings_action)
         
         menubar.addMenu(edit_menu)
-        
+
+        # Create View menu
+        view_menu = QMenu("View", self)
+
+        # Toggle actions (checkable)
+        self.toggle_toolbar_action = QAction("Toggle Toolbar", self, checkable=True)
+        self.toggle_toolbar_action.setChecked(True)  # Toolbar visible by default
+        self.toggle_toolbar_action.triggered.connect(self.toggle_toolbar)
+        view_menu.addAction(self.toggle_toolbar_action)
+
+        self.toggle_statusbar_action = QAction("Toggle Status Bar", self, checkable=True)
+        self.toggle_statusbar_action.setChecked(True)  # Status bar visible by default
+        self.toggle_statusbar_action.triggered.connect(self.toggle_statusbar)
+        view_menu.addAction(self.toggle_statusbar_action)
+
+        self.toggle_grids_action = QAction("Toggle Grids", self, checkable=True)
+        self.toggle_grids_action.setChecked(True)  # Grids visible by default
+        self.toggle_grids_action.setShortcut(QKeySequence("Ctrl+G"))
+        self.toggle_grids_action.triggered.connect(self.toggle_grids)
+        view_menu.addAction(self.toggle_grids_action)
+
+        view_menu.addSeparator()
+
+        # Zoom actions
+        self.zoom_in_action = QAction("Zoom In", self)
+        self.zoom_in_action.setShortcut(QKeySequence("Ctrl++"))
+        self.zoom_in_action.triggered.connect(self.zoom_in)
+        view_menu.addAction(self.zoom_in_action)
+
+        self.zoom_out_action = QAction("Zoom Out", self)
+        self.zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
+        self.zoom_out_action.triggered.connect(self.zoom_out)
+        view_menu.addAction(self.zoom_out_action)
+
+        self.zoom_to_fit_action = QAction("Zoom to Fit", self)
+        self.zoom_to_fit_action.setShortcut(QKeySequence("Ctrl+0"))
+        self.zoom_to_fit_action.triggered.connect(self.zoom_to_fit)
+        view_menu.addAction(self.zoom_to_fit_action)
+
+        self.auto_range_x_action = QAction("Auto-range X-axis", self)
+        self.auto_range_x_action.triggered.connect(self.auto_x_range)
+        view_menu.addAction(self.auto_range_x_action)
+
+        self.auto_range_y_action = QAction("Auto-range Y1 & Y2 axes", self)
+        self.auto_range_y_action.triggered.connect(self.auto_range_y)
+        view_menu.addAction(self.auto_range_y_action)
+
+        self.zoom_box_action = QAction("Zoom Box", self, checkable=True)
+        self.zoom_box_action.setChecked(False)
+        self.zoom_box_action.triggered.connect(self.enable_zoom_box)
+        view_menu.addAction(self.zoom_box_action)
+
+        menubar.addMenu(view_menu)
+
         self.setMenuBar(menubar)
-        
+
+        # Create toolbar
+        self.toolbar = QToolBar("Main Toolbar", self)
+        self.addToolBar(self.toolbar)
+        self.toolbar.setVisible(True)  # Default visible
+
+        # Add toolbar actions with Qt standard icons
+        style = self.style()
+
+        # Open File
+        open_file_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open File", self)
+        open_file_action.setToolTip("Open RAW file")
+        open_file_action.triggered.connect(self.open_file)
+        self.toolbar.addAction(open_file_action)
+
+        # Open New Window
+        open_new_window_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder), "Open New Window", self)
+        open_new_window_action.setToolTip("Open new window")
+        open_new_window_action.triggered.connect(self.open_new_window)
+        self.toolbar.addAction(open_new_window_action)
+
+        self.toolbar.addSeparator()
+
+        # Zoom In
+        self.zoom_in_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp), "Zoom In", self)
+        self.zoom_in_action_toolbar.setToolTip("Zoom in (Ctrl++)")
+        self.zoom_in_action_toolbar.triggered.connect(self.zoom_in)
+        self.toolbar.addAction(self.zoom_in_action_toolbar)
+
+        # Zoom Out
+        self.zoom_out_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowDown), "Zoom Out", self)
+        self.zoom_out_action_toolbar.setToolTip("Zoom out (Ctrl+-)")
+        self.zoom_out_action_toolbar.triggered.connect(self.zoom_out)
+        self.toolbar.addAction(self.zoom_out_action_toolbar)
+
+        # Zoom to Fit
+        self.zoom_to_fit_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogResetButton), "Zoom to Fit", self)
+        self.zoom_to_fit_action_toolbar.setToolTip("Auto-range all axes (Ctrl+0)")
+        self.zoom_to_fit_action_toolbar.triggered.connect(self.zoom_to_fit)
+        self.toolbar.addAction(self.zoom_to_fit_action_toolbar)
+
+        # Auto-range X-axis
+        self.auto_range_x_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowRight), "Auto-range X-axis", self)
+        self.auto_range_x_action_toolbar.setToolTip("Auto-range X-axis")
+        self.auto_range_x_action_toolbar.triggered.connect(self.auto_x_range)
+        self.toolbar.addAction(self.auto_range_x_action_toolbar)
+
+        # Auto-range Y axes
+        self.auto_range_y_action_toolbar = QAction("Y", self)
+        self.auto_range_y_action_toolbar.setToolTip("Auto-range Y1 & Y2 axes")
+        self.auto_range_y_action_toolbar.triggered.connect(self.auto_range_y)
+        self.toolbar.addAction(self.auto_range_y_action_toolbar)
+
+        # Zoom Box (checkable)
+        self.zoom_box_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_TitleBarNormalButton), "Zoom Box", self)
+        self.zoom_box_action_toolbar.setToolTip("Rectangle zoom mode (toggle)")
+        self.zoom_box_action_toolbar.setCheckable(True)
+        self.zoom_box_action_toolbar.triggered.connect(self.enable_zoom_box)
+        self.toolbar.addAction(self.zoom_box_action_toolbar)
+
+        # Toggle Grids (checkable)
+        self.toggle_grids_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogListView), "Toggle Grids", self)
+        self.toggle_grids_action_toolbar.setToolTip("Toggle grid visibility (Ctrl+G)")
+        self.toggle_grids_action_toolbar.setCheckable(True)
+        self.toggle_grids_action_toolbar.setChecked(True)
+        self.toggle_grids_action_toolbar.triggered.connect(self.toggle_grids)
+        self.toolbar.addAction(self.toggle_grids_action_toolbar)
+
+        # Create status bar
+        self.statusbar = QStatusBar(self)
+        self.setStatusBar(self.statusbar)
+        self.coord_label = QLabel("X: -, Y: -")
+        self.dataset_label = QLabel("Dataset: -")
+        self.statusbar.addPermanentWidget(self.coord_label)
+        self.statusbar.addPermanentWidget(self.dataset_label)
+
         # Create main widget
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -771,6 +900,11 @@ class WaveViewer(QMainWindow):
         grid_color.setAlpha(100)  # Semi-transparent
         # Show grid
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
+        # Connect grid checkbox signals to keep menu/toolbar in sync
+        if hasattr(self.plot_widget.plotItem, 'ctrl') and self.plot_widget.plotItem.ctrl is not None:
+            ctrl = self.plot_widget.plotItem.ctrl
+            ctrl.xGridCheck.stateChanged.connect(self._update_grid_check_state)
+            ctrl.yGridCheck.stateChanged.connect(self._update_grid_check_state)
         # Set grid pen color for X and Y axes
         self.plot_widget.getAxis('bottom').gridPen = pg.mkPen(color=grid_color)
         self.plot_widget.getAxis('left').gridPen = pg.mkPen(color=grid_color)
@@ -787,7 +921,12 @@ class WaveViewer(QMainWindow):
         self.update_plot_title('Wave Viewer')
         # Make plot widget expand to fill space
         main_layout.addWidget(self.plot_widget, 1)
-        
+
+        # Connect mouse move signal for coordinate display
+        self.plot_widget.plotItem.scene().sigMouseMoved.connect(self.on_mouse_moved)
+        # Connect mouse leave signal to clear coordinates
+        # self.plot_widget.plotItem.vb.sigMouseLeave.connect(self.on_mouse_left_plot)  # sigMouseLeave not available
+
         # Create controls layout with two rows
         controls_layout = QVBoxLayout()
         controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -922,6 +1061,13 @@ class WaveViewer(QMainWindow):
                 self.auto_y2_range()
                 # Update window title with file path
                 self.setWindowTitle(f"Wave Viewer - {filename}")
+                # Update status bar dataset label
+                if self.raw_file and self.raw_file.datasets:
+                    total_datasets = len(self.raw_file.datasets)
+                    current_dataset = self.current_dataset + 1  # Convert to 1-based for display
+                    self.dataset_label.setText(f"Dataset: {current_dataset}/{total_datasets}")
+                else:
+                    self.dataset_label.setText("Dataset: -")
             except FileNotFoundError as e:
                 print(f"Error opening file: {e}")
                 from PyQt6.QtWidgets import QMessageBox
@@ -1150,6 +1296,13 @@ class WaveViewer(QMainWindow):
         self.update_y1_label('Y1-axis')
         self.update_y2_label('Y2-axis')
         self.update_plot_title('Wave Viewer')
+        # Update status bar dataset label
+        if self.raw_file and self.raw_file.datasets:
+            total_datasets = len(self.raw_file.datasets)
+            current_dataset = self.current_dataset + 1  # Convert to 1-based for display
+            self.dataset_label.setText(f"Dataset: {current_dataset}/{total_datasets}")
+        else:
+            self.dataset_label.setText("Dataset: -")
     
     def split_expressions(self, expr):
         """Split expression into individual expressions, respecting quotes, parentheses and operators"""
@@ -2489,6 +2642,98 @@ class WaveViewer(QMainWindow):
                 legend_name = f"{var} @ {y_axis}"
                 self.legend.addItem(item, legend_name)
 
+    def toggle_toolbar(self):
+        """Toggle toolbar visibility"""
+        visible = not self.toolbar.isVisible()
+        self.toolbar.setVisible(visible)
+        self.toggle_toolbar_action.setChecked(visible)
+
+    def toggle_statusbar(self):
+        """Toggle status bar visibility"""
+        visible = not self.statusbar.isVisible()
+        self.statusbar.setVisible(visible)
+        self.toggle_statusbar_action.setChecked(visible)
+
+    def toggle_grids(self):
+        """Toggle grid visibility"""
+        plot_item = self.plot_widget.plotItem
+        # Get current grid state from ctrl checkboxes if available
+        x_visible = y_visible = True  # default
+        try:
+            if hasattr(plot_item, 'ctrl') and plot_item.ctrl is not None:
+                ctrl = plot_item.ctrl
+                # Safely get checkbox states
+                if hasattr(ctrl, 'xGridCheck'):
+                    x_visible = ctrl.xGridCheck.isChecked()
+                if hasattr(ctrl, 'yGridCheck'):
+                    y_visible = ctrl.yGridCheck.isChecked()
+        except Exception:
+            # If anything fails, assume default (grids visible)
+            pass
+
+        # If any grid is visible, turn both off. If both are off, turn both on.
+        grids_visible = x_visible or y_visible
+        new_state = not grids_visible
+        self.plot_widget.showGrid(x=new_state, y=new_state, alpha=0.3)
+        self.toggle_grids_action.setChecked(new_state)
+        self.toggle_grids_action_toolbar.setChecked(new_state)
+
+    def _update_grid_check_state(self):
+        """Update menu/toolbar check state based on actual grid visibility"""
+        plot_item = self.plot_widget.plotItem
+        try:
+            if hasattr(plot_item, 'ctrl') and plot_item.ctrl is not None:
+                ctrl = plot_item.ctrl
+                x_visible = False
+                y_visible = False
+                if hasattr(ctrl, 'xGridCheck'):
+                    x_visible = ctrl.xGridCheck.isChecked()
+                if hasattr(ctrl, 'yGridCheck'):
+                    y_visible = ctrl.yGridCheck.isChecked()
+                grids_visible = x_visible or y_visible
+                self.toggle_grids_action.setChecked(grids_visible)
+                self.toggle_grids_action_toolbar.setChecked(grids_visible)
+        except Exception:
+            # If we can't determine grid state, leave check state as is
+            pass
+
+    def zoom_in(self):
+        """Zoom in by scaling view"""
+        self.plot_widget.plotItem.vb.scaleBy(s=(0.8, 0.8))
+
+    def zoom_out(self):
+        """Zoom out by scaling view"""
+        self.plot_widget.plotItem.vb.scaleBy(s=(1.25, 1.25))
+
+    def zoom_to_fit(self):
+        """Auto-range all axes to fit data"""
+        self.auto_x_range()
+        self.auto_y1_range()
+        self.auto_y2_range()
+
+    def auto_range_y(self):
+        """Auto-range both Y axes"""
+        self.auto_y1_range()
+        self.auto_y2_range()
+
+    def enable_zoom_box(self, enabled):
+        """Enable or disable rectangle zoom mode"""
+        if enabled:
+            self.plot_widget.plotItem.vb.setMouseMode(pg.ViewBox.RectMode)
+        else:
+            self.plot_widget.plotItem.vb.setMouseMode(pg.ViewBox.PanMode)
+        self.zoom_box_action.setChecked(enabled)
+        self.zoom_box_action_toolbar.setChecked(enabled)
+
+    def on_mouse_moved(self, pos):
+        """Update status bar with mouse coordinates"""
+        view_pos = self.plot_widget.plotItem.vb.mapSceneToView(pos)
+        self.coord_label.setText(f"X: {view_pos.x():.3f}, Y: {view_pos.y():.3f}")
+
+    def on_mouse_left_plot(self):
+        """Clear coordinates when mouse leaves plot"""
+        self.coord_label.setText("X: -, Y: -")
+
 def main():
     """Main entry point for pqwave application"""
     # Parse command line arguments
@@ -2496,7 +2741,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Wave Viewer for SPICE raw data')
     parser.add_argument('raw_file', nargs='?', help='SPICE raw file to open (optional)')
-    parser.add_argument('--version', action='version', version='pqwave 0.2.1.1')
+    parser.add_argument('--version', action='version', version='pqwave 0.2.1.2')
     
     args = parser.parse_args()
     
