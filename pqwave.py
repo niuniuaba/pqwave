@@ -859,7 +859,7 @@ class WaveViewer(QMainWindow):
         # Create status bar
         self.statusbar = QStatusBar(self)
         self.setStatusBar(self.statusbar)
-        self.coord_label = QLabel("X: -, Y: -")
+        self.coord_label = QLabel("X: -, Y1: -, Y2: -")
         self.dataset_label = QLabel("Dataset: -")
         self.statusbar.addPermanentWidget(self.coord_label)
         self.statusbar.addPermanentWidget(self.dataset_label)
@@ -2726,13 +2726,37 @@ class WaveViewer(QMainWindow):
         self.zoom_box_action_toolbar.setChecked(enabled)
 
     def on_mouse_moved(self, pos):
-        """Update status bar with mouse coordinates"""
-        view_pos = self.plot_widget.plotItem.vb.mapSceneToView(pos)
-        self.coord_label.setText(f"X: {view_pos.x():.3f}, Y: {view_pos.y():.3f}")
+        """Update status bar with mouse coordinates for dual Y axes"""
+        try:
+            # Map scene coordinates to main viewbox (Y1 axis)
+            view_pos = self.plot_widget.plotItem.vb.mapSceneToView(pos)
+            x_val = view_pos.x()
+            y1_val = view_pos.y()
+
+            # Get Y2 value if y2_viewbox exists
+            y2_val = None
+            if hasattr(self, 'y2_viewbox'):
+                try:
+                    # Map the same scene point to Y2 viewbox
+                    y2_view_pos = self.y2_viewbox.mapSceneToView(pos)
+                    y2_val = y2_view_pos.y()
+                except Exception:
+                    # If mapping fails, Y2 value remains None
+                    pass
+
+            # Format coordinate string
+            if y2_val is not None:
+                self.coord_label.setText(f"X: {x_val:.3f}, Y1: {y1_val:.3f}, Y2: {y2_val:.3f}")
+            else:
+                self.coord_label.setText(f"X: {x_val:.3f}, Y1: {y1_val:.3f}, Y2: -")
+
+        except Exception:
+            # If mapping fails entirely, show placeholders
+            self.coord_label.setText("X: -, Y1: -, Y2: -")
 
     def on_mouse_left_plot(self):
         """Clear coordinates when mouse leaves plot"""
-        self.coord_label.setText("X: -, Y: -")
+        self.coord_label.setText("X: -, Y1: -, Y2: -")
 
 def main():
     """Main entry point for pqwave application"""
