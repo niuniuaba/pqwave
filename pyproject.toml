@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pqwave"
-version = "0.2.1.2"
+version = "0.2.2.0"
 authors = [
     {name = "niuniuaba", email = "liuyongjin@petalmail.com"}
 ]
@@ -23,6 +23,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -46,7 +48,7 @@ Repository = "https://github.com/niuniuaba/pqwave.git"
 Issues = "https://github.com/niuniuaba/pqwave/issues"
 
 [project.scripts]
-pqwave = "pqwave:main"
+pqwave = "pqwave.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

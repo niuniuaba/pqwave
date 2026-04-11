@@ -1,6 +1,6 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 
-![Version](https://img.shields.io/badge/version-0.2.1.2-blue)
+![Version](https://img.shields.io/badge/version-0.2.2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -18,13 +18,19 @@
 ## 📸 Screenshots
 ![本地图片](./screenshot.png)
 
-## 📦 Prerequisites
-- Python 3.8 or higher
-- numpy
-- spicelib
-- pyqtgraph
-- PyQt6
+## 📦 Installation 
+```bash
+# Clone repository
+git clone https://github.com/yourname/pqwave.git
 
+# Create virtual environment
+cd pqwave
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
 ## 🚀 Command Line Usage
 ```bash
 # Open a RAW file directly
@@ -45,11 +51,38 @@ python pqwave.py --help
 5. **Add Traces**: Click Y1 or Y2 to add traces
 6. **Adjust View**: Use logarithmic scale or manual ranges as needed
 
-## 🔧 Architecture
+## 🔧 Architecture  
+
 ```
-pqwave.py 
-├── LogAxisItem    # Custom logarithmic axis display
-├── RawFile        # SPICE RAW file parser, support pure SPICE, ngspice/xyce, LTspice, and QSPICE .qraw
-├── ExprEvaluator  # Mathematical expression evaluator, infix notation and built-in math functions
-└── WaveViewer     # Main application and UI
+pqwave/
+├── __init__.py              # Package exports, version
+├── main.py                  # Entry point (minimal)
+├── models/                  # Data models and business logic
+│   ├── __init__.py
+│   ├── dataset.py          # Dataset, Variable, Trace classes
+│   ├── expression.py       # ExprEvaluator (moved from main)
+│   ├── state.py           # ApplicationState singleton
+│   └── rawfile.py         # RawFile (moved from main)
+├── ui/                     # UI components
+│   ├── __init__.py
+│   ├── main_window.py     # MainWindow (replaces WaveViewer)
+│   ├── plot_widget.py     # Enhanced PlotWidget with cursor support
+│   ├── control_panel.py   # Dataset/vector/trace controls
+│   ├── menu_manager.py    # Menu and toolbar management
+│   ├── trace_manager.py   # Trace lifecycle and styling
+│   └── axis_manager.py    # Axis configuration and scaling
+├── utils/                  # Utilities
+│   ├── __init__.py
+│   ├── colors.py          # Color management
+│   ├── log_axis.py        # LogAxisItem (moved from main)
+│   └── socket_client.py   # Xschem socket communication
+├── communication/          # Communication layer
+│   ├── __init__.py
+│   ├── xschem_client.py   # Xschem protocol implementation
+│   └── socket_server.py   # Optional local server
+└── tests/                 # Test suite
+    ├── __init__.py
+    ├── test_models.py
+    ├── test_ui.py
+    └── test_utils.py
 ```

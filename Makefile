@@ -23,11 +23,11 @@ test:
 	pytest tests/
 
 lint:
-	flake8 pqwave.py
-	mypy pqwave.py --ignore-missing-imports
+	flake8 pqwave.py pqwave/
+	mypy pqwave.py pqwave/ --ignore-missing-imports
 
 format:
-	black pqwave.py
+	black pqwave.py pqwave/
 
 clean:
 	rm -rf build/ dist/ *.egg-info/ __pycache__/ .pytest_cache/ .mypy_cache/
