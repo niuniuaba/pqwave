@@ -1,6 +1,6 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 
-![Version](https://img.shields.io/badge/version-0.2.2.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.2-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -43,6 +43,54 @@ python pqwave.py --version
 python pqwave.py --help
 ```
 
+### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `raw_file` | SPICE raw file to open (optional) |
+| `--version`, `-v` | Show version and exit |
+| `--test` | Run test suites and exit |
+| `--debug` | Enable debug-level logging (most verbose) |
+| `--verbose` | Enable info-level logging (user feedback) |
+| `--quiet` | Suppress all output except errors |
+| `--log-file FILE` | Write logs to specified file |
+
+**Logging level priority**: `--debug` > `--verbose` > default (WARNING) > `--quiet` (ERROR only)
+
+### Examples
+
+```bash
+# Run all tests
+python pqwave.py --test
+
+# Open a file with verbose logging to see user feedback messages
+python pqwave.py --verbose simulation.raw
+
+# Enable full debug output for troubleshooting
+python pqwave.py --debug simulation.raw
+
+# Suppress all non-error output for clean terminal
+python pqwave.py --quiet simulation.raw
+
+# Write logs to a file while running GUI
+python pqwave.py --debug --log-file pqwave.log simulation.raw
+```
+
+### Running Tests
+
+```bash
+# Run all tests via --test flag
+python pqwave.py --test
+
+# Run tests with verbose output
+python pqwave.py --test --verbose
+
+# Run tests with debug output
+python pqwave.py --test --debug
+```
+
+Test results are displayed with pass/fail status for each test file, followed by a summary.
+
 ### Basic Workflow
 1. **Open File**: Use File → Open or command line
 2. **Select Dataset**: Choose from available simulation runs
@@ -56,33 +104,49 @@ python pqwave.py --help
 ```
 pqwave/
 ├── __init__.py              # Package exports, version
-├── main.py                  # Entry point (minimal)
+├── main.py                  # CLI entry point (argparse, logging, test runner)
+├── logging_config.py        # Standard logging configuration
+├── test_runner.py           # Test discovery and execution engine
 ├── models/                  # Data models and business logic
 │   ├── __init__.py
-│   ├── dataset.py          # Dataset, Variable, Trace classes
-│   ├── expression.py       # ExprEvaluator (moved from main)
-│   ├── state.py           # ApplicationState singleton
-│   └── rawfile.py         # RawFile (moved from main)
-├── ui/                     # UI components
+│   ├── dataset.py           # Dataset class
+│   ├── expression.py        # ExprEvaluator for math expressions
+│   ├── rawfile.py           # RawFile parser for SPICE formats
+│   ├── state.py             # ApplicationState singleton
+│   └── trace.py             # Trace data model
+├── ui/                      # UI components
 │   ├── __init__.py
-│   ├── main_window.py     # MainWindow (replaces WaveViewer)
-│   ├── plot_widget.py     # Enhanced PlotWidget with cursor support
-│   ├── control_panel.py   # Dataset/vector/trace controls
-│   ├── menu_manager.py    # Menu and toolbar management
-│   ├── trace_manager.py   # Trace lifecycle and styling
-│   └── axis_manager.py    # Axis configuration and scaling
-├── utils/                  # Utilities
+│   ├── main_window.py       # MainWindow (composes all UI components)
+│   ├── plot_widget.py       # Enhanced PlotWidget with dual Y-axis & cursors
+│   ├── control_panel.py     # Dataset/vector/trace controls
+│   ├── menu_manager.py      # Menu bar and toolbar management
+│   ├── trace_manager.py     # Trace lifecycle, color assignment, legend
+│   ├── axis_manager.py      # Axis configuration, scaling, log mode
+│   └── settings_widget.py   # Application settings dialog
+├── utils/                   # Utilities
 │   ├── __init__.py
-│   ├── colors.py          # Color management
-│   ├── log_axis.py        # LogAxisItem (moved from main)
-│   └── socket_client.py   # Xschem socket communication
-├── communication/          # Communication layer
+│   ├── colors.py            # Color management for traces
+│   └── log_axis.py          # LogAxisItem for logarithmic axis display
+├── communication/           # Communication layer
 │   ├── __init__.py
-│   ├── xschem_client.py   # Xschem protocol implementation
-│   └── socket_server.py   # Optional local server
-└── tests/                 # Test suite
+│   ├── xschem_client.py     # Xschem protocol implementation
+│   └── socket_server.py     # Optional local server
+└── tests/                   # Test suite (16+ test files)
     ├── __init__.py
+    ├── test_basic.py
+    ├── test_expr_evaluator.py
+    ├── test_imports.py
+    ├── test_instantiate.py
+    ├── test_integration.py
+    ├── test_log_axis.py
     ├── test_models.py
-    ├── test_ui.py
-    └── test_utils.py
+    ├── test_mouse_coords.py
+    ├── test_mouse_gui.py
+    ├── test_plot_widget_mouse.py
+    ├── test_rawfile.py
+    ├── test_settings.py
+    ├── test_trace_manager.py
+    ├── test_trace_prop.py
+    ├── test_trace_prop_fixed.py
+    └── test_ui_integration.py
 ```

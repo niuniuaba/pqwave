@@ -22,6 +22,7 @@ from PyQt6.QtGui import QColor
 
 from pqwave.models.state import ApplicationState, AxisId
 from pqwave.models.rawfile import RawFile
+from pqwave.models.raw_converter import write_raw_file, FORMAT_CONFIG
 from pqwave.models.dataset import Dataset
 from pqwave.models.trace import AxisAssignment
 from pqwave.ui.menu_manager import MenuManager
@@ -30,8 +31,12 @@ from pqwave.ui.plot_widget import PlotWidget
 from pqwave.ui.trace_manager import TraceManager
 from pqwave.ui.settings_widget import SettingsWidget
 from pqwave.ui.axis_manager import AxisManager
+from pqwave.ui.mark_panel import MarkPanel
 from pqwave.utils.colors import ColorManager
+from pqwave.logging_config import get_logger
 
+
+logger = get_logger(__name__)
 
 class MainWindow(QMainWindow):
     """Main application window orchestrating all UI components."""
@@ -66,6 +71,10 @@ class MainWindow(QMainWindow):
 
         # Zoom box state
         self.zoom_box_enabled = False
+
+        # Cross-hair cursor state
+        self.cross_hair_visible = False
+        self.mark_panel = None
 
         # Setup UI
         self._setup_ui()
@@ -134,6 +143,7 @@ class MainWindow(QMainWindow):
         return {
             'open_file': self.open_file,
             'open_new_window': self.open_new_window,
+            'convert_raw_data': self.convert_raw_data,
             'edit_trace_properties': self.edit_trace_properties,
             'show_settings': self.show_settings,
             'toggle_toolbar': self.toggle_toolbar,
@@ -151,7 +161,8 @@ class MainWindow(QMainWindow):
             'auto_range_x_toolbar': self.auto_range_x,
             'auto_range_y_toolbar': self.auto_range_y,
             'zoom_box_toolbar': self.enable_zoom_box,
-            'toggle_grids_toolbar': self.toggle_grids
+            'toggle_grids_toolbar': self.toggle_grids,
+            'toggle_cross_hair': self.toggle_cross_hair
         }
 
     def _connect_signals(self):
@@ -169,11 +180,18 @@ class MainWindow(QMainWindow):
         self.plot_widget.cursor_y1_changed.connect(self._on_cursor_y1_changed)
         self.plot_widget.cursor_y2_changed.connect(self._on_cursor_y2_changed)
         self.plot_widget.axis_log_mode_changed.connect(self._on_axis_log_mode_changed)
+        self.plot_widget.mark_clicked.connect(self._on_mark_clicked)
 
         # Connect axis manager signals
         self.axis_manager.axis_log_mode_changed.connect(self._on_axis_log_mode_changed_from_manager)
         self.axis_manager.axis_range_changed.connect(self._on_axis_range_changed)
         self.axis_manager.axis_label_changed.connect(self._on_axis_label_changed)
+
+    def _connect_mark_panel(self):
+        """Connect mark panel signals (called when panel is created)."""
+        if self.mark_panel is not None:
+            self.mark_panel.mark_deleted_last.connect(self._on_mark_deleted_last)
+            self.mark_panel.window_closed.connect(self._on_mark_panel_closed)
 
     def _update_trace_manager_log_modes(self):
         """Update trace manager with current log mode settings."""
@@ -202,9 +220,135 @@ class MainWindow(QMainWindow):
         new_window = MainWindow()
         new_window.show()
 
+    def convert_raw_data(self):
+        """Convert currently loaded raw data to another format."""
+        if not self.raw_file or not self.raw_file.datasets:
+            QMessageBox.warning(
+                self, "No Data",
+                "No raw data loaded. Open a raw file first before converting."
+            )
+            return
+
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, QPushButton
+
+        dataset = self.raw_file.datasets[0]  # Use first dataset
+        title = dataset.get('title', 'pqwave conversion')
+        date = dataset.get('date', '')
+        plotname = dataset.get('plotname', '')
+        flags = dataset.get('flags', '')
+        variables = dataset.get('variables', [])
+        data = dataset.get('data', np.array([]))
+        is_ac_or_complex = dataset.get('_is_ac_or_complex', False)
+
+        # Detect source format from spicelib's dialect detection
+        if self.raw_file.raw_data:
+            detected = self.raw_file.raw_data.dialect
+            if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
+                src_format = detected
+            else:
+                # Fallback to extension-based detection
+                src_file = self.raw_file.filename.lower()
+                if src_file.endswith('.qraw'):
+                    src_format = 'qspice'
+                else:
+                    src_format = 'ltspice'
+        else:
+            src_format = 'ltspice'
+
+        # Show format selection dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Convert Raw Data")
+        dialog.setMinimumWidth(350)
+
+        layout = QVBoxLayout()
+
+        info_label = QLabel(
+            f"Source: {src_format.upper()}\n"
+            f"Variables: {len(variables)}\n"
+            f"Points: {data.shape[0] if data.ndim > 0 else 0}"
+        )
+        layout.addWidget(info_label)
+
+        layout.addWidget(QLabel("Target format:"))
+
+        format_group = []
+        for fmt_key, fmt_config in FORMAT_CONFIG.items():
+            label = f"{fmt_key.upper()} ({fmt_config['extension']})"
+            rb = QRadioButton(label)
+            if fmt_key == src_format:
+                rb.setEnabled(False)  # Disable current format
+            else:
+                rb.setChecked(True)  # Default to first non-source format
+            format_group.append((fmt_key, rb))
+            layout.addWidget(rb)
+
+        # Button box
+        button_layout = QHBoxLayout()
+        convert_btn = QPushButton("Convert")
+        cancel_btn = QPushButton("Cancel")
+        button_layout.addWidget(convert_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+
+        dialog.setLayout(layout)
+
+        def do_convert():
+            target_fmt = None
+            for fmt_key, rb in format_group:
+                if rb.isChecked():
+                    target_fmt = fmt_key
+                    break
+
+            if target_fmt is None:
+                QMessageBox.warning(dialog, "Error", "Please select a target format.")
+                return
+
+            dialog.accept()
+
+            # Show save file dialog
+            ext = FORMAT_CONFIG[target_fmt]['extension']
+            save_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Converted Raw File",
+                "",
+                f"Raw Files (*{ext});;All Files (*)"
+            )
+
+            if not save_path:
+                return
+
+            try:
+                write_raw_file(
+                    output_path=save_path,
+                    title=title,
+                    date=date,
+                    plotname=plotname,
+                    flags=flags,
+                    variables=variables,
+                    data=data,
+                    target_format=target_fmt,
+                    is_ac_or_complex=is_ac_or_complex,
+                )
+                QMessageBox.information(
+                    self, "Conversion Successful",
+                    f"Converted to {target_fmt.upper()} format:\n{save_path}"
+                )
+                logger.info(f"Raw data converted to {save_path} ({target_fmt})")
+            except Exception as e:
+                logger.exception(f"Conversion failed: {e}")
+                QMessageBox.critical(
+                    self, "Conversion Failed",
+                    f"Failed to convert raw data:\n{e}"
+                )
+
+        convert_btn.clicked.connect(do_convert)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        dialog.exec()
+
     def edit_trace_properties(self):
         """Edit trace properties (alias, color, line width)"""
-        print(f"[DEBUG] edit_trace_properties called, traces count: {len(self.trace_manager.traces)}")
+        logger.debug(f"edit_trace_properties called, traces count: {len(self.trace_manager.traces)}")
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QLineEdit, QPushButton, QHBoxLayout, QLabel, QComboBox
 
         # Get traces from trace manager
@@ -482,15 +626,93 @@ class MainWindow(QMainWindow):
             self.menu_manager.actions['zoom_box'].setChecked(self.zoom_box_enabled)
             self.menu_manager.actions['zoom_box_toolbar'].setChecked(self.zoom_box_enabled)
 
+    # Cross-hair cursor and marks
+
+    def toggle_cross_hair(self):
+        """Toggle cross-hair cursor ON/OFF.
+
+        When turning ON: shows cross-hair and opens the mark data panel.
+        When turning OFF: hides cross-hair, clears all marks, closes mark panel.
+        """
+        self.cross_hair_visible = not self.cross_hair_visible
+
+        # Update plot widget
+        self.plot_widget.set_cross_hair_visible(self.cross_hair_visible)
+
+        # Update menu and toolbar state
+        if self.menu_manager:
+            self.menu_manager.set_cross_hair_visible(self.cross_hair_visible)
+
+        if self.cross_hair_visible:
+            self._open_mark_panel()
+        else:
+            self._close_mark_panel()
+
+    def _open_mark_panel(self):
+        """Create and show the mark data panel."""
+        if self.mark_panel is None:
+            self.mark_panel = MarkPanel(parent=self)
+            self._connect_mark_panel()
+        self.mark_panel.clear_all_marks()
+        self.mark_panel.show()
+        self.mark_panel.raise_()
+        self.mark_panel.activateWindow()
+
+    def _close_mark_panel(self):
+        """Close the mark panel and clear all marks."""
+        self.plot_widget.clear_marks()
+        if self.mark_panel is not None:
+            self.mark_panel.close()
+            self.mark_panel = None
+
+    @pyqtSlot(float, float, float, float, float)
+    def _on_mark_clicked(self, x_vb, y1_vb, x_linear, y1_linear, y2_linear):
+        """Handle mark placement from plot widget click.
+
+        Args:
+            x_vb, y1_vb: Viewbox coordinates (for mark rendering in plot space)
+            x_linear, y1_linear, y2_linear: Linear display values (for data panel)
+        """
+        self.plot_widget.add_mark_at_position(x_vb, y1_vb)
+        if self.mark_panel is not None:
+            # Re-show panel if user had closed it via window close button
+            self.mark_panel.show()
+            self.mark_panel.raise_()
+            self.mark_panel.activateWindow()
+            self.mark_panel.add_mark(x_linear, y1_linear, y2_linear)
+
+    @pyqtSlot()
+    def _on_mark_panel_closed(self):
+        """Handle mark panel window close button — hide without destroying."""
+        if self.mark_panel is not None:
+            self.mark_panel.hide()
+
+    @pyqtSlot()
+    def _on_mark_deleted_last(self):
+        """Handle mark deletion from mark panel button."""
+        self.plot_widget.remove_last_mark()
+
     # Raw file handling
 
     def _load_raw_file(self, filename):
         """Load raw file and update UI."""
         try:
-            self.raw_file = RawFile(filename)
+            # 1. Clear existing traces from plot widget BEFORE replacing raw_file.
+            #    This ensures Qt objects don't hold references to old data when
+            #    the old RawFile is garbage-collected and its temp files deleted.
+            self.trace_manager.clear_traces()
+            self.trace_manager.set_raw_file(None)
 
-            # Update application state
+            # 2. Parse the new file (does NOT touch self.raw_file yet)
+            new_raw_file = RawFile(filename)
+
+            # 3. Clear application state (releases old datasets)
             self.state.clear_datasets()
+
+            # 4. Now safe to replace self.raw_file — old one has no remaining refs
+            self.raw_file = new_raw_file
+
+            # 5. Populate UI with new data
             for i in range(len(self.raw_file.datasets)):
                 dataset = Dataset(self.raw_file, i)
                 self.state.add_dataset(dataset)
@@ -502,7 +724,7 @@ class MainWindow(QMainWindow):
                 var_names = self.raw_file.get_variable_names(0)
                 if var_names:
                     self.state.current_x_var = var_names[0]
-                    print(f"Auto-set X variable to: {self.state.current_x_var}")
+                    logger.info(f"Auto-set X variable to: {self.state.current_x_var}")
                     # Update X-axis label
                     self.axis_manager.set_axis_label(AxisId.X, self.state.current_x_var)
 
@@ -511,11 +733,11 @@ class MainWindow(QMainWindow):
             self._update_variable_combo()
             self.control_panel.clear_expression()  # Clear trace expression for new file
 
-            # Clear existing traces
-            self.trace_manager.clear_traces()
-
             # Set raw file reference in trace manager
             self.trace_manager.set_raw_file(self.raw_file)
+
+            # Update trace manager with current log mode settings from state
+            self._update_trace_manager_log_modes()
 
             # Auto-range axes
             self.auto_range_x()
@@ -527,13 +749,12 @@ class MainWindow(QMainWindow):
             # Update status bar dataset label
             self._update_dataset_label()
 
-            print(f"Successfully loaded: {filename}")
+            logger.info(f"Successfully loaded: {filename}")
 
         except FileNotFoundError as e:
             self._show_error("File not found", f"File not found: {filename}\n\n{e}")
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"Error opening file: {filename}")
             error_msg = str(e)
             if "Invalid RAW file" in error_msg:
                 self._show_error("Invalid RAW file", f"Invalid RAW file format: {filename}\n\n{error_msg}")
@@ -545,7 +766,7 @@ class MainWindow(QMainWindow):
         if self.initial_file_loaded:
             return
         if self.initial_file:
-            print(f"Loading initial file: {self.initial_file}")
+            logger.info(f"Loading initial file: {self.initial_file}")
             self._load_raw_file(self.initial_file)
             self.initial_file_loaded = True
 
@@ -636,7 +857,7 @@ class MainWindow(QMainWindow):
 
             # Clear expression after successful addition
             self.control_panel.trace_expr.clear()
-            print(f"Set X-axis variable to: {x_var}")
+            logger.info(f"Set X-axis variable to: {x_var}")
 
         elif axis in ["Y1", "Y2"]:
             # Y1/Y2 buttons add traces
@@ -655,13 +876,13 @@ class MainWindow(QMainWindow):
             # Add trace
             trace = self.trace_manager.add_trace(expression, x_var, y_axis)
             if trace:
-                print(f"Added trace: {trace.name} to {y_axis.value}")
+                logger.info(f"Added trace: {trace.name} to {y_axis.value}")
                 # Clear expression after successful addition
                 self.control_panel.trace_expr.clear()
             else:
                 QMessageBox.warning(self, "Error", f"Failed to add trace for expression: {expression}")
         else:
-            print(f"Unknown axis: {axis}")
+            logger.warning(f"Unknown axis: {axis}")
 
     @pyqtSlot(str)
     def _on_expression_changed(self, expression):
@@ -746,7 +967,7 @@ class MainWindow(QMainWindow):
 
     def _show_error(self, title, message):
         """Show error message dialog."""
-        print(f"Error: {title}: {message}")
+        logger.error(f"{title}: {message}")
         QMessageBox.warning(self, title, message)
 
     # Public API for testing
