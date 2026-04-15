@@ -25,12 +25,13 @@ class MenuManager:
         Args:
             parent: The parent QMainWindow
             callbacks: Dictionary mapping action names to callback functions.
-                      Required keys: 'open_file', 'open_new_window', 'edit_trace_properties',
+                      Required keys: 'open_file', 'open_new_window', 'convert_raw_data',
+                      'edit_trace_properties',
                       'show_settings', 'toggle_toolbar', 'toggle_statusbar', 'toggle_grids',
                       'zoom_in', 'zoom_out', 'zoom_to_fit', 'auto_range_x', 'auto_range_y',
                       'enable_zoom_box', 'zoom_in_toolbar', 'zoom_out_toolbar',
                       'zoom_to_fit_toolbar', 'auto_range_x_toolbar', 'auto_range_y_toolbar',
-                      'zoom_box_toolbar', 'toggle_grids_toolbar'
+                      'zoom_box_toolbar', 'toggle_grids_toolbar', 'toggle_cross_hair'
         """
         self.parent = parent
         self.callbacks = callbacks or {}
@@ -66,6 +67,10 @@ class MenuManager:
         open_new_window_action = QAction("Open New Window", self.parent)
         open_new_window_action.triggered.connect(self.callbacks.get('open_new_window', lambda: None))
         file_menu.addAction(open_new_window_action)
+
+        convert_raw_action = QAction("Convert Raw Data...", self.parent)
+        convert_raw_action.triggered.connect(self.callbacks.get('convert_raw_data', lambda: None))
+        file_menu.addAction(convert_raw_action)
 
         self.menubar.addMenu(file_menu)
 
@@ -104,6 +109,12 @@ class MenuManager:
         self.toggle_grids_action.triggered.connect(self.callbacks.get('toggle_grids', lambda: None))
         view_menu.addAction(self.toggle_grids_action)
         self.actions['toggle_grids'] = self.toggle_grids_action
+
+        self.toggle_cross_hair_action = QAction("Toggle Cross-hair", self.parent, checkable=True)
+        self.toggle_cross_hair_action.setChecked(False)
+        self.toggle_cross_hair_action.triggered.connect(self.callbacks.get('toggle_cross_hair', lambda: None))
+        view_menu.addAction(self.toggle_cross_hair_action)
+        self.actions['toggle_cross_hair'] = self.toggle_cross_hair_action
 
         view_menu.addSeparator()
 
@@ -216,6 +227,15 @@ class MenuManager:
         self.toolbar.addAction(self.toggle_grids_action_toolbar)
         self.actions['toggle_grids_toolbar'] = self.toggle_grids_action_toolbar
 
+        # Toggle Cross-hair (checkable)
+        self.toggle_cross_hair_action_toolbar = QAction("+", self.parent)
+        self.toggle_cross_hair_action_toolbar.setToolTip("Toggle cross-hair cursor (click to place marks)")
+        self.toggle_cross_hair_action_toolbar.setCheckable(True)
+        self.toggle_cross_hair_action_toolbar.setChecked(False)
+        self.toggle_cross_hair_action_toolbar.triggered.connect(self.callbacks.get('toggle_cross_hair', lambda: None))
+        self.toolbar.addAction(self.toggle_cross_hair_action_toolbar)
+        self.actions['toggle_cross_hair_toolbar'] = self.toggle_cross_hair_action_toolbar
+
     def _create_status_bar(self):
         """Create status bar with labels."""
         self.coord_label = QLabel("X: -, Y1: -, Y2: -")
@@ -260,3 +280,8 @@ class MenuManager:
         """Update grid toggle state."""
         self.toggle_grids_action.setChecked(visible)
         self.toggle_grids_action_toolbar.setChecked(visible)
+
+    def set_cross_hair_visible(self, visible):
+        """Update cross-hair toggle state."""
+        self.toggle_cross_hair_action.setChecked(visible)
+        self.toggle_cross_hair_action_toolbar.setChecked(visible)

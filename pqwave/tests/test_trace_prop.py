@@ -8,74 +8,26 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PyQt6.QtWidgets import QApplication, QPushButton
+from PyQt6.QtWidgets import QApplication
 from PyQt6.QtTest import QTest
 from PyQt6.QtCore import Qt, QTimer
-from pqwave.models.trace import AxisAssignment
 
 def test_trace_property_editor():
     """Test trace property editor dialog."""
     app = QApplication([])
 
     from pqwave.ui.main_window import MainWindow
-    # Use absolute path to test file
-    test_file = os.path.join(os.path.dirname(__file__), 'bridge.raw')
-    print(f"Test file path: {test_file}")
-    print(f"File exists: {os.path.exists(test_file)}")
-    # Don't pass initial_file to avoid QTimer.singleShot loading during test
-    window = MainWindow()  # No initial_file parameter
+    window = MainWindow('tests/bridge.raw')
     window.show()
 
     # Wait for loading
     app.processEvents()
 
-    # Manually load raw file
-    print("Loading raw file manually...")
-    try:
-        from pqwave.models.rawfile import RawFile
-        raw_file = RawFile(test_file)
-        window._load_raw_file(test_file)
-        print("Raw file loaded successfully")
-    except Exception as e:
-        print(f"Failed to load raw file: {e}")
-        return False
-
     # Ensure we have at least one trace
     if not window.trace_manager.traces:
         print("Adding a trace...")
-        # Ensure raw file is loaded
-        if window.trace_manager.raw_file is None:
-            print("Raw file not loaded, attempting to load manually...")
-            try:
-                from pqwave.models.rawfile import RawFile
-                raw_file = RawFile(test_file)
-                window.trace_manager.set_raw_file(raw_file)
-                print("Manually loaded raw file")
-            except Exception as e:
-                print(f"Failed to load raw file: {e}")
-                return False
-
-        # Ensure X-axis variable is set
-        if not window.state.current_x_var:
-            print("X-axis variable not set, attempting to set default...")
-            var_names = window.trace_manager.raw_file.get_variable_names()
-            print(f"Available variables: {var_names}")
-            if var_names:
-                # Try to find 'time' or similar
-                for var in ['time', 'frequency', 'freq', 'hz']:
-                    if var in var_names:
-                        window.state.current_x_var = var
-                        break
-                # Otherwise use first variable
-                if not window.state.current_x_var:
-                    window.state.current_x_var = var_names[0]
-                print(f"Set X-axis variable to: {window.state.current_x_var}")
-            else:
-                print("No variables found in raw file")
-                return False
-
         # Add a trace directly
-        trace = window.trace_manager.add_trace('v(ac_p)', window.state.current_x_var, AxisAssignment.Y1)
+        trace = window.trace_manager.add_trace('v(ac_p)', window.state.current_x_var, 'Y1')
         if trace:
             print(f"Added trace: {trace.name}")
         else:
@@ -113,9 +65,6 @@ def test_trace_property_editor():
     window.edit_trace_properties()
 
     print("Dialog closed")
-    print(f"Traces after dialog close: {len(window.trace_manager.traces)}")
-    if window.trace_manager.traces:
-        print(f"First trace: {window.trace_manager.traces[0]}")
 
     # Verify nothing changed (since we clicked Close)
     var, plot_item, y_axis = window.trace_manager.traces[0]
@@ -132,41 +81,16 @@ def test_trace_property_editor():
     print("✓ Dialog opens and closes without changing trace properties (Close button)")
 
     # Now test Apply button
-    # Create independent widgets (not in dialog) for testing _apply_trace_properties
+    # We'll need to simulate selecting a trace, editing fields, and clicking Apply
+    # For simplicity, we'll directly call the helper methods
     print("\nTesting apply functionality via helper methods...")
-    from PyQt6.QtWidgets import QListWidget, QLineEdit, QComboBox
-
-    # Mock list widget
+    # Mock list widget (we need a QListWidget)
+    from PyQt6.QtWidgets import QListWidget
     list_widget = QListWidget()
     list_widget.addItem(f"1. {var} @ {y_axis}")
     list_widget.setCurrentRow(0)
 
-    # Create independent widgets that won't be deleted when dialog closes
-    window.alias_edit = QLineEdit()
-    window.color_combo = QComboBox()
-    window.width_combo = QComboBox()
-
-    # Setup color combo
-    colors = [
-        ("Default (auto)", None),
-        ("Red", (255, 0, 0)),
-        ("Green", (0, 255, 0)),
-        ("Blue", (0, 0, 255)),
-        ("Yellow", (255, 255, 0)),
-        ("Magenta", (255, 0, 255)),
-        ("Cyan", (0, 255, 255)),
-        ("Orange", (255, 165, 0)),
-        ("Purple", (128, 0, 128)),
-        ("Brown", (165, 42, 42))
-    ]
-    for color_name, color_value in colors:
-        window.color_combo.addItem(color_name, color_value)
-
-    # Setup width combo
-    for width in [1, 2, 3, 4, 5]:
-        window.width_combo.addItem(str(width), width)
-
-    # Set values for testing
+    # Update alias edit and color combo via the instance variables
     window.alias_edit.setText("NewAlias")
     window.color_combo.setCurrentIndex(1)  # Red
     window.width_combo.setCurrentIndex(2)  # 3

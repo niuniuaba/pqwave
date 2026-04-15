@@ -21,6 +21,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtCore import pyqtSignal, Qt
 
 from pqwave.utils.log_axis import LogAxisItem
+from pqwave.logging_config import get_logger
 
 
 class PlotWidget(pg.PlotWidget):
@@ -32,7 +33,10 @@ class PlotWidget(pg.PlotWidget):
         cursor_x_changed(value): Emitted when X cursor position changes
         cursor_y1_changed(value): Emitted when Y1 cursor position changes
         cursor_y2_changed(value): Emitted when Y2 cursor position changes
+        mark_clicked(x, y1, y2): Emitted when user clicks to place a mark
     """
+
+    logger = get_logger(__name__)
 
     mouse_moved = pyqtSignal(float, float, float)  # x, y1, y2
     mouse_left = pyqtSignal()
@@ -40,6 +44,7 @@ class PlotWidget(pg.PlotWidget):
     cursor_y1_changed = pyqtSignal(float)
     cursor_y2_changed = pyqtSignal(float)
     axis_log_mode_changed = pyqtSignal(str, bool)  # orientation, log_mode
+    mark_clicked = pyqtSignal(float, float, float, float, float)  # x_vb, y1_vb, x_linear, y1_linear, y2_linear
 
     def __init__(self, parent=None):
         """Initialize the enhanced plot widget.
@@ -79,6 +84,17 @@ class PlotWidget(pg.PlotWidget):
         # Mouse tracking state
         self._mouse_inside_viewbox = False
 
+        # Mark tracking state (only active when cross-hair is ON)
+        self._mark_scatter: Optional[pg.ScatterPlotItem] = None
+        self._mark_positions: list = []  # list of (x, y1) tuples
+        self._mark_label: Optional[pg.TextItem] = None  # hover tooltip
+        self._mark_label_visible = False
+
+        # Log mode tracking per axis
+        self._x_log_mode = False
+        self._y1_log_mode = False
+        self._y2_log_mode = False
+
         # Apply system theme colors and styling
         self._apply_theme_colors()
 
@@ -93,8 +109,9 @@ class PlotWidget(pg.PlotWidget):
 
         # Connect mouse signals
         scene = self.plotItem.scene()
-        print(f"DEBUG: Connecting sigMouseMoved from scene {scene}")
+        self.logger.debug(f"Connecting sigMouseMoved from scene {scene}")
         scene.sigMouseMoved.connect(self._on_mouse_moved)
+        scene.sigMouseClicked.connect(self._on_mouse_clicked)
         # Note: sigMouseLeave not available, we'll use a timer or other method
 
     # Public API for cursor control
@@ -106,6 +123,135 @@ class PlotWidget(pg.PlotWidget):
             self.cross_hair_vline.setVisible(visible)
         if self.cross_hair_hline:
             self.cross_hair_hline.setVisible(visible)
+
+    def add_mark_at_position(self, x: float, y1: float) -> None:
+        """Add a visual mark at the given plot coordinates.
+
+        Args:
+            x: X coordinate in plot space
+            y1: Y1 coordinate in plot space
+        """
+        self._mark_positions.append((x, y1))
+        self._update_mark_scatter()
+
+    def remove_last_mark(self) -> bool:
+        """Remove the most recently placed visual mark.
+
+        Returns:
+            True if a mark was removed, False if no marks exist.
+        """
+        if not self._mark_positions:
+            return False
+        self._mark_positions.pop()
+        self._update_mark_scatter()
+        return True
+
+    def clear_marks(self) -> None:
+        """Remove all visual marks."""
+        self._mark_positions.clear()
+        self._update_mark_scatter()
+        self._hide_mark_label()
+
+    def _update_mark_scatter(self) -> None:
+        """Update the scatter plot item with current mark positions."""
+        if self._mark_positions:
+            if self._mark_scatter is None:
+                # Use the same color as grid/ticks (semi-transparent system text color)
+                text_color = QApplication.palette().windowText().color()
+                mark_color = QColor(text_color)
+                mark_color.setAlpha(160)
+
+                self._mark_scatter = pg.ScatterPlotItem(
+                    size=8,
+                    pen=pg.mkPen(color=mark_color, width=1),
+                    brush=pg.mkBrush(mark_color),
+                    symbol='x',
+                    hoverable=True,
+                    hoverSize=12,
+                    hoverPen=pg.mkPen(color=mark_color, width=1),
+                    hoverBrush=pg.mkBrush(mark_color),
+                )
+                self.plotItem.addItem(self._mark_scatter)
+            xs, ys = zip(*self._mark_positions)
+            self._mark_scatter.setData(list(xs), list(ys))
+        else:
+            if self._mark_scatter is not None:
+                self.plotItem.removeItem(self._mark_scatter)
+                self._mark_scatter = None
+            # Also clean up the hover label
+            if self._mark_label is not None:
+                try:
+                    self.plotItem.removeItem(self._mark_label)
+                except Exception:
+                    pass
+                self._mark_label = None
+            self._mark_label_visible = False
+
+    def _check_mark_hover(self, x_vb: float, y1_vb: float) -> None:
+        """Check if mouse is near any mark and show/hide the tooltip.
+
+        Called from _on_mouse_moved to detect proximity to marks.
+        Uses pixel (scene) distance for accurate hit detection regardless
+        of zoom level or log mode.
+        """
+        if not self._mark_positions:
+            self._hide_mark_label()
+            return
+
+        from PyQt6.QtCore import QPointF
+
+        # Map mouse position to scene (pixel) coordinates
+        try:
+            mouse_scene = self.plotItem.vb.mapViewToScene(QPointF(x_vb, y1_vb))
+        except Exception:
+            self._hide_mark_label()
+            return
+
+        # Check distance in pixel space (20 pixel radius)
+        threshold_px = 20.0
+
+        for i, (mx, my) in enumerate(self._mark_positions):
+            try:
+                mark_scene = self.plotItem.vb.mapViewToScene(QPointF(mx, my))
+                dx = mouse_scene.x() - mark_scene.x()
+                dy = mouse_scene.y() - mark_scene.y()
+                if dx * dx + dy * dy < threshold_px * threshold_px:
+                    self._show_mark_label(mx, my, i + 1)
+                    return
+            except Exception:
+                continue
+
+        self._hide_mark_label()
+
+    def _show_mark_label(self, x_vb: float, y_vb: float, index: int) -> None:
+        """Show the hover tooltip for a mark.
+
+        Args:
+            x_vb: X coordinate in viewbox space
+            y_vb: Y coordinate in viewbox space
+            index: 1-based mark index
+        """
+        if self._mark_label is None:
+            text_color = QApplication.palette().windowText().color()
+            bg_color = QApplication.palette().window().color()
+            self._mark_label = pg.TextItem(
+                text='',
+                anchor=(0, 1),
+                color=text_color.name(),
+                fill=pg.mkBrush(bg_color),
+            )
+            self.plotItem.addItem(self._mark_label)
+
+        self._mark_label.setText(f"#{index}")
+        self._mark_label.setPos(x_vb, y_vb)
+        self._mark_label.setVisible(True)
+        self._mark_label_visible = True
+
+    def _hide_mark_label(self) -> None:
+        """Hide the hover tooltip."""
+        if self._mark_label is not None:
+            self._mark_label.setVisible(False)
+            self._mark_label_visible = False
 
     def set_cursor_x_visible(self, visible: bool, position: Optional[float] = None) -> None:
         """Show/hide X cursor line.
@@ -227,13 +373,32 @@ class PlotWidget(pg.PlotWidget):
             log_mode: True for log scale, False for linear
         """
         if axis == 'X':
+            self._x_log_mode = log_mode
             self.plotItem.setLogMode(x=log_mode)
         elif axis == 'Y1':
+            self._y1_log_mode = log_mode
             self.plotItem.setLogMode(y=log_mode)
         elif axis == 'Y2' and self.y2_viewbox:
+            self._y2_log_mode = log_mode
             self.y2_viewbox.setLogMode(y=log_mode)
             if self.right_axis:
                 self.right_axis.setLogMode(log_mode)
+
+    @staticmethod
+    def _log_to_linear(value: float) -> float:
+        """Convert log-space coordinate from mapSceneToView back to linear space.
+
+        When pyqtgraph is in log mode, mapSceneToView returns the exponent value.
+        E.g., if the actual data value is 1000 (10^3), mapSceneToView returns ~3.0.
+        This converts it back to 10^3 = 1000.
+        """
+        import math
+        try:
+            return 10.0 ** value
+        except OverflowError:
+            return float('inf') if value > 0 else float('-inf')
+        except (ValueError, ZeroDivisionError):
+            return float('nan')
 
     def set_axis_label(self, axis: str, label: str) -> None:
         """Set label for an axis."""
@@ -254,13 +419,17 @@ class PlotWidget(pg.PlotWidget):
             self.y2_viewbox.setYRange(min_val, max_val, padding=0)
 
     def auto_range_axis(self, axis: str) -> None:
-        """Enable auto-ranging for an axis."""
+        """Auto-range an axis based on current data and immediately update the view."""
+        vb = self.plotItem.vb
         if axis == 'X':
-            self.plotItem.enableAutoRange(axis='x')
+            vb.enableAutoRange(x=True)
+            vb.autoRange(padding=0.05)
         elif axis == 'Y1':
-            self.plotItem.enableAutoRange(axis='y')
+            vb.enableAutoRange(y=True)
+            vb.autoRange(padding=0.05)
         elif axis == 'Y2' and self.y2_viewbox:
-            self.y2_viewbox.enableAutoRange(axis='y')
+            self.y2_viewbox.enableAutoRange(y=True)
+            self.y2_viewbox.autoRange(padding=0.05)
 
     # Grid control
 
@@ -356,21 +525,21 @@ class PlotWidget(pg.PlotWidget):
 
         # Check if viewbox is available
         if not hasattr(self, 'plotItem') or not hasattr(self.plotItem, 'vb') or self.plotItem.vb is None:
-            print(f"DEBUG: Viewbox not available. plotItem: {hasattr(self, 'plotItem')}, vb: {hasattr(self.plotItem, 'vb') if hasattr(self, 'plotItem') else 'N/A'}")
+            self.logger.debug(f"Viewbox not available. plotItem: {hasattr(self, 'plotItem')}, vb: {hasattr(self.plotItem, 'vb') if hasattr(self, 'plotItem') else 'N/A'}")
             return
 
         # Check if mouse is inside the main viewbox
         vb_rect = self.plotItem.vb.sceneBoundingRect()
         if vb_rect.isNull() or not vb_rect.isValid():
             # Viewbox not properly initialized yet
-            print(f"DEBUG: Viewbox rect invalid: null={vb_rect.isNull()}, valid={vb_rect.isValid()}, rect={vb_rect}")
+            self.logger.debug(f"Viewbox rect invalid: null={vb_rect.isNull()}, valid={vb_rect.isValid()}, rect={vb_rect}")
             if self._mouse_inside_viewbox:
                 self._mouse_inside_viewbox = False
                 self.mouse_left.emit()
             return
 
         mouse_inside = vb_rect.contains(pos)
-        print(f"DEBUG: Mouse pos={pos}, vb_rect={vb_rect}, mouse_inside={mouse_inside}")
+        self.logger.debug(f"Mouse pos={pos}, vb_rect={vb_rect}, mouse_inside={mouse_inside}")
 
         # Handle state change
         if mouse_inside != self._mouse_inside_viewbox:
@@ -378,6 +547,7 @@ class PlotWidget(pg.PlotWidget):
             if not mouse_inside:
                 # Mouse left the viewbox
                 self.mouse_left.emit()
+                self._hide_mark_label()
                 return
 
         # If mouse is outside viewbox, don't emit coordinates
@@ -388,7 +558,7 @@ class PlotWidget(pg.PlotWidget):
         try:
             # Debug view range
             view_range = self.plotItem.vb.viewRange()
-            print(f"DEBUG: View range: {view_range}")
+            self.logger.debug(f"View range: {view_range}")
             # Map scene coordinates to main viewbox (Y1 axis)
             view_pos = self.plotItem.vb.mapSceneToView(pos)
             x_val = view_pos.x()
@@ -402,30 +572,93 @@ class PlotWidget(pg.PlotWidget):
                     y2_val = y2_view_pos.y()
                 except Exception:
                     # If Y2 mapping fails, keep NaN
-                    print(f"DEBUG: Y2 mapping failed")
+                    self.logger.debug(f"Y2 mapping failed")
                     pass
 
-            print(f"DEBUG: Mapped coordinates: x={x_val}, y1={y1_val}, y2={y2_val}")
+            self.logger.debug(f"Mapped coordinates: x={x_val}, y1={y1_val}, y2={y2_val}")
 
-            # Update cross-hair positions
+            # Update cross-hair positions (always in viewbox coordinates)
             if self.cross_hair_visible:
                 self.cross_hair_vline.setValue(x_val)
                 self.cross_hair_hline.setValue(y1_val)
 
-            # Emit signal with coordinates
-            self.mouse_moved.emit(x_val, y1_val, y2_val)
+            # Check if mouse is near any mark for hover tooltip
+            self._check_mark_hover(x_val, y1_val)
+
+            # Convert to linear space for display before emitting
+            display_x = self._log_to_linear(x_val) if self._x_log_mode else x_val
+            display_y1 = self._log_to_linear(y1_val) if self._y1_log_mode else y1_val
+            display_y2 = self._log_to_linear(y2_val) if self._y2_log_mode else y2_val
+
+            # Emit signal with linear display coordinates
+            self.mouse_moved.emit(display_x, display_y1, display_y2)
 
         except Exception as e:
-            print(f"DEBUG: Exception in mapSceneToView: {e}")
+            self.logger.debug(f"Exception in mapSceneToView: {e}")
             # If mapping fails, emit NaN values
             self.mouse_moved.emit(float('nan'), float('nan'), float('nan'))
 
+    def _on_mouse_clicked(self, event) -> None:
+        """Handle mouse clicks for mark placement.
+
+        Only places a mark when cross-hair is visible and the click
+        is inside the main viewbox with the left button.
+        """
+        if not self.cross_hair_visible:
+            return
+        if not event.button() == Qt.MouseButton.LeftButton:
+            return
+
+        if not hasattr(self, 'plotItem') or not hasattr(self.plotItem, 'vb') or self.plotItem.vb is None:
+            return
+
+        vb_rect = self.plotItem.vb.sceneBoundingRect()
+        if vb_rect.isNull() or not vb_rect.isValid():
+            return
+
+        pos = event.scenePos()
+        if not vb_rect.contains(pos):
+            return
+
+        try:
+            view_pos = self.plotItem.vb.mapSceneToView(pos)
+            x_val = view_pos.x()
+            y1_val = view_pos.y()
+
+            # Get Y2 value if available
+            y2_val = float('nan')
+            if self.y2_viewbox:
+                try:
+                    y2_view_pos = self.y2_viewbox.mapSceneToView(pos)
+                    y2_val = y2_view_pos.y()
+                except Exception:
+                    pass
+
+            # Convert to linear space for display before emitting
+            display_x = self._log_to_linear(x_val) if self._x_log_mode else x_val
+            display_y1 = self._log_to_linear(y1_val) if self._y1_log_mode else y1_val
+            display_y2 = self._log_to_linear(y2_val) if self._y2_log_mode else y2_val
+
+            # Emit signal: viewbox coords for mark rendering, linear for display
+            self.mark_clicked.emit(x_val, y1_val, display_x, display_y1, display_y2)
+
+        except Exception as e:
+            self.logger.debug(f"Exception in _on_mouse_clicked: {e}")
+
     def _on_axis_log_mode_changed(self, orientation: str, log_mode: bool) -> None:
-        """Handle log mode changes from LogAxisItem."""
-        # Emit signal for external handling
+        """Handle log mode changes from LogAxisItem.
+
+        Updates local log mode flags so that coordinate conversion in
+        _on_mouse_moved and _on_mouse_clicked produces correct linear values.
+        """
+        if orientation == 'bottom':
+            self._x_log_mode = log_mode
+        elif orientation == 'left':
+            self._y1_log_mode = log_mode
+        elif orientation == 'right':
+            self._y2_log_mode = log_mode
+
         self.axis_log_mode_changed.emit(orientation, log_mode)
-        # This can be used to update trace visibility or other state
-        pass
 
     # Zoom box mode
 

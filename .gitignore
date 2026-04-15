@@ -182,6 +182,12 @@ Thumbs.db
 # Test data
 tests/*.raw
 tests/*.log
-
+tests/*.*
 # Archive files
 archieves/
+
+# working files
+xschem_graph.md
+QSPICE_QUX.md 
+LTspice.md 
+

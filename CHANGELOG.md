@@ -1,6 +1,14 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 ## CHANGELOG.md
 
+###  v0.2.2.1
+- Added "Convert Raw Data..." under File menu: convert loaded raw data between SPICE/ngspice, LTspice, and QSPICE formats via a dialog with format selection and save-to-file
+- Fixed source format detection in Convert dialog: now uses spicelib's `raw_data.dialect` property instead of unreliable file-extension-based heuristics
+- **Known Limitation — QSPICE AC file conversion**: spicelib always treats the first variable in QSPICE complex/AC files as the frequency axis (stored as `float64`, not `complex128`). This means converting AC files to QSPICE format may produce incorrect data if the first variable is not a frequency axis. Typical AC analysis files (with frequency as the first variable) convert correctly. This is a spicelib design choice, not a bug in pqwave.
+- Fixed Issue #8: Mark Data widget now reappears when placing new marks after closing it via window close button; previous marks are preserved
+- Fixed Issue #9: QSPICE special characters (Greek letters α β γ, dagger †, etc.) in variable names now display correctly by parsing raw file bytes directly instead of relying on spicelib's character-by-character header reading
+- **Memory and CPU optimization**: Fixed O(N×filesize) memory and I/O in RawFile.parse() by calling spicelib's `read_trace_data()` once with all variable names instead of N individual `get_trace()` calls. In NormalAccess mode (QSPICE default), each `get_trace()` was re-reading the entire binary data section, accumulating ~3.9 GB of intermediate buffers for a 120 MB file. After fix: RSS reduced from ~4.4 GB to ~689 MB (6.4×), parse CPU time from 1.9s to 0.5s (3.8×). Added reusable memory and CPU profiling scripts (`pqwave/tests/memory_profile.py`, `pqwave/tests/cpu_profile.py`).
+
 ###  v0.2.2.0
 - Restructured project from monolithic to modular architecture
 - Added tooltips for trace expression input: "Add Trace:" label, expression field, and X/Y1/Y2 buttons show "Expressions must be quoted inside \"\" or ''" on hover

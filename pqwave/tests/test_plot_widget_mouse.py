@@ -74,7 +74,7 @@ def test_mouse_mapping():
         print(f"Emitted coordinates: x={x}, y1={y1}, y2={y2}")
         # Check that coordinates are close to original view pos
         assert abs(x - 5.0) < 0.1, f"X coordinate mismatch: {x} vs 5.0"
-        assert abs(y1 - view_y) < 0.1, f"Y1 coordinate mismatch: {y1} vs {view_y}"
+        assert abs(y1 - 0.5) < 0.1, f"Y1 coordinate mismatch: {y1} vs 0.5"
         print("✓ Mouse mapping works")
     else:
         print("✗ No coordinates emitted")
