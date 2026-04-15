@@ -22,6 +22,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 from pqwave.utils.log_axis import LogAxisItem
 from pqwave.logging_config import get_logger
+from pqwave.models.state import ViewboxTheme, THEME_COLORS
 
 
 class PlotWidget(pg.PlotWidget):
@@ -95,14 +96,8 @@ class PlotWidget(pg.PlotWidget):
         self._y1_log_mode = False
         self._y2_log_mode = False
 
-        # Apply system theme colors and styling
-        self._apply_theme_colors()
-
-        # Setup grid and axes
-        self._setup_grid_and_axes()
-
-        # Create viewbox border
-        self._create_viewbox_border()
+        # Apply viewbox theme and styling
+        self._apply_viewbox_theme(ViewboxTheme.DARK)
 
         # Initialize cursors
         self._create_cursors()
@@ -156,9 +151,9 @@ class PlotWidget(pg.PlotWidget):
         """Update the scatter plot item with current mark positions."""
         if self._mark_positions:
             if self._mark_scatter is None:
-                # Use the same color as grid/ticks (semi-transparent system text color)
-                text_color = QApplication.palette().windowText().color()
-                mark_color = QColor(text_color)
+                # Use the current theme's foreground color (semi-transparent)
+                fg_color = THEME_COLORS[self._current_theme]['foreground']
+                mark_color = QColor(fg_color)
                 mark_color.setAlpha(160)
 
                 self._mark_scatter = pg.ScatterPlotItem(
@@ -232,13 +227,12 @@ class PlotWidget(pg.PlotWidget):
             index: 1-based mark index
         """
         if self._mark_label is None:
-            text_color = QApplication.palette().windowText().color()
-            bg_color = QApplication.palette().window().color()
+            colors = THEME_COLORS[self._current_theme]
             self._mark_label = pg.TextItem(
                 text='',
                 anchor=(0, 1),
-                color=text_color.name(),
-                fill=pg.mkBrush(bg_color),
+                color=colors['foreground'],
+                fill=pg.mkBrush(colors['background']),
             )
             self.plotItem.addItem(self._mark_label)
 
@@ -329,8 +323,8 @@ class PlotWidget(pg.PlotWidget):
         update_viewbox()
         self.plotItem.vb.sigResized.connect(update_viewbox)
 
-        # Apply theme colors to Y2 axis
-        self._apply_theme_to_y2_axis()
+        # Apply current theme to Y2 axis
+        self._apply_viewbox_theme(self._current_theme)
 
         # Create Y2 cursor line if not exists
         if self.cursor_y2_line is None:
@@ -438,58 +432,67 @@ class PlotWidget(pg.PlotWidget):
         self.plotItem.showGrid(x=visible, y=visible, alpha=0.3)
         if self.right_axis:
             # Update Y2 grid visibility
-            self.right_axis.gridPen = pg.mkPen(color=QColor(self.right_axis.pen.color()) if visible else None)
+            fg_color = THEME_COLORS[self._current_theme]['foreground']
+            grid_color = QColor(fg_color)
+            grid_color.setAlpha(100)
+            self.right_axis.gridPen = pg.mkPen(color=grid_color) if visible else pg.mkPen(None)
 
     # Internal methods
 
-    def _apply_theme_colors(self) -> None:
-        """Apply system theme colors to plot."""
-        # Get system background color
-        bg_color = QApplication.palette().window().color()
-        hex_color = bg_color.name()
-        self.setBackground(hex_color)
+    def _apply_viewbox_theme(self, theme: ViewboxTheme) -> None:
+        """Apply the specified theme to the plot viewbox, axes, and title."""
+        colors = THEME_COLORS[theme]
+        bg_color = colors['background']
+        fg_color = colors['foreground']
 
-        # Get system text color
-        text_color = QApplication.palette().windowText().color()
+        self._current_theme = theme
 
-        # Set axis label colors
+        # Set viewbox background
+        self.setBackground(bg_color)
+
+        # Set axis pens (bottom, left, right) and their label colors
         for axis_name in ['bottom', 'left', 'right']:
             axis = self.getAxis(axis_name)
             if axis:
-                axis.setPen(text_color)
-
-    def _apply_theme_to_y2_axis(self) -> None:
-        """Apply system theme colors to Y2 axis."""
-        if not self.right_axis:
-            return
-
-        text_color = QApplication.palette().windowText().color()
-        self.right_axis.setPen(text_color)
-
-        # Set grid color (semi-transparent)
-        grid_color = QColor(text_color)
-        grid_color.setAlpha(100)
-        self.right_axis.gridPen = pg.mkPen(color=grid_color)
-
-    def _setup_grid_and_axes(self) -> None:
-        """Setup grid and axis styling."""
-        # Show grid with default alpha
-        self.showGrid(x=True, y=True, alpha=0.3)
+                axis.setPen(fg_color)
+                axis.labelStyle['color'] = fg_color
+                axis._updateLabel()
 
         # Set grid colors
-        text_color = QApplication.palette().windowText().color()
-        grid_color = QColor(text_color)
+        grid_color = QColor(fg_color)
         grid_color.setAlpha(100)
-
         self.getAxis('bottom').gridPen = pg.mkPen(color=grid_color)
         self.getAxis('left').gridPen = pg.mkPen(color=grid_color)
         if self.right_axis:
             self.right_axis.gridPen = pg.mkPen(color=grid_color)
 
-    def _create_viewbox_border(self) -> None:
-        """Create border around the viewbox."""
-        text_color = QApplication.palette().windowText().color()
-        self.plotItem.vb.setBorder(pg.mkPen(color=text_color, width=1))
+        # Set viewbox border
+        self.plotItem.vb.setBorder(pg.mkPen(color=fg_color, width=1))
+
+        # Set title label color
+        if self.plotItem.titleLabel:
+            self.plotItem.titleLabel.opts['color'] = fg_color
+            title_text = self.plotItem.titleLabel.text
+            if title_text:
+                self.plotItem.titleLabel.setText(title_text)
+
+        # Update existing mark scatter colors
+        if self._mark_scatter is not None:
+            mark_color = QColor(fg_color)
+            mark_color.setAlpha(160)
+            self._mark_scatter.setPen(pg.mkPen(color=mark_color, width=1))
+            self._mark_scatter.setBrush(pg.mkBrush(mark_color))
+            self._mark_scatter.setHoverPen(pg.mkPen(color=mark_color, width=1))
+            self._mark_scatter.setHoverBrush(pg.mkBrush(mark_color))
+
+        # Update existing mark label colors
+        if self._mark_label is not None:
+            self._mark_label.setColor(fg_color)
+            self._mark_label.fill = pg.mkBrush(bg_color)
+
+    def set_viewbox_theme(self, theme: ViewboxTheme) -> None:
+        """Apply a viewbox theme and update all visual elements."""
+        self._apply_viewbox_theme(theme)
 
     def _create_cursors(self) -> None:
         """Create cursor lines."""

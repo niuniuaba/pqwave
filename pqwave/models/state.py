@@ -17,6 +17,25 @@ from .dataset import Dataset
 from .trace import Trace, AxisAssignment
 
 
+class ViewboxTheme(Enum):
+    """Viewbox color themes."""
+    DARK = 'dark'
+    LIGHT = 'light'
+
+
+# Theme color definitions
+THEME_COLORS = {
+    ViewboxTheme.DARK: {
+        'background': '#000000',
+        'foreground': '#E0E0E0',
+    },
+    ViewboxTheme.LIGHT: {
+        'background': '#FFFFFF',
+        'foreground': '#000000',
+    },
+}
+
+
 class AxisId(Enum):
     """Axis identifiers."""
     X = 'X'
@@ -93,6 +112,7 @@ class ApplicationState:
         self.status_bar_visible: bool = True
         self.toolbar_visible: bool = True
         self.plot_title: str = ''
+        self.viewbox_theme: ViewboxTheme = ViewboxTheme.DARK
 
     # Dataset management
 
@@ -183,6 +203,10 @@ class ApplicationState:
         self.axis_configs[axis_id].auto_range = True
         self.axis_configs[axis_id].range = None
 
+    def set_viewbox_theme(self, theme: ViewboxTheme) -> None:
+        """Set the viewbox theme."""
+        self.viewbox_theme = theme
+
     # State serialization
 
     def to_dict(self) -> Dict[str, Any]:
@@ -204,7 +228,8 @@ class ApplicationState:
             'legend_visible': self.legend_visible,
             'status_bar_visible': self.status_bar_visible,
             'toolbar_visible': self.toolbar_visible,
-            'plot_title': self.plot_title
+            'plot_title': self.plot_title,
+            'viewbox_theme': self.viewbox_theme.value
         }
 
     def __repr__(self) -> str:

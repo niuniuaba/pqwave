@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, pyqtSlot
 from PyQt6.QtGui import QColor
 
-from pqwave.models.state import ApplicationState, AxisId
+from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme
 from pqwave.models.rawfile import RawFile
 from pqwave.models.raw_converter import write_raw_file, FORMAT_CONFIG
 from pqwave.models.dataset import Dataset
@@ -543,6 +543,7 @@ class MainWindow(QMainWindow):
             )
             # Connect signals
             self._settings_widget.plot_title_changed.connect(self._on_plot_title_changed)
+            self._settings_widget.viewbox_theme_changed.connect(self._on_viewbox_theme_changed)
             self._settings_widget.destroyed.connect(lambda: setattr(self, '_settings_widget', None))
 
         # Show and raise the widget
@@ -554,6 +555,10 @@ class MainWindow(QMainWindow):
         """Handle plot title changes from settings widget."""
         # Update plot widget title
         self.plot_widget.set_plot_title(title)
+
+    def _on_viewbox_theme_changed(self, theme: ViewboxTheme) -> None:
+        """Handle viewbox theme changes from settings widget."""
+        self.plot_widget.set_viewbox_theme(theme)
 
     def toggle_toolbar(self):
         """Toggle toolbar visibility."""

@@ -1,9 +1,9 @@
 ## TODO.md
-###  v0.2.2.1 add themes setting of viewbox 
+### ✅ v0.2.2.1 add themes setting of viewbox ✅ **已完成**
 8. 增加一个设定绘图区(viewbox)颜色theme的功能。
 - 仅提供dark和light两种theme，确保作为示波器显示供能的显示效果，并避免分散用户的注意力
-- Dark mode: background设为，foreground设为，同时title和label字体颜色也设为foreground颜色
-- Light mode：background设为，foreground设为，同时title和label字体颜色也设为foreground颜色
+- Dark mode: background设为纯黑色(#000000)，foreground设为#E0E0E0，同时title和label字体颜色也设为foreground颜色
+- Light mode：background设为白色(#FFFFFF)，foreground设为黑色(#000000)，同时title和label字体颜色也设为foreground颜色
 - 取消目前viewbox / tilte / label 颜色跟随系统theme的方法
 - 用户通过plot setting widget来使用此功能
 

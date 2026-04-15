@@ -11,11 +11,11 @@ This widget provides controls for:
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox,
-    QGroupBox, QGridLayout, QPushButton, QDoubleSpinBox
+    QGroupBox, QGridLayout, QPushButton, QDoubleSpinBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from pqwave.models.state import AxisId, ApplicationState
+from pqwave.models.state import AxisId, ApplicationState, ViewboxTheme, THEME_COLORS
 from pqwave.ui.axis_manager import AxisManager
 
 
@@ -24,6 +24,7 @@ class SettingsWidget(QWidget):
 
     # Signal emitted when plot title changes
     plot_title_changed = pyqtSignal(str)
+    viewbox_theme_changed = pyqtSignal(ViewboxTheme)
 
     def __init__(self,
                  axis_manager: AxisManager,
@@ -72,6 +73,20 @@ class SettingsWidget(QWidget):
         title_layout.addWidget(self.title_edit)
         title_group.setLayout(title_layout)
         layout.addWidget(title_group)
+
+        # Viewbox theme selector
+        theme_group = QGroupBox("Viewbox Theme")
+        theme_layout = QHBoxLayout()
+        theme_label = QLabel("Theme:")
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Dark", ViewboxTheme.DARK)
+        self.theme_combo.addItem("Light", ViewboxTheme.LIGHT)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        theme_layout.addWidget(theme_label)
+        theme_layout.addWidget(self.theme_combo)
+        theme_layout.addStretch()
+        theme_group.setLayout(theme_layout)
+        layout.addWidget(theme_group)
 
         # Axes settings
         axes_group = QGroupBox("Axes Settings")
@@ -192,6 +207,12 @@ class SettingsWidget(QWidget):
         # Plot title
         self.title_edit.setText(self.state.plot_title)
 
+        # Viewbox theme
+        theme = self.state.viewbox_theme
+        index = self.theme_combo.findData(theme)
+        if index >= 0:
+            self.theme_combo.setCurrentIndex(index)
+
         # Load axis settings
         for axis_id in AxisId:
             config = self.state.get_axis_config(axis_id)
@@ -216,6 +237,13 @@ class SettingsWidget(QWidget):
         """Handle plot title changes."""
         self.state.plot_title = text
         self.plot_title_changed.emit(text)
+
+    def _on_theme_changed(self, index: int) -> None:
+        """Handle viewbox theme selection changes."""
+        theme = self.theme_combo.itemData(index)
+        if theme is not None:
+            self.state.viewbox_theme = theme
+            self.viewbox_theme_changed.emit(theme)
 
     def _on_log_mode_changed(self, axis_id: AxisId, state: int):
         """Handle log mode checkbox changes."""

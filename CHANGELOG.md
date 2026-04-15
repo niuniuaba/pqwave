@@ -2,6 +2,8 @@
 ## CHANGELOG.md
 
 ###  v0.2.2.1
+- Added viewbox theme selector (Dark/Light) in Plot Settings: Dark mode uses pure black background (#000000) with light foreground (#E0E0E0), Light mode uses white background with black foreground. Theme applies to viewbox, axis pens, grid lines, axis labels, title text, mark scatter, and mark tooltips
+- Removed system-theme-following behavior: plot colors are no longer tied to QApplication.palette()
 - Added "Convert Raw Data..." under File menu: convert loaded raw data between SPICE/ngspice, LTspice, and QSPICE formats via a dialog with format selection and save-to-file
 - Fixed source format detection in Convert dialog: now uses spicelib's `raw_data.dialect` property instead of unreliable file-extension-based heuristics
 - **Known Limitation — QSPICE AC file conversion**: spicelib always treats the first variable in QSPICE complex/AC files as the frequency axis (stored as `float64`, not `complex128`). This means converting AC files to QSPICE format may produce incorrect data if the first variable is not a frequency axis. Typical AC analysis files (with frequency as the first variable) convert correctly. This is a spicelib design choice, not a bug in pqwave.
