@@ -1,6 +1,13 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 ## CHANGELOG.md
 
+###  v0.2.2.2
+- **Float32 migration**: all in-memory real data migrated from float64 to float32, complex data from complex128 to complex64 (~2× memory reduction for data matrix). LTspice stores float32 on disk; xschem offers float option — double precision is overkill for transient/DC SPICE data
+- **Release spicelib cache**: set `self.raw_data = None` after parse completes, freeing ~2.4 GB for rc_ltspice.raw. All data retained in memmap/column_stack matrix
+- **Zero-copy Variable access**: Dataset Variables now reference columns from the memmap/column_stack matrix directly (numpy views), sharing a single underlying memory allocation instead of creating per-variable copies
+- **LRU cache on get_variable_data()**: repeated calls for the same variable return the identical numpy view object, eliminating redundant allocations
+- **Updated profiling scripts**: `memory_profile.py`, `memory_profile_light.py`, and `cpu_profile.py` rewritten for the optimized pipeline — removed spicelib-internal profiling, added Dataset/cache verification stages, general-purpose for any raw file
+
 ###  v0.2.2.1
 - Added viewbox theme selector (Dark/Light) in Plot Settings: Dark mode uses pure black background (#000000) with light foreground (#E0E0E0), Light mode uses white background with black foreground. Theme applies to viewbox, axis pens, grid lines, axis labels, title text, mark scatter, and mark tooltips
 - Removed system-theme-following behavior: plot colors are no longer tied to QApplication.palette()

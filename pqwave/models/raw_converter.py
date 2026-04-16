@@ -5,9 +5,9 @@
 RawFileConverter - Convert SPICE raw files between formats.
 
 Supports conversion between:
-- LTspice (.raw): utf_16_le encoding, float32 real data, complex128 for AC
-- QSPICE (.qraw): utf_8 encoding, float64 real data, complex128 for AC
-- ngspice (.raw): utf_8 encoding, float64 real data, complex128 for AC
+- LTspice (.raw): utf_16_le encoding, float32 real data, complex64 for AC
+- QSPICE (.qraw): utf_8 encoding, float32 real data, complex64 for AC
+- ngspice (.raw): utf_8 encoding, float32 real data, complex64 for AC
 """
 
 import struct
@@ -22,8 +22,8 @@ FORMAT_CONFIG = {
         'encoding': 'utf_16_le',
         'command_line': 'Command: Linear Technology Corporation LTspice XVII',
         'real_dtype': np.float32,
-        'time_dtype': np.float64,
-        'ac_dtype': np.complex128,
+        'time_dtype': np.float64,  # LTspice stores time axis as float64
+        'ac_dtype': np.complex128,  # AC: complex as pair of float64
         'freq_dtype': np.float64,
         'extension': '.raw',
     },
@@ -146,11 +146,15 @@ def write_raw_file(
             dtype = _get_dtype_for_variable(var, config, is_ac_or_complex)
             value = data[pt_idx, var_idx]
 
-            if is_ac_or_complex and dtype == np.complex128:
-                # Complex: store real then imag as float64
+            if is_ac_or_complex and dtype in (np.complex64, np.complex128):
+                # Complex: store real then imag
                 val = complex(value)
-                binary_parts.append(struct.pack('<d', val.real))
-                binary_parts.append(struct.pack('<d', val.imag))
+                if dtype == np.complex64:
+                    binary_parts.append(struct.pack('<f', val.real))
+                    binary_parts.append(struct.pack('<f', val.imag))
+                else:
+                    binary_parts.append(struct.pack('<d', val.real))
+                    binary_parts.append(struct.pack('<d', val.imag))
             else:
                 # Real value
                 val = float(np.real(value))

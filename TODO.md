@@ -1,4 +1,15 @@
 ## TODO.md
+### ✅ v0.2.2.2 float32 migration and memory optimization ✅ **已完成**
+9. further performance improvement
+- still heavy memory use for large file and potential memory leak.
+- **根本原因**: 三处内存浪费 — (1) spicelib 解析后保留完整数据副本 (2) Dataset.Variable 通过 get_variable_data() 为每个变量创建第三份数组 (3) 所有数据用 float64 存储，内存翻倍
+- **修复 (1)**: parse() 结束后设置 `self.raw_data = None`，释放 spicelib 内部缓存 (~2.4 GB for rc_ltspice.raw)
+- **修复 (2)**: Variable 直接引用 memmap/column_stack 矩阵的列 (numpy view, zero-copy)，所有 Variable 共享同一底层内存
+- **修复 (3)**: 所有实数数据从 float64 → float32，复数数据从 complex128 → complex64。LTspice 文件本就 float32 存储；xschem 也提供 float 选项
+- **LRU 缓存**: get_variable_data() 增加 (dataset_idx, var_name) 缓存，重复调用返回同一 view 对象
+- **效果** (rc_100M.raw, 20 vars, 1.3M pts): RSS 从理论 ~7.2 GB → ~1.2 GB (~6× 减少)。rc_500M.raw: 2.15x 文件比。cdg_16M.raw (AC): 7.06x 文件比 (小文件受 Python/Qt 固定开销影响)
+- **更新**: profiling 脚本适配优化后的 pipeline (`memory_profile.py`, `memory_profile_light.py`, `cpu_profile.py`)
+
 ### ✅ v0.2.2.1 add themes setting of viewbox ✅ **已完成**
 8. 增加一个设定绘图区(viewbox)颜色theme的功能。
 - 仅提供dark和light两种theme，确保作为示波器显示供能的显示效果，并避免分散用户的注意力

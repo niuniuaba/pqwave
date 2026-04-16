@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""Lightweight memory profiler for large raw files.
+"""Lightweight memory profiler for pqwave raw file loading.
 
-Uses a staged approach with gc.collect() between stages to avoid OOM,
-and tracks RSS at each step to identify where memory explodes.
+Uses gc.collect() between stages and tracks RSS at each step.
+No tracemalloc overhead — suitable for very large files (>500 MB).
 
 Usage:
-    venv/bin/python pqwave/tests/memory_profile_light.py tests/rc.raw
+    python pqwave/tests/memory_profile_light.py <raw_file>
+
+    e.g.  python pqwave/tests/memory_profile_light.py tests/bridge.raw
+          python pqwave/tests/memory_profile_light.py tests/rc_ltspice.raw
 """
 
 import sys
 import os
 import gc
 import resource
-import tracemalloc
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# Allow running as script or as module
+if __name__ == "__main__":
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(script_dir)))
 
-from pqwave.models.rawfile import _parse_header_variables, preprocess_raw_file
-
-try:
-    from spicelib import RawRead
-except ImportError:
-    print("spicelib not available")
-    sys.exit(1)
+from pqwave.models.rawfile import RawFile
+from pqwave.models.dataset import Dataset
 
 
 def fmt_bytes(n: int) -> str:
@@ -45,11 +45,7 @@ def rss():
 def snap(label):
     gc.collect()
     rss_val = rss()
-    if tracemalloc.is_tracing():
-        tm = tracemalloc.get_traced_memory()
-        print(f"  [{label}] RSS: {fmt_bytes(rss_val):>10}  tracemalloc: cur={fmt_bytes(tm[0]):>10} peak={fmt_bytes(tm[1]):>10}")
-    else:
-        print(f"  [{label}] RSS: {fmt_bytes(rss_val):>10}")
+    print(f"  [{label}] RSS: {fmt_bytes(rss_val):>10}")
     return rss_val
 
 
@@ -63,94 +59,75 @@ def main(filepath):
     print()
 
     gc.collect()
-    tracemalloc.start(10)
+    rss_start = rss()
+    print(f"  [initial] RSS: {fmt_bytes(rss_start):>10}")
 
-    rss_start = snap("initial")
+    # Stage 1: RawFile parse
+    print(f"\n--- Stage 1: RawFile().parse() ---")
+    rf = RawFile(filepath)
+    snap("after parse")
 
-    # Stage 1: preprocess_raw_file
-    print(f"\n--- Stage 1: preprocess_raw_file ---")
-    load_path = preprocess_raw_file(filepath)
-    is_tmp = load_path != filepath
-    print(f"  Result: {'temp file' if is_tmp else 'original file'}")
-    snap("after preprocess")
+    # Report internal state
+    ds = rf.datasets[0] if rf.datasets else None
+    if ds is None:
+        print("  No datasets found!")
+        return
 
-    # Stage 2: RawRead header only
-    print(f"\n--- Stage 2: RawRead() ---")
-    raw_data = RawRead(load_path)
-    trace_names = raw_data.get_trace_names()
-    n_traces = len(trace_names)
-    print(f"  Traces: {n_traces}")
-    snap("after RawRead")
+    data_matrix = ds.get('data')
+    n_vars = len(ds.get('variables', []))
+    n_points = data_matrix.shape[0] if data_matrix is not None and data_matrix.ndim > 1 else 0
 
-    # Stage 3: Load traces one by one, measure each
-    print(f"\n--- Stage 3: Loading traces one by one ---")
-    first5_rss = []
-    plot = raw_data._plots[0]
-    for i, name in enumerate(trace_names):
-        trace = raw_data.get_trace(name)
-        if trace is not None and hasattr(trace, 'get_wave'):
-            arr = trace.get_wave()
-            size = arr.nbytes
-            if i < 5:
-                r = snap(f"after trace {i} ({name})")
-                first5_rss.append(r)
-            if i >= n_traces - 3:
-                snap(f"after trace {i} ({name})")
-            del arr  # Free to avoid OOM
-            if i == 5:
-                print(f"  ... (skipping middle traces to avoid OOM) ...")
+    print(f"  Variables: {n_vars}")
+    print(f"  Points: {n_points:,}")
+    if data_matrix is not None:
+        is_mmap = hasattr(data_matrix, 'filename')
+        print(f"  Matrix shape: {data_matrix.shape}")
+        print(f"  Matrix dtype: {data_matrix.dtype}")
+        print(f"  Matrix size: {fmt_bytes(data_matrix.nbytes)}")
+        print(f"  Storage: {'memmap' if is_mmap else 'column_stack'}")
+    print(f"  raw_data is None: {rf.raw_data is None}")
 
-    # Stage 4: Load first few traces and column_stack
-    print(f"\n--- Stage 4: column_stack first 10 traces ---")
-    data_list = []
-    for i, name in enumerate(trace_names[:10]):
-        trace = raw_data.get_trace(name)
-        if trace is not None and hasattr(trace, 'get_wave'):
-            arr = trace.get_wave()
-            data_list.append(arr)
-    if data_list:
-        import numpy as np
-        stacked = np.column_stack(data_list)
-        print(f"  10 traces stacked: {stacked.shape}, {fmt_bytes(stacked.nbytes)}")
-        snap("after column_stack 10")
-        del stacked
-    del data_list
+    # Stage 2: Dataset instantiation
+    print(f"\n--- Stage 2: Dataset() ---")
+    dataset = Dataset(rf, dataset_idx=0)
+    snap("after Dataset")
+    print(f"  Variables: {dataset.n_variables}")
+    print(f"  Points: {dataset.n_points}")
 
-    # Estimate full memory
+    # Stage 3: Variable access (cache verification)
+    print(f"\n--- Stage 3: Variable access ---")
+    for var in dataset.variables[:3]:
+        d1 = rf.get_variable_data(var.name, 0)
+        d2 = rf.get_variable_data(var.name, 0)
+        d3 = rf.get_variable_data(var.name, 0)
+        same = (d1 is d2 is d3) if d1 is not None else False
+        dtype_str = str(d1.dtype) if d1 is not None else "None"
+        print(f"  {var.name}: dtype={dtype_str}, cache_hits_same={same}")
+    snap("after variable access")
+
+    # Stage 4: Complex derived data if applicable
+    print(f"\n--- Stage 4: Derived variables ---")
+    has_complex = False
+    for var in dataset.variables:
+        if var.is_complex:
+            has_complex = True
+            mag = var.magnitude
+            phase = var.phase
+            print(f"  {var.name}: complex, mag dtype={mag.dtype}, phase dtype={phase.dtype}")
+    if not has_complex:
+        print(f"  (no complex variables)")
+    snap("after derived access")
+
+    # Summary
     print(f"\n{'='*70}")
-    print("MEMORY ESTIMATION")
+    print("SUMMARY")
     print(f"{'='*70}")
-
-    # Get one trace size as reference
-    ref_trace = raw_data.get_trace(trace_names[0])
-    ref_arr = ref_trace.get_wave()
-    per_var = ref_arr.nbytes
-    ref_dtype = ref_arr.dtype
-    ref_len = len(ref_arr)
-    del ref_arr
-
-    matrix_bytes = per_var * n_traces
-    print(f"  Points per trace: {ref_len:,}")
-    print(f"  dtype: {ref_dtype}")
-    print(f"  Per variable: {fmt_bytes(per_var)}")
-    print(f"  All traces (spicelib internal): ~{fmt_bytes(per_var * n_traces)}")
-    print(f"  Full column_stack matrix: ~{fmt_bytes(matrix_bytes)}")
-    print(f"  Total (spicelib + matrix): ~{fmt_bytes(per_var * n_traces * 2)}")
-    print(f"  Plus preprocess raw_bytes: ~{fmt_bytes(file_size)}")
-    print(f"  Estimated peak: ~{fmt_bytes(per_var * n_traces * 2 + file_size)}")
-    print()
-    print(f"  Available RAM: ~10 GB")
-    print(f"  Available + swap: ~14 GB")
-
     rss_end = snap("FINAL")
-    rss_increase = rss_end - rss_start
-    print(f"\n  RSS increase from start: {fmt_bytes(rss_increase)}")
-
-    # Cleanup
-    if is_tmp and os.path.exists(load_path):
-        os.unlink(load_path)
-
-    tracemalloc.stop()
+    ratio = rss_end / file_size
+    delta = rss_end - rss_start
+    print(f"\n  RSS / file size ratio: {ratio:.2f}x")
+    print(f"  RSS increase from start: {fmt_bytes(delta)}")
+    print(f"  Matrix occupies: {fmt_bytes(data_matrix.nbytes) if data_matrix is not None else 'N/A'}")
 
 
 if __name__ == "__main__":

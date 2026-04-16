@@ -264,6 +264,7 @@ class RawFile:
         self._tmp_file = None  # Temp file path for preprocessed encoding
         self._mmap_path = None  # Temp file path for np.memmap backing store
         self._name_map = {}    # correct_name -> spicelib_name mapping
+        self._data_cache = {}  # (dataset_idx, var_name) -> numpy view
         self.parse()
 
     def __del__(self):
@@ -324,6 +325,9 @@ class RawFile:
         """Parse the raw file using spicelib"""
         if not SPICELIB_AVAILABLE:
             raise ImportError("spicelib is not available. Install with: pip install spicelib")
+
+        # Clear data cache from any previous parse
+        self._data_cache = {}
 
         # Read only the header portion for variable name parsing
         # (spicelib's character-by-character header reading breaks multi-byte UTF-8)
@@ -409,6 +413,12 @@ class RawFile:
                             else:
                                 data = np.array(trace)
 
+                            # Downcast to float32 to reduce memory usage
+                            if data.dtype == np.float64:
+                                data = data.astype(np.float32)
+                            elif data.dtype == np.complex128:
+                                data = data.astype(np.complex64)
+
                             if ref_dtype is None:
                                 ref_dtype = data.dtype
                                 n_points = len(data)
@@ -467,6 +477,13 @@ class RawFile:
             }
             self.datasets.append(dataset)
 
+            # Release spicelib raw_data to free ~50% of parsed memory.
+            # All data is now in the memmap/column_stack matrix.
+            self.raw_data = None
+            logger.info(
+                f"Released spicelib raw_data; data retained in memmap/column_stack"
+            )
+
         except Exception as e:
             raise Exception(f"Error parsing file {self.filename}: {e}")
 
@@ -493,116 +510,95 @@ class RawFile:
         return []
 
     def get_variable_data(self, var_name, dataset_idx=0):
-        """Get data for a variable"""
-        if dataset_idx < len(self.datasets) and self.raw_data:
-            # Check if it's a derived variable for complex vector
-            if var_name.startswith('mag(') and var_name.endswith(')'):
-                base_var = var_name[4:-1]
-                return self._get_complex_magnitude(base_var, dataset_idx)
-            elif var_name.startswith('real(') and var_name.endswith(')'):
-                base_var = var_name[5:-1]
-                return self._get_complex_real(base_var, dataset_idx)
-            elif var_name.startswith('imag(') and var_name.endswith(')'):
-                base_var = var_name[5:-1]
-                return self._get_complex_imag(base_var, dataset_idx)
-            elif var_name.startswith('ph(') and var_name.endswith(')'):
-                base_var = var_name[3:-1]
-                return self._get_complex_phase(base_var, dataset_idx)
+        """Get data for a variable.
 
-            # Regular variable - use spicelib's get_trace method
-            # Map correct name to spicelib name if needed
-            sp_name = self._name_map.get(var_name, var_name)
-            trace = self.raw_data.get_trace(sp_name)
-            if trace is not None:
-                # Convert TraceRead object to numpy array
-                try:
-                    # Try to get the wave data
-                    if hasattr(trace, 'get_wave'):
-                        data = trace.get_wave()
-                        return data
-                    else:
-                        # Try to convert to numpy array
-                        return np.array(trace)
-                except Exception as e:
-                    logger.error(f"Error converting trace {var_name} to numpy array: {e}")
-                    return None
+        Reads directly from the memmap/column_stack matrix to avoid
+        creating duplicate copies. Returns a numpy view (no copy).
+        """
+        if dataset_idx >= len(self.datasets):
+            return None
+        dataset = self.datasets[dataset_idx]
+        variables = dataset.get('variables', [])
+        data_matrix = dataset.get('data')
+
+        if data_matrix is None or data_matrix.size == 0:
+            return None
+
+        # Check if it's a derived variable for complex vector
+        if var_name.startswith('mag(') and var_name.endswith(')'):
+            base_var = var_name[4:-1]
+            return self._get_complex_magnitude(base_var, dataset_idx)
+        elif var_name.startswith('real(') and var_name.endswith(')'):
+            base_var = var_name[5:-1]
+            return self._get_complex_real(base_var, dataset_idx)
+        elif var_name.startswith('imag(') and var_name.endswith(')'):
+            base_var = var_name[5:-1]
+            return self._get_complex_imag(base_var, dataset_idx)
+        elif var_name.startswith('ph(') and var_name.endswith(')'):
+            base_var = var_name[3:-1]
+            return self._get_complex_phase(base_var, dataset_idx)
+
+        # Regular variable: find column index and return view
+        cache_key = (dataset_idx, var_name)
+        if cache_key in self._data_cache:
+            return self._data_cache[cache_key]
+
+        for var in variables:
+            if var['name'] == var_name:
+                col = var['index']
+                if col < data_matrix.shape[1]:
+                    view = data_matrix[:, col]
+                    self._data_cache[cache_key] = view
+                    return view
+
         return None
 
     def _get_complex_magnitude(self, var_name, dataset_idx=0):
         """Get magnitude of complex vector"""
-        if self.raw_data:
-            # Try to get the trace directly
-            trace = self.raw_data.get_trace(var_name)
-            if trace is not None:
-                # Convert to numpy array first
-                data = self.get_variable_data(var_name, dataset_idx)
-                if data is not None:
-                    # Check if data is complex
-                    if np.iscomplexobj(data):
-                        return np.abs(data)
-                    else:
-                        # If not complex, return absolute value of real data
-                        return np.abs(data)
+        data = self.get_variable_data(var_name, dataset_idx)
+        if data is not None:
+            if np.iscomplexobj(data):
+                return np.abs(data)
+            else:
+                return np.abs(data)
         return None
 
     def _get_complex_real(self, var_name, dataset_idx=0):
         """Get real part of complex vector"""
-        if self.raw_data:
-            # Try to get the trace directly
-            trace = self.raw_data.get_trace(var_name)
-            if trace is not None:
-                # Convert to numpy array first
-                data = self.get_variable_data(var_name, dataset_idx)
-                if data is not None:
-                    # Check if data is complex
-                    if np.iscomplexobj(data):
-                        return np.real(data)
-                    else:
-                        # If not complex, return the data as is
-                        return data
+        data = self.get_variable_data(var_name, dataset_idx)
+        if data is not None:
+            if np.iscomplexobj(data):
+                return np.real(data)
+            else:
+                return data
         return None
 
     def _get_complex_imag(self, var_name, dataset_idx=0):
         """Get imaginary part of complex vector"""
-        if self.raw_data:
-            trace = self.raw_data.get_trace(var_name)
-            if trace is not None:
-                # Convert to numpy array first
-                data = self.get_variable_data(var_name, dataset_idx)
-                if data is not None:
-                    # Check if data is complex
-                    if np.iscomplexobj(data):
-                        return np.imag(data)
-                    else:
-                        # If not complex, return zeros
-                        return np.zeros_like(data)
+        data = self.get_variable_data(var_name, dataset_idx)
+        if data is not None:
+            if np.iscomplexobj(data):
+                return np.imag(data)
+            else:
+                return np.zeros_like(data)
         return None
 
     def _get_complex_phase(self, var_name, dataset_idx=0):
         """Get phase of complex vector (in radians)"""
-        if self.raw_data:
-            trace = self.raw_data.get_trace(var_name)
-            if trace is not None:
-                # Convert to numpy array first
-                data = self.get_variable_data(var_name, dataset_idx)
-                if data is not None:
-                    # Check if data is complex
-                    if np.iscomplexobj(data):
-                        return np.angle(data)
-                    else:
-                        # If not complex, return zeros
-                        return np.zeros_like(data)
+        data = self.get_variable_data(var_name, dataset_idx)
+        if data is not None:
+            if np.iscomplexobj(data):
+                return np.angle(data)
+            else:
+                return np.zeros_like(data)
         return None
 
     def get_num_points(self, dataset_idx=0):
         """Get number of points in a dataset"""
-        if dataset_idx < len(self.datasets) and self.raw_data:
-            # Get the first trace to determine the number of points
-            trace_names = self.raw_data.get_trace_names()
-            if trace_names:
-                trace = self.raw_data.get_trace(trace_names[0])
-                if trace is not None:
-                    return len(trace)
+        if dataset_idx < len(self.datasets):
+            data = self.datasets[dataset_idx].get('data')
+            if data is not None and data.size > 0:
+                return len(data)
         return 0
 
 

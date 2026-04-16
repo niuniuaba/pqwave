@@ -24,12 +24,10 @@ import numpy as np
 # Allow running as script or as module
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    if os.path.basename(script_dir) == "tests":
-        sys.path.insert(0, os.path.dirname(script_dir))
-    else:
-        sys.path.insert(0, script_dir)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(script_dir)))
 
 from pqwave.models.rawfile import RawFile, preprocess_raw_file, _parse_header_variables
+from pqwave.models.dataset import Dataset
 from pqwave.models.expression import ExprEvaluator
 
 
@@ -58,7 +56,7 @@ def profile_stages(filepath: str) -> dict:
 
     timings = {}
 
-    # Stage 1: Read raw bytes
+    # Stage 1: Read raw bytes (for header parsing)
     t0 = time.perf_counter()
     with open(filepath, 'rb') as f:
         raw_bytes = f.read()
@@ -74,73 +72,83 @@ def profile_stages(filepath: str) -> dict:
     t_pre = time.perf_counter()
     timings['parse_header'] = t_parse - t0
     timings['preprocess'] = t_pre - t_parse
+    is_tmp = load_path != filepath
     print(f'Stage 2a: _parse_header_variables     {timings["parse_header"]:.3f}s  ({len(correct_variables)} vars)')
     print(f'Stage 2b: preprocess_raw_file         {timings["preprocess"]:.3f}s')
 
-    # Stage 3: RawRead (header only)
-    from spicelib import RawRead
+    # Stage 3: Full RawFile.parse()
+    print(f'\n--- Stage 3: RawFile.parse() (full pipeline) ---')
     t0 = time.perf_counter()
-    raw_data = RawRead(load_path)
+    rf = RawFile(filepath)
     t1 = time.perf_counter()
-    spicelib_traces = raw_data.get_trace_names()
-    timings['rawread_header'] = t1 - t0
-    print(f'Stage 3: RawRead() parse header       {timings["rawread_header"]:.3f}s  ({len(spicelib_traces)} traces)')
+    timings['rawfile_parse'] = t1 - t0
+    print(f'Stage 3: RawFile.parse()              {timings["rawfile_parse"]:.3f}s')
 
-    # Stage 4: get_trace loop (current approach - one by one)
-    print(f'')
-    print(f'--- Stage 4: get_trace() loop (current: one by one) ---')
-    t0 = time.perf_counter()
-    data_list = []
-    for i, name in enumerate(spicelib_traces):
-        t_each = time.perf_counter()
-        trace = raw_data.get_trace(name)
-        data = trace.get_wave()
-        data_list.append(data)
-        t_each_end = time.perf_counter()
-        if i < 5 or i >= len(spicelib_traces) - 3:
-            print(f'  get_trace #{i:2d} {name:20s}  {t_each_end - t_each:.3f}s')
-        elif i == 5:
-            print(f'  ...')
-    t1 = time.perf_counter()
-    timings['get_trace_loop'] = t1 - t0
-    print(f'Stage 4: get_trace() ({len(spicelib_traces)} vars)  {timings["get_trace_loop"]:.3f}s')
-    print(f'  avg per variable: {timings["get_trace_loop"] / len(spicelib_traces):.3f}s')
+    if not rf.datasets:
+        print("  No datasets found!")
+        return timings
 
-    # Stage 5: column_stack
-    t0 = time.perf_counter()
-    data = np.column_stack(data_list)
-    t1 = time.perf_counter()
-    timings['column_stack'] = t1 - t0
-    print(f'Stage 5: np.column_stack              {timings["column_stack"]:.3f}s  ({data.shape}, {data.dtype}, {data.nbytes/1024**2:.0f} MB)')
+    ds = rf.datasets[0]
+    data_matrix = ds['data']
+    n_vars = data_matrix.shape[1] if data_matrix.ndim > 1 else 0
+    n_points = data_matrix.shape[0] if data_matrix.ndim > 1 else 0
+    var_names = [v['name'] for v in ds.get('variables', [])]
 
-    # Stage 6: get_variable_data repeated (no caching)
-    print(f'\n--- Stage 6: get_variable_data repeated calls (no caching) ---')
+    print(f'  -> {n_vars} vars, {n_points:,} points, dtype={data_matrix.dtype}')
+    print(f'  -> raw_data is None: {rf.raw_data is None}')
+
+    # Stage 4: Dataset instantiation
+    print(f'\n--- Stage 4: Dataset() ---')
     t0 = time.perf_counter()
-    for _ in range(3):
-        for name in spicelib_traces[:5]:
-            trace = raw_data.get_trace(name)
-            arr = trace.get_wave()
+    dataset = Dataset(rf, dataset_idx=0)
     t1 = time.perf_counter()
-    timings['repeated_get'] = t1 - t0
-    print(f'Stage 6: 3x5 get_trace calls          {timings["repeated_get"]:.3f}s')
+    timings['dataset_init'] = t1 - t0
+    print(f'Stage 4: Dataset()                    {timings["dataset_init"]:.3f}s')
+
+    # Stage 5: get_variable_data repeated calls (cache test)
+    print(f'\n--- Stage 5: get_variable_data repeated calls (with cache) ---')
+    t0 = time.perf_counter()
+    for _ in range(5):
+        for name in var_names[:5]:
+            rf.get_variable_data(name, 0)
+    t1 = time.perf_counter()
+    timings['cached_get_5x5'] = t1 - t0
+    print(f'Stage 5: 5x5 cached get_variable_data {timings["cached_get_5x5"]:.3f}s')
+    # Verify cache works
+    if var_names:
+        a1 = rf.get_variable_data(var_names[0], 0)
+        a2 = rf.get_variable_data(var_names[0], 0)
+        print(f'  Cache working: {a1 is a2}')
+
+    # Stage 6: Complex derivation if applicable
+    if ds.get('_is_ac_or_complex', False):
+        print(f'\n--- Stage 6: Complex derivation ---')
+        t0 = time.perf_counter()
+        for var in ds['variables'][:5]:
+            vname = var['name']
+            rf._get_complex_magnitude(vname, 0)
+            rf._get_complex_real(vname, 0)
+            rf._get_complex_imag(vname, 0)
+            rf._get_complex_phase(vname, 0)
+        t1 = time.perf_counter()
+        timings['complex_derive_5'] = t1 - t0
+        print(f'Stage 6: derive 5 complex vars     {timings["complex_derive_5"]:.3f}s')
+    else:
+        print(f'\n--- Stage 6: N/A (not AC/complex) ---')
 
     # Stage 7: ExprEvaluator
     print(f'\n--- Stage 7: ExprEvaluator ---')
-    class CachedMockRF:
-        def __init__(self, data_list, trace_names, n_points):
-            self._data = {name: arr for name, arr in zip(trace_names, data_list)}
-            self._n_points = n_points
-        def get_variable_data(self, name, idx=0):
-            return self._data.get(name)
-        def get_num_points(self, idx=0):
-            return self._n_points
-
-    mock_rf = CachedMockRF(data_list, spicelib_traces, len(data_list[0]))
-    evaluator = ExprEvaluator(mock_rf, 0)
+    evaluator = ExprEvaluator(rf, 0)
     print(f'  n_points: {evaluator.n_points:,}')
 
-    v0 = spicelib_traces[0]
-    v1 = spicelib_traces[1] if len(spicelib_traces) > 1 else v0
+    if len(var_names) >= 2:
+        v0 = var_names[0]
+        v1 = var_names[1]
+    elif len(var_names) == 1:
+        v0 = var_names[0]
+        v1 = v0
+    else:
+        v0 = v1 = ''
 
     exprs = [
         ('simple', v0),
@@ -153,10 +161,10 @@ def profile_stages(filepath: str) -> dict:
         for _ in range(5):
             result = evaluator.evaluate(expr)
         t1 = time.perf_counter()
-        print(f'  [{label}] 5x evaluate  {(t1-t0)*1000:.1f}ms  -> {result.shape}')
+        print(f'  [{label}] 5x evaluate  {(t1-t0)*1000:.1f}ms  -> {result.shape}, dtype={result.dtype}')
 
     # Cleanup temp file
-    if load_path != filepath and os.path.exists(load_path):
+    if is_tmp and os.path.exists(load_path):
         os.unlink(load_path)
 
     # Summary table

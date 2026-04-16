@@ -130,12 +130,16 @@ class Dataset:
         # Create Variable objects
         self.variables: List[Variable] = []
         var_dicts = dataset_dict.get('variables', [])
+        data_matrix = dataset_dict.get('data')
         for var_dict in var_dicts:
             name = var_dict['name']
             index = var_dict['index']
             var_type = var_dict['type']
-            # Get data column from raw file
-            data = raw_file.get_variable_data(name, dataset_idx)
+            # Reference column from memmap/column_stack directly (numpy view, no copy)
+            if data_matrix is not None and data_matrix.size > 0:
+                data = data_matrix[:, index]
+            else:
+                data = raw_file.get_variable_data(name, dataset_idx)
             if data is not None:
                 var = Variable(name, index, var_type, data)
                 self.variables.append(var)
