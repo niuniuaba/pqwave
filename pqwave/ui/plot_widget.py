@@ -17,12 +17,17 @@ from typing import Optional, Tuple, Callable
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QColor
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 
 from pqwave.utils.log_axis import LogAxisItem
 from pqwave.logging_config import get_logger
 from pqwave.models.state import ViewboxTheme, THEME_COLORS
+
+# ViewBox update throttle interval (ms).  Coalesces rapid pan/zoom events
+# into fewer paint cycles.  30ms = ~30fps, which is visually smooth while
+# cutting CPU from ~200+ paint/sec to ~30 paint/sec during mouse drag.
+_VB_THROTTLE_MS = 30
 
 
 class PlotWidget(pg.PlotWidget):
@@ -104,10 +109,25 @@ class PlotWidget(pg.PlotWidget):
 
         # Connect mouse signals
         scene = self.plotItem.scene()
-        self.logger.debug(f"Connecting sigMouseMoved from scene {scene}")
         scene.sigMouseMoved.connect(self._on_mouse_moved)
         scene.sigMouseClicked.connect(self._on_mouse_clicked)
-        # Note: sigMouseLeave not available, we'll use a timer or other method
+
+        # Optimize ViewBox rendering for performance with large datasets.
+        # Throttle view range updates during mouse drag/pan/zoom to ~30fps
+        # instead of painting every event (~200+ Hz).
+        vb = self.plotItem.vb
+        self._vb_update_timer = QTimer()
+        self._vb_update_timer.setSingleShot(True)
+        self._vb_update_timer.setInterval(_VB_THROTTLE_MS)
+        self._vb_update_timer.timeout.connect(self._flush_vb_updates)
+        self._vb_update_pending = False
+        self._vb_queued_translate = None  # accumulated (dx, dy)
+        self._vb_queued_call = None  # ('scaleBy', args, kwargs) or None
+        # Wrap ViewBox.translateBy and scaleBy to go through throttle
+        self._orig_vb_translateBy = vb.translateBy
+        self._orig_vb_scaleBy = vb.scaleBy
+        vb.translateBy = self._throttled_vb_translateBy
+        vb.scaleBy = self._throttled_vb_scaleBy
 
     # Public API for cursor control
 
@@ -362,29 +382,29 @@ class PlotWidget(pg.PlotWidget):
     def set_axis_log_mode(self, axis: str, log_mode: bool) -> None:
         """Set log mode for an axis.
 
-        Args:
-            axis: 'X', 'Y1', or 'Y2'
-            log_mode: True for log scale, False for linear
+        Data is pre-transformed to log10 space by TraceManager.
+        We set the AXIS to log mode (for tick generation) but keep the
+        ViewBox in LINEAR mode — otherwise viewRange() applies log10
+        to the range, causing double-log corruption.
         """
         if axis == 'X':
             self._x_log_mode = log_mode
-            self.plotItem.setLogMode(x=log_mode)
+            self.getAxis('bottom').setLogMode(x=log_mode)
         elif axis == 'Y1':
             self._y1_log_mode = log_mode
-            self.plotItem.setLogMode(y=log_mode)
+            self.getAxis('left').setLogMode(y=log_mode)
         elif axis == 'Y2' and self.y2_viewbox:
             self._y2_log_mode = log_mode
-            self.y2_viewbox.setLogMode(y=log_mode)
             if self.right_axis:
                 self.right_axis.setLogMode(log_mode)
 
     @staticmethod
     def _log_to_linear(value: float) -> float:
-        """Convert log-space coordinate from mapSceneToView back to linear space.
+        """Convert log-space coordinate back to linear space for display.
 
-        When pyqtgraph is in log mode, mapSceneToView returns the exponent value.
-        E.g., if the actual data value is 1000 (10^3), mapSceneToView returns ~3.0.
-        This converts it back to 10^3 = 1000.
+        TraceManager pre-transforms data to log10 space, so the ViewBox
+        coordinates are exponent values (e.g., 3.0 for actual value 1000).
+        This converts back to 10^3 = 1000 for user display.
         """
         import math
         try:
@@ -413,11 +433,19 @@ class PlotWidget(pg.PlotWidget):
             self.y2_viewbox.setYRange(min_val, max_val, padding=0)
 
     def auto_range_axis(self, axis: str) -> None:
-        """Auto-range an axis based on current data and immediately update the view."""
+        """Auto-range an axis based on current data and immediately update the view.
+
+        For X axis: after auto-ranging, autoRange is disabled so that
+        clipToView on PlotDataItem can work (pyqtgraph skips clipping
+        when autoRange is enabled). This matches xschem's behavior where
+        the view only changes on explicit user action.
+        """
         vb = self.plotItem.vb
         if axis == 'X':
             vb.enableAutoRange(x=True)
             vb.autoRange(padding=0.05)
+            # Disable X autoRange so clipToView works during pan/zoom
+            vb.enableAutoRange(x=False)
         elif axis == 'Y1':
             vb.enableAutoRange(y=True)
             vb.autoRange(padding=0.05)
@@ -524,25 +552,20 @@ class PlotWidget(pg.PlotWidget):
 
     def _on_mouse_moved(self, pos) -> None:
         """Handle mouse movement for coordinate display and cross-hair."""
-        import math
 
         # Check if viewbox is available
         if not hasattr(self, 'plotItem') or not hasattr(self.plotItem, 'vb') or self.plotItem.vb is None:
-            self.logger.debug(f"Viewbox not available. plotItem: {hasattr(self, 'plotItem')}, vb: {hasattr(self.plotItem, 'vb') if hasattr(self, 'plotItem') else 'N/A'}")
             return
 
         # Check if mouse is inside the main viewbox
         vb_rect = self.plotItem.vb.sceneBoundingRect()
         if vb_rect.isNull() or not vb_rect.isValid():
-            # Viewbox not properly initialized yet
-            self.logger.debug(f"Viewbox rect invalid: null={vb_rect.isNull()}, valid={vb_rect.isValid()}, rect={vb_rect}")
             if self._mouse_inside_viewbox:
                 self._mouse_inside_viewbox = False
                 self.mouse_left.emit()
             return
 
         mouse_inside = vb_rect.contains(pos)
-        self.logger.debug(f"Mouse pos={pos}, vb_rect={vb_rect}, mouse_inside={mouse_inside}")
 
         # Handle state change
         if mouse_inside != self._mouse_inside_viewbox:
@@ -559,9 +582,6 @@ class PlotWidget(pg.PlotWidget):
 
         # Mouse is inside viewbox, try to map coordinates
         try:
-            # Debug view range
-            view_range = self.plotItem.vb.viewRange()
-            self.logger.debug(f"View range: {view_range}")
             # Map scene coordinates to main viewbox (Y1 axis)
             view_pos = self.plotItem.vb.mapSceneToView(pos)
             x_val = view_pos.x()
@@ -574,11 +594,7 @@ class PlotWidget(pg.PlotWidget):
                     y2_view_pos = self.y2_viewbox.mapSceneToView(pos)
                     y2_val = y2_view_pos.y()
                 except Exception:
-                    # If Y2 mapping fails, keep NaN
-                    self.logger.debug(f"Y2 mapping failed")
                     pass
-
-            self.logger.debug(f"Mapped coordinates: x={x_val}, y1={y1_val}, y2={y2_val}")
 
             # Update cross-hair positions (always in viewbox coordinates)
             if self.cross_hair_visible:
@@ -596,8 +612,7 @@ class PlotWidget(pg.PlotWidget):
             # Emit signal with linear display coordinates
             self.mouse_moved.emit(display_x, display_y1, display_y2)
 
-        except Exception as e:
-            self.logger.debug(f"Exception in mapSceneToView: {e}")
+        except Exception:
             # If mapping fails, emit NaN values
             self.mouse_moved.emit(float('nan'), float('nan'), float('nan'))
 
@@ -679,3 +694,68 @@ class PlotWidget(pg.PlotWidget):
     def get_plot_title(self) -> str:
         """Get the current plot title."""
         return self.plotItem.titleLabel.text if self.plotItem.titleLabel else ''
+
+    # --- ViewBox throttle: coalesce rapid pan/zoom into fewer paints ---
+
+    def _throttled_vb_translateBy(self, *args, **kwargs):
+        """Intercept ViewBox.translateBy and accumulate deltas."""
+        # Extract dx, dy from any calling convention:
+        # translateBy(t=(dx,dy)) / translateBy(x=dx, y=dy) / translateBy(dx, dy)
+        t = kwargs.get('t', None)
+        x = kwargs.get('x', None)
+        y = kwargs.get('y', None)
+
+        if not kwargs and args:
+            # Pure positional: translateBy(dx, dy) or translateBy(Point)
+            a0 = args[0]
+            if isinstance(a0, (tuple, list)):
+                t = a0
+            elif hasattr(a0, 'x'):  # Point
+                t = (a0.x(), a0.y())
+            elif len(args) >= 2:
+                x, y = args[0], args[1]
+            else:
+                x = args[0]
+
+        dx = t[0] if t is not None else (x if x is not None else 0.0)
+        dy = t[1] if t is not None else (y if y is not None else 0.0)
+
+        if not self._vb_update_pending:
+            self._vb_update_pending = True
+            self._vb_queued_translate = (dx, dy)
+            self._vb_update_timer.start()
+        else:
+            ox, oy = self._vb_queued_translate
+            self._vb_queued_translate = (ox + dx, oy + dy)
+
+    def _throttled_vb_scaleBy(self, *args, **kwargs):
+        """Intercept ViewBox.scaleBy and coalesce rapid calls."""
+        # Forward the last call's args as-is.  ScaleBy is only called by
+        # mouse-wheel/zoom-box which fires far fewer events than pan-drag,
+        # so accumulation matters much less.
+        if not self._vb_update_pending:
+            self._vb_update_pending = True
+            self._vb_queued_call = ('scaleBy', args, kwargs)
+            self._vb_update_timer.start()
+        else:
+            self._vb_queued_call = ('scaleBy', args, kwargs)
+
+    def _flush_vb_updates(self):
+        """Apply the accumulated view transform."""
+        self._vb_update_pending = False
+
+        # Apply accumulated translation
+        if self._vb_queued_translate is not None:
+            dx, dy = self._vb_queued_translate
+            self._vb_queued_translate = None
+            self._orig_vb_translateBy(x=dx, y=dy)
+
+        # Apply queued scaleBy (if that was the last operation)
+        if self._vb_queued_call is not None:
+            name, args, kwargs = self._vb_queued_call
+            self._vb_queued_call = None
+            if name == 'translateBy':
+                # Already handled via _vb_queued_translate above; ignore
+                pass
+            elif name == 'scaleBy':
+                self._orig_vb_scaleBy(*args, **kwargs)

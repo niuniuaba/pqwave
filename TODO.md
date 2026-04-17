@@ -1,4 +1,21 @@
 ## TODO.md
+### ✅ v0.2.2 further performance improvement ✅ **已完成**
+10. reduce high cpu use for large files
+- simple benchmark from top information (read raw, add trace, move, span, zoom, etc)
+  - tests/rc_100M.raw : CPU ~10% / xschem, 120-140 % pqwave → **now ~5-10%**
+- **Optimizations applied**:
+  - (a) **PlotDataItem → PlotCurveItem**: Pre-downsample to 1600pts at trace creation (peak method). Eliminates per-paint autoDownsample, updateItems, dataBounds nanmin/nanmax. **18x faster**
+  - (b) **_StaticCurveItem**: Subclass that permanently caches boundingRect and skips viewTransformChanged invalidation. **22% faster**
+  - (c) **Segmented line mode**: `setSegmentedLineMode('on')` uses drawLines instead of drawPath. Reduces QPainter overhead
+  - (d) **ThrottledPlotDataItem**: Debounced viewRangeChanged at 50ms (already existed, kept)
+  - (e) **ViewBox translateBy/scaleBy throttle**: Coalesce rapid pan/zoom calls into single paint every 30ms. **2.6x fewer paints** during real mouse drag
+  - (f) **Remove debug logging**: Strip logger.debug from _on_mouse_moved, LogAxisItem.tickStrings/setLogMode
+  - (g) **BoundingRectViewportUpdate**: Reduce repaint region size
+- **Results** (22 traces, 636K pts each, 200 translateBy events):
+  - Before: 0.703s (3.5ms/event, ~700ms total for 200 events)
+  - After: 0.009s (0.045ms/event, **78x faster** in tight loop)
+  - Realistic timing (100 events over 2s): 38 paints vs 100 → **15.9 Hz vs 50 Hz**
+
 ### ✅ v0.2.2.2 float32 migration and memory optimization ✅ **已完成**
 9. further performance improvement
 - still heavy memory use for large file and potential memory leak.

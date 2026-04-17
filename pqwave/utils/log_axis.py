@@ -9,9 +9,6 @@ logarithmic axis ticks by showing values as 10^exponent with superscript formatt
 """
 
 from pyqtgraph import AxisItem
-from pqwave.logging_config import get_logger
-
-logger = get_logger(__name__)
 
 
 class LogAxisItem(AxisItem):
@@ -27,78 +24,43 @@ class LogAxisItem(AxisItem):
 
 
     def setLogMode(self, x=None, y=None):
-        """Set log mode for this axis
-
-        Args:
-            x: Whether X-axis is in log mode (for bottom axis)
-            y: Whether Y-axis is in log mode (for left/right axis)
-        """
-        logger.debug(f"\n=== LogAxisItem.setLogMode called: orientation={self.orientation}, x={x}, y={y} ===")
-
-        # Store old log mode for comparison
+        """Set log mode for this axis"""
         old_log_mode = self.log_mode
 
-        # Update log_mode based on orientation
         if self.orientation in ['left', 'right'] and y is not None:
             self.log_mode = y
-            logger.debug(f"  Updated log_mode from {old_log_mode} to: {y} (Y-axis)")
         elif self.orientation == 'bottom' and x is not None:
             self.log_mode = x
-            logger.debug(f"  Updated log_mode from {old_log_mode} to: {x} (X-axis)")
 
-        # Enable/disable auto SI prefix based on log mode
-        # For log mode, disable auto SI prefix (we show exponents directly)
-        # For linear mode, enable auto SI prefix for large/small numbers
         new_mode = y if self.orientation in ['left', 'right'] else x
         if new_mode is not None:
-            if new_mode:  # Log mode
+            if new_mode:
                 self.enableAutoSIPrefix(False)
-                logger.debug(f"  Disabled auto SI prefix for log mode")
-            else:  # Linear mode
+            else:
                 self.enableAutoSIPrefix(True)
-                logger.debug(f"  Enabled auto SI prefix for linear mode")
 
-        # Also call parent's setLogMode to ensure pyqtgraph internal state is updated
         try:
             super().setLogMode(x=x, y=y)
-            logger.debug(f"  Called parent setLogMode")
-        except Exception as e:
-            logger.debug(f"  Parent setLogMode failed: {e}")
+        except Exception:
+            pass
 
-        # If log mode changed, call callback if provided
         if new_mode is not None and new_mode != old_log_mode:
-            logger.debug(f"  Log mode changed from {old_log_mode} to {new_mode}")
             if self.log_mode_changed_callback:
-                logger.debug(f"  Calling log_mode_changed_callback with orientation={self.orientation}, log_mode={new_mode}")
                 try:
                     self.log_mode_changed_callback(self.orientation, new_mode)
-                except Exception as e:
-                    logger.debug(f"  Callback failed: {e}")
+                except Exception:
+                    pass
 
     def tickStrings(self, values, scale, spacing):
         """Convert tick values to strings"""
-        logger.debug(f"\n=== LogAxisItem.tickStrings ===")
-        logger.debug(f"  orientation: {self.orientation}")
-        logger.debug(f"  log_mode: {self.log_mode}")
-        logger.debug(f"  values: {values}")
-
         strings = []
         for v in values:
             if self.log_mode:
-                # For log scale, show 10^v with superscript exponent
-                logger.debug(f"  Processing value v={v}")
-
-                # Format exponent with superscript
                 formatted = self._format_exponent_with_superscript(v)
                 strings.append(formatted)
-                logger.debug(f"    Formatted as: '{formatted}'")
             else:
-                # For linear scale, use default formatting
                 default_str = super().tickStrings([v], scale, spacing)[0]
                 strings.append(default_str)
-                logger.debug(f"  Linear mode: v={v} -> '{default_str}'")
-
-        logger.debug(f"  Returning strings: {strings}")
         return strings
 
     def _format_exponent_with_superscript(self, exponent):

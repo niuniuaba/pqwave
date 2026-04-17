@@ -10,14 +10,60 @@ of traces in the plot, including color assignment and legend synchronization.
 
 import numpy as np
 import pyqtgraph as pg
-from typing import Optional, List, Tuple, Dict, Any
+from PyQt6 import QtCore
 from PyQt6.QtGui import QColor
+from typing import Optional, List, Tuple
 
-from pqwave.models.state import ApplicationState, AxisId
+from pqwave.models.state import ApplicationState
 from pqwave.models.trace import Trace, AxisAssignment
 from pqwave.models.expression import ExprEvaluator
 from pqwave.utils.colors import ColorManager
 from pqwave.logging_config import get_logger
+
+# Pre-downsample target: 2x typical screen width.  This gives good visual
+# quality for moderate zoom-in while keeping per-paint overhead low.
+DOWNSAMPLE_TARGET = 1600
+
+
+class _StaticCurveItem(pg.PlotCurveItem):
+    """PlotCurveItem that caches its bounding rect between setData() calls.
+
+    pyqtgraph's default behaviour is to call dataBounds(nanmin/nanmax) on
+    every paint event because viewTransformChanged invalidates the bounds
+    cache.  This subclass skips that invalidation during normal pan/zoom
+    (data never changes), but clears the cache when setData() is called
+    (e.g. during log mode toggle).
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._boundingRect = None
+
+    def viewTransformChanged(self):
+        # Do NOT invalidate bounds cache during pan/zoom — data is stable.
+        # The default calls invalidateBounds() which forces nanmin/nanmax
+        # on every paint.  We skip it entirely.
+        pass
+
+    def setData(self, *args, **kwargs):
+        # Clear cached bounds when data changes (e.g. log mode toggle)
+        self._boundingRect = None
+        super().setData(*args, **kwargs)
+
+    def boundingRect(self):
+        if self._boundingRect is None:
+            # Compute once and cache until next setData()
+            (xmn, xmx) = self.dataBounds(ax=0)
+            if xmn is None or xmx is None:
+                return QtCore.QRectF()
+            (ymn, ymx) = self.dataBounds(ax=1)
+            if ymn is None or ymx is None:
+                return QtCore.QRectF()
+            self._boundingRect = QtCore.QRectF(xmn, ymn, xmx - xmn, ymx - ymn)
+        return self._boundingRect
+
+
+from PyQt6 import QtCore
 
 
 class TraceManager:
@@ -49,7 +95,7 @@ class TraceManager:
         self.right_axis = None
 
         # Internal state
-        self.traces: List[Tuple[str, pg.PlotDataItem, str]] = []  # (var, plot_item, y_axis)
+        self.traces: List[Tuple[str, pg.PlotCurveItem, str]] = []  # (var, plot_item, y_axis)
         self.raw_file = None
         self.current_dataset = 0
 
@@ -261,9 +307,9 @@ class TraceManager:
     def update_traces_for_log_mode(self) -> None:
         """Update all existing traces for current log mode settings.
 
-        Reuses existing PlotDataItem objects — only updates logMode flags.
-        PlotDataItem internally invalidates its cached mapped data and
-        re-applies log10 mapping on the next paint.
+        PlotCurveItem has no setLogMode; we must transform the data ourselves.
+        Always transforms from the ORIGINAL linear-space trace data, so
+        toggling log mode on/off produces correct values.
         """
         self.logger.debug(f"\n=== update_traces_for_log_mode ===")
         self.logger.debug(f"  Current log modes: x_log={self.x_log}, y1_log={self.y1_log}, y2_log={self.y2_log}")
@@ -274,9 +320,29 @@ class TraceManager:
 
         self.logger.debug(f"  Found {len(self.traces)} traces to update")
 
-        for var, plot_item, y_axis in self.traces:
+        state_traces = self.state.traces
+        for i, (var, plot_item, y_axis) in enumerate(self.traces):
             y_log = self.y1_log if y_axis == "Y1" else self.y2_log
-            plot_item.setLogMode(self.x_log, y_log)
+
+            # Get the ORIGINAL linear-space data from the Trace model
+            if i < len(state_traces):
+                trace = state_traces[i]
+                x_orig = trace.x_data
+                y_orig = trace.y_data
+            else:
+                # Fallback: use whatever is in the curve item
+                x_orig, y_orig = plot_item.getData()
+                if x_orig is None or y_orig is None:
+                    continue
+
+            # Apply log10 transform to original data
+            x = np.log10(np.abs(x_orig) + 1e-300) if self.x_log else x_orig.copy()
+            y = np.log10(np.abs(y_orig) + 1e-300) if y_log else y_orig.copy()
+
+            # Re-downsample the transformed data
+            x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
+
+            plot_item.setData(x_ds, y_ds)
             self.logger.debug(f"  Updated log mode for {var}: x={self.x_log}, y={y_log}")
 
         self.logger.debug(f"  Trace update complete")
@@ -295,22 +361,67 @@ class TraceManager:
 
     # Internal methods
 
-    def _create_plot_item(self, trace: Trace) -> pg.PlotDataItem:
-        """Create a PlotDataItem for the trace and add it to the appropriate viewbox."""
-        pen = pg.mkPen(color=trace.color, width=1)
-        y_log = self.y1_log if trace.y_axis == AxisAssignment.Y1 else self.y2_log
+    @staticmethod
+    def _downsample(x: np.ndarray, y: np.ndarray, n_pts: int):
+        """Downsample x,y data to ~n_pts using peak method (min/max per bin).
 
-        plot_item = pg.PlotDataItem(
-            trace.x_data,
-            trace.y_data,
-            name=trace.name,
+        This runs once at trace creation time.  The downsampled arrays are
+        then passed to PlotCurveItem, avoiding all per-paint overhead of
+        PlotDataItem (autoDownsample rebuild, dataBounds, updateItems).
+        """
+        n = len(x)
+        if n <= n_pts:
+            return x.copy(), y.copy()
+        n_bins = n_pts // 2  # each bin produces 2 points (min+max)
+        if n_bins < 1:
+            n_bins = 1
+        bin_size = n // n_bins
+        if bin_size < 1:
+            bin_size = 1
+
+        x_ds = np.empty(n_bins * 2, dtype=x.dtype)
+        y_ds = np.empty(n_bins * 2, dtype=y.dtype)
+
+        for i in range(n_bins):
+            start = i * bin_size
+            end = min(start + bin_size, n)
+            x_ds[2 * i] = x[start:end].mean()
+            x_ds[2 * i + 1] = x[start:end].mean()
+            y_ds[2 * i] = y[start:end].min()
+            y_ds[2 * i + 1] = y[start:end].max()
+
+        return x_ds, y_ds
+
+    def _create_plot_item(self, trace: Trace) -> pg.PlotCurveItem:
+        """Create a PlotCurveItem for the trace with pre-downsampled data.
+
+        Uses PlotCurveItem (not PlotDataItem) to eliminate per-paint overhead:
+        no autoDownsample rebuild, no dataBounds nanmin/max, no updateItems.
+        Downsampling runs once at creation time.
+
+        If the axis is already in log mode, data is log10-transformed before
+        plotting so that the log-scale axis receives correct exponent values.
+        """
+        pen = pg.mkPen(color=trace.color, width=1)
+
+        x_data = trace.x_data
+        y_data = trace.y_data
+
+        # Apply log10 transform if the corresponding axis is in log mode
+        x = np.log10(np.abs(x_data) + 1e-300) if self.x_log else x_data
+        y_log = self.y1_log if trace.y_axis == AxisAssignment.Y1 else self.y2_log
+        y = np.log10(np.abs(y_data) + 1e-300) if y_log else y_data
+
+        # Pre-downsample to fixed resolution
+        x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
+
+        plot_item = _StaticCurveItem(
+            x_ds, y_ds,
             pen=pen,
-            symbol=None,              # rule 2: disable scatter points
-            skipFiniteCheck=True,     # rule 8: skip finite check
-            autoDownsample=True,
-            downsampleMethod='peak',
         )
-        plot_item.setLogMode(self.x_log, y_log)
+        # Segmented line mode is faster than path rendering for line plots.
+        # Uses drawLines() instead of drawPath().
+        plot_item.setSegmentedLineMode('on')
 
         if trace.y_axis == AxisAssignment.Y2:
             # Ensure Y2 axis exists
