@@ -1,6 +1,19 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 ## CHANGELOG.md
 
+###  v0.2.3 — Xschem integration with bug fixes
+- **Xschem integration**: TCP socket server (port 2022) enables pqwave as external wave viewer for xschem schematic editor
+- **GAW-style protocol**: Support `table_set filename.raw` and `copyvar v(node) sel #color` commands for xschem compatibility
+- **Extended JSON protocol**: Additional commands (`add_trace`, `remove_trace`, `get_data_point`, `close_window`, `list_windows`) for advanced control
+- **Single-instance server**: Only one pqwave server runs; subsequent instances forward commands to existing server
+- **Window registry**: Maps client connections to appropriate windows based on raw file
+- **Pending command queue**: Commands queued when raw file not yet loaded, processed automatically after file load
+- **Bug fix 1**: Fixed add_trace/remove_trace/get_data_point commands being dropped instead of queued when raw file not loaded (enhanced `_is_command_for_this_window` routing logic)
+- **Bug fix 2**: Fixed `--xschem-send` blocking for 5 seconds on non-JSON commands (added JSON detection with 5s timeout for JSON, 0.1s timeout for GAW commands)
+- **Command routing**: All xschem command handlers now pass `raw_file` parameter to correctly route commands to appropriate windows
+- **Headless testing**: Added Xvfb support for GUI tests, using virtual environment Python interpreter as per CLAUDE.md rules
+- **Unit tests**: Comprehensive tests for xschem server, command handler, window registry, and bug fixes
+
 ###  v0.2.2 — CPU performance optimization
 - **PlotDataItem → PlotCurveItem**: Pre-downsample to 1600pts at trace creation time using peak method (min/max per bin). Eliminates per-paint autoDownsample rebuild, updateItems, and dataBounds nanmin/nanmax overhead. **18x faster** per paint event
 - **_StaticCurveItem**: Custom PlotCurveItem subclass that permanently caches boundingRect and skips viewTransformChanged invalidation during pan/zoom. **22% faster** by avoiding redundant bounds recalculation

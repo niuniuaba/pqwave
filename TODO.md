@@ -1,4 +1,20 @@
 ## TODO.md
+### ✅ v0.2.3 introduce new feature : communicate with external eda tools. ✅ **已完成**   
+11. communicate with xschem ✅ **已完成**
+- open pqwave as external wave viewer from xschem 
+  - **实现**: 在 xschemrc 中添加 pqwave 到 `sim(spicewave)` 数组，支持 GAW 式 TCP 套接字通信，无需修改 xschem 源代码
+- receive node_name signal from xschem schematic then plot the trace.
+  - **实现**: `pqwave/communication/xschem_server.py` TCP 服务器（默认端口 2022），解析 `table_set filename.raw` 和 `copyvar v(node) sel #color` 命令
+  - **实现**: `pqwave/communication/command_handler.py` 命令处理器，将 TCP 命令转换为 Qt 信号
+  - **实现**: `pqwave/communication/window_registry.py` 窗口注册表，管理多窗口和客户端映射
+  - **实现**: 单实例服务器模式，后续 pqwave 实例将命令转发到已有服务器
+  - **配置**: 文档 `docs/xschem_integration.md` 提供详细配置说明
+- back-anotate data points from pqwave to xschem schematic
+  - **实现**: JSON 扩展协议支持 `get_data_point` 命令查询特定 X 坐标的数据点
+  - **实现**: 复数数据处理（幅度/相位、实部/虚部格式）
+  - **示例**: xschemrc 中提供 Tcl 过程示例，用于查询和显示波形数据
+  - **测试**: `pqwave/tests/test_xschem_server.py` 7 项测试全部通过
+
 ### ✅ v0.2.2 further performance improvement ✅ **已完成**
 10. reduce high cpu use for large files
 - simple benchmark from top information (read raw, add trace, move, span, zoom, etc)

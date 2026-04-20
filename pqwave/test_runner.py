@@ -22,9 +22,9 @@ def discover_test_files() -> List[str]:
     Returns:
         List of absolute paths to test files
     """
-    # Get the project root directory (parent of pqwave directory)
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    test_dir = os.path.join(project_root, 'tests')
+    # Get the directory containing test_runner.py (pqwave directory)
+    pqwave_dir = os.path.dirname(os.path.abspath(__file__))
+    test_dir = os.path.join(pqwave_dir, 'tests')
 
     if not os.path.exists(test_dir):
         print(f"ERROR: Test directory not found: {test_dir}")

@@ -11,6 +11,7 @@ them with the ApplicationState singleton.
 
 import sys
 import traceback
+from typing import Optional, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
@@ -34,6 +35,8 @@ from pqwave.ui.axis_manager import AxisManager
 from pqwave.ui.mark_panel import MarkPanel
 from pqwave.utils.colors import ColorManager
 from pqwave.logging_config import get_logger
+from pqwave.communication.window_registry import get_registry
+import uuid
 
 
 logger = get_logger(__name__)
@@ -55,6 +58,15 @@ class MainWindow(QMainWindow):
         # Initialize application state singleton
         self.state = ApplicationState()
 
+        # Xschem integration: window ID and registry
+        self.window_id = str(uuid.uuid4())
+        self.raw_file_path = initial_file  # current raw file path (may be updated when loading new file)
+        self.state.window_registry.register_window(
+            window_id=self.window_id,
+            window_instance=self,
+            raw_file_path=self.raw_file_path
+        )
+
         # Store initial file for delayed loading
         self.initial_file = initial_file
 
@@ -75,6 +87,9 @@ class MainWindow(QMainWindow):
         # Cross-hair cursor state
         self.cross_hair_visible = False
         self.mark_panel = None
+
+        # Xschem pending commands (when raw_file not yet loaded)
+        self.pending_xschem_commands = []  # list of (command_type, args, client_addr, connection_state)
 
         # Setup UI
         self._setup_ui()
@@ -186,6 +201,603 @@ class MainWindow(QMainWindow):
         self.axis_manager.axis_log_mode_changed.connect(self._on_axis_log_mode_changed_from_manager)
         self.axis_manager.axis_range_changed.connect(self._on_axis_range_changed)
         self.axis_manager.axis_label_changed.connect(self._on_axis_label_changed)
+
+        # Connect xschem integration signals
+        self._connect_xschem_signals()
+
+    def _connect_xschem_signals(self):
+        """Connect xschem command handler signals."""
+        if self.state.command_handler is None:
+            logger.debug("No xschem command handler available, skipping xschem signal connections")
+            return
+
+        # Connect command handler signals to local slots
+        self.state.command_handler.table_set_received.connect(self._handle_xschem_table_set)
+        self.state.command_handler.copyvar_received.connect(self._handle_xschem_copyvar)
+        self.state.command_handler.open_file_received.connect(self._handle_xschem_open_file)
+        self.state.command_handler.add_trace_received.connect(self._handle_xschem_add_trace)
+        self.state.command_handler.remove_trace_received.connect(self._handle_xschem_remove_trace)
+        self.state.command_handler.get_data_point_received.connect(self._handle_xschem_get_data_point)
+        self.state.command_handler.close_window_received.connect(self._handle_xschem_close_window)
+        self.state.command_handler.list_windows_received.connect(self._handle_xschem_list_windows)
+        self.state.command_handler.ping_received.connect(self._handle_xschem_ping)
+        self.state.command_handler.invalid_command_received.connect(self._handle_xschem_invalid_command)
+
+        logger.debug(f"Connected xschem signals for window {self.window_id}")
+
+    # Xschem pending commands handling
+    def _queue_xschem_command(self, command_type: str, args: dict, client_addr: str, connection_state: dict) -> None:
+        """Queue xschem command for processing when raw_file is available."""
+        logger.debug(f"Window {self.window_id} queuing {command_type} command from {client_addr}")
+        self.pending_xschem_commands.append((command_type, args, client_addr, connection_state))
+
+    def _process_pending_xschem_commands(self) -> None:
+        """Process any queued xschem commands."""
+        if not self.pending_xschem_commands:
+            return
+        logger.debug(f"Window {self.window_id} processing {len(self.pending_xschem_commands)} pending commands")
+        # Process in order
+        for command_type, args, client_addr, connection_state in self.pending_xschem_commands:
+            if command_type == 'copyvar':
+                self._handle_xschem_copyvar(
+                    args['var_name'], args['color'], client_addr, connection_state
+                )
+            elif command_type == 'add_trace':
+                self._handle_xschem_add_trace(
+                    args['var_name'], args['axis'], args['color'], client_addr, connection_state
+                )
+            elif command_type == 'remove_trace':
+                self._handle_xschem_remove_trace(
+                    args['var_name'], client_addr, connection_state
+                )
+            elif command_type == 'get_data_point':
+                self._handle_xschem_get_data_point(
+                    args['x_value'], client_addr, connection_state
+                )
+            # Note: table_set and open_file are not queued as they trigger file loading
+        # Clear processed commands
+        self.pending_xschem_commands.clear()
+
+    # Xschem command slot methods
+    def _handle_xschem_table_set(self, raw_file: str, client_addr: str, connection_state: dict):
+        """Handle xschem table_set command."""
+        logger.debug(f"Window {self.window_id} received table_set: {raw_file} from {client_addr}")
+        # Check if this command is for this window
+        is_for_this = self._is_command_for_this_window(client_addr, connection_state, raw_file=raw_file)
+        logger.debug(f"Window {self.window_id} table_set is_for_this_window: {is_for_this}")
+        if not is_for_this:
+            logger.debug(f"Ignoring table_set, not for this window")
+            return
+        # Update client-window mapping
+        self.state.window_registry.set_window_for_client(client_addr, self.window_id)
+        # Load the raw file in this window
+        self._load_raw_file(raw_file)
+
+    def _handle_xschem_copyvar(self, var_name: str, color: str, client_addr: str, connection_state: dict):
+        """Handle xschem copyvar command."""
+        logger.debug(f"Window {self.window_id} received copyvar: {var_name} color {color} from {client_addr}")
+        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
+            logger.debug(f"Ignoring copyvar, not for this window")
+            return
+
+        # Parse color
+        rgb = self._parse_color(color)
+        if rgb is None:
+            logger.warning(f"Invalid color format: {color}, using default red")
+            rgb = (255, 0, 0)  # Red
+
+        # Determine axis from variable name
+        axis = self._detect_axis_from_var_name(var_name)
+
+        # If raw file not yet loaded, queue command for later processing
+        if self.raw_file is None:
+            logger.debug(f"Raw file not loaded, queuing copyvar command for {var_name}")
+            self._queue_xschem_command('copyvar', {
+                'var_name': var_name,
+                'color': color,
+                'rgb': rgb,
+                'axis': axis
+            }, client_addr, connection_state)
+            return
+
+        # Get current X variable
+        x_var = self._get_current_x_var()
+        if x_var is None:
+            logger.error(f"Cannot add trace: no X variable set (raw file loaded but no X variable?)")
+            return
+
+        # Add trace with error collection
+        error_messages = []
+        trace = self.trace_manager.add_trace_from_variable(
+            variable_name=var_name,
+            x_var_name=x_var,
+            y_axis=axis,
+            custom_color=rgb,
+            error_out=error_messages
+        )
+        if trace is None:
+            error_msg = f"Failed to add trace for variable: {var_name}"
+            if error_messages:
+                error_msg = f"Failed to add trace: {error_messages[0]}"
+            logger.error(error_msg)
+        else:
+            logger.info(f"Added trace for {var_name} on axis {axis} color {color}")
+
+    def _handle_xschem_open_file(self, raw_file: str, client_addr: str, connection_state: dict):
+        """Handle xschem open_file JSON command."""
+        logger.debug(f"Window {self.window_id} received open_file: {raw_file} from {client_addr}")
+        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=raw_file):
+            logger.debug(f"Ignoring open_file, not for this window")
+            return
+        self.state.window_registry.set_window_for_client(client_addr, self.window_id)
+        try:
+            self._load_raw_file(raw_file)
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="success",
+                data={"loaded": True, "raw_file": raw_file, "window_id": self.window_id}
+            )
+        except Exception as e:
+            logger.error(f"Failed to load raw file {raw_file}: {e}")
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="error",
+                error=f"Failed to load raw file: {e}"
+            )
+
+    def _handle_xschem_add_trace(self, var_name: str, axis: str, color: str, client_addr: str, connection_state: dict):
+        """Handle xschem add_trace JSON command."""
+        logger.debug(f"Window {self.window_id} received add_trace: {var_name} axis {axis} color {color} from {client_addr}")
+        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
+            logger.debug(f"Ignoring add_trace, not for this window")
+            return
+
+        # If raw file not yet loaded, queue command for later processing
+        if self.raw_file is None:
+            logger.debug(f"Raw file not loaded, queuing add_trace command for {var_name}")
+            self._queue_xschem_command('add_trace', {
+                'var_name': var_name,
+                'axis': axis,
+                'color': color
+            }, client_addr, connection_state)
+            return
+
+        # Parse color
+        rgb = self._parse_color(color)
+        if rgb is None:
+            logger.warning(f"Invalid color format: {color}, using default red")
+            rgb = (255, 0, 0)  # Red
+
+        # Determine axis assignment
+        if axis == 'auto':
+            y_axis = self._detect_axis_from_var_name(var_name)
+        elif axis == 'Y1':
+            y_axis = AxisAssignment.Y1
+        elif axis == 'Y2':
+            y_axis = AxisAssignment.Y2
+        else:
+            logger.warning(f"Invalid axis '{axis}', defaulting to auto detection")
+            y_axis = self._detect_axis_from_var_name(var_name)
+
+        # Get current X variable
+        x_var = self._get_current_x_var()
+        if x_var is None:
+            logger.error(f"Cannot add trace: no X variable set (raw file not loaded?)")
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="error",
+                error="No X variable set (raw file not loaded)"
+            )
+            return
+
+        # Add trace with error collection
+        error_messages = []
+        trace = self.trace_manager.add_trace_from_variable(
+            variable_name=var_name,
+            x_var_name=x_var,
+            y_axis=y_axis,
+            custom_color=rgb,
+            error_out=error_messages
+        )
+        if trace is None:
+            error_msg = f"Failed to add trace for variable: {var_name}"
+            if error_messages:
+                # Use the first error message for more detail
+                error_msg = error_messages[0]
+            logger.error(error_msg)
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="error",
+                error=error_msg
+            )
+        else:
+            logger.info(f"Added trace for {var_name} on axis {y_axis} color {color}")
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="success",
+                data={"added": True, "var_name": var_name, "axis": str(y_axis), "color": color}
+            )
+
+    def _handle_xschem_remove_trace(self, var_name: str, client_addr: str, connection_state: dict):
+        """Handle xschem remove_trace JSON command."""
+        logger.debug(f"Window {self.window_id} received remove_trace: {var_name} from {client_addr}")
+        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
+            logger.debug(f"Ignoring remove_trace, not for this window")
+            return
+
+        # If raw file not yet loaded, queue command for later processing
+        if self.raw_file is None:
+            logger.debug(f"Raw file not loaded, queuing remove_trace command for {var_name}")
+            self._queue_xschem_command('remove_trace', {
+                'var_name': var_name
+            }, client_addr, connection_state)
+            return
+
+        if self.trace_manager is None:
+            logger.error("Cannot remove trace: trace_manager not initialized")
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="error", error="Trace manager not available"
+            )
+            return
+
+        success = self.trace_manager.remove_trace_by_variable_name(var_name)
+        if success:
+            logger.info(f"Removed trace for variable '{var_name}'")
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="success", data={"removed": var_name}
+            )
+        else:
+            logger.warning(f"Trace not found for variable '{var_name}'")
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="error", error=f"Trace not found for variable '{var_name}'"
+            )
+
+    def _handle_xschem_get_data_point(self, x_value: float, client_addr: str, connection_state: dict):
+        """Handle xschem get_data_point JSON command."""
+        logger.debug(f"Window {self.window_id} received get_data_point: x={x_value} from {client_addr}")
+        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
+            logger.debug(f"Ignoring get_data_point, not for this window")
+            return
+
+        # If raw file not yet loaded, queue command for later processing
+        if self.raw_file is None:
+            logger.debug(f"Raw file not loaded, queuing get_data_point command for x={x_value}")
+            self._queue_xschem_command('get_data_point', {
+                'x_value': x_value
+            }, client_addr, connection_state)
+            return
+
+        if self.state is None or self.trace_manager is None:
+            logger.error("Cannot query data point: state or trace_manager not initialized")
+            self._send_xschem_response(
+                client_addr, connection_state,
+                status="error", error="Application not ready"
+            )
+            return
+
+        results = self._query_data_point(x_value)
+        # Convert numpy types to Python native types for JSON serialization
+        # The _query_data_point already converts to float via float()
+        # However, y_value may be complex, which is not JSON serializable.
+        # We'll replace complex y_value with dict representation.
+        serializable_results = []
+        for res in results:
+            res_copy = res.copy()
+            y_val = res_copy.get('y_value')
+            if isinstance(y_val, complex) or np.iscomplexobj(y_val):
+                # Replace with magnitude/phase representation
+                res_copy['y_value'] = {
+                    'magnitude': float(np.abs(y_val)),
+                    'phase_deg': float(np.angle(y_val, deg=True)),
+                    'real': float(y_val.real),
+                    'imag': float(y_val.imag)
+                }
+            elif isinstance(y_val, (np.floating, np.integer)):
+                res_copy['y_value'] = float(y_val)
+            # y_nearest may also be complex
+            y_nearest = res_copy.get('y_nearest')
+            if isinstance(y_nearest, complex) or np.iscomplexobj(y_nearest):
+                res_copy['y_nearest'] = {
+                    'magnitude': float(np.abs(y_nearest)),
+                    'phase_deg': float(np.angle(y_nearest, deg=True)),
+                    'real': float(y_nearest.real),
+                    'imag': float(y_nearest.imag)
+                }
+            elif isinstance(y_nearest, (np.floating, np.integer)):
+                res_copy['y_nearest'] = float(y_nearest)
+            # Convert numpy bool to Python bool
+            out_of_range = res_copy.get('out_of_range')
+            if isinstance(out_of_range, np.bool_):
+                res_copy['out_of_range'] = bool(out_of_range)
+            serializable_results.append(res_copy)
+
+        self._send_xschem_response(
+            client_addr, connection_state,
+            status="success",
+            data={"x": x_value, "traces": serializable_results}
+        )
+
+    def _handle_xschem_close_window(self, window_id: str, client_addr: str, connection_state: dict):
+        """Handle xschem close_window JSON command."""
+        logger.debug(f"Window {self.window_id} received close_window: window_id={window_id} from {client_addr}")
+        # If window_id matches this window, close it
+        if window_id == self.window_id:
+            self.close()
+        # Otherwise ignore (could be for another window)
+
+    def _handle_xschem_list_windows(self, client_addr: str, connection_state: dict):
+        """Handle xschem list_windows JSON command."""
+        logger.debug(f"Window {self.window_id} received list_windows from {client_addr}")
+        registry = self.state.window_registry
+        window_ids = registry.get_all_window_ids()
+        windows = []
+        for win_id in window_ids:
+            win = registry.get_window_by_id(win_id)
+            if win is not None:
+                windows.append({
+                    "window_id": win_id,
+                    "raw_file": win.raw_file_path,
+                    "title": win.windowTitle()
+                })
+            else:
+                # Window reference lost (garbage collected)
+                windows.append({
+                    "window_id": win_id,
+                    "raw_file": None,
+                    "title": "(closed)"
+                })
+        self._send_xschem_response(
+            client_addr, connection_state,
+            status="success",
+            data={"windows": windows}
+        )
+
+    def _handle_xschem_ping(self, client_addr: str, connection_state: dict):
+        """Handle xschem ping JSON command."""
+        logger.debug(f"Window {self.window_id} received ping from {client_addr}")
+        from pqwave import __version__
+        self._send_xschem_response(
+            client_addr, connection_state,
+            status="success",
+            data={"pong": True, "version": f"pqwave {__version__}"}
+        )
+
+    def _handle_xschem_invalid_command(self, command_dict: dict, error_message: str):
+        """Handle xschem invalid_command signal."""
+        logger.warning(f"Invalid command received: {error_message} - {command_dict}")
+        # Extract client info from command dict
+        client_addr = command_dict.get('_client_addr', 'unknown')
+        connection_state = command_dict.get('_connection_state', {})
+        command_id = command_dict.get('id')
+
+        # Only send response for JSON commands (those with an ID)
+        if command_id is not None:
+            response = {
+                "status": "error",
+                "error": error_message,
+                "id": command_id
+            }
+            if self.state.command_handler is not None:
+                self.state.command_handler.send_response(client_addr, response)
+            else:
+                logger.error("Cannot send error response: command_handler not available")
+
+    def _is_command_for_this_window(self, client_addr: str, connection_state: dict, raw_file: Optional[str] = None) -> bool:
+        """
+        Determine if an xschem command is intended for this window.
+
+        Checks:
+        1. If client is already associated with this window (via registry)
+        2. If raw_file matches this window's raw_file_path
+        3. If this is the only window open (default)
+
+        Returns True if command should be processed by this window.
+        """
+        logger.debug(f"_is_command_for_this_window: client={client_addr}, raw_file={raw_file}, window_id={self.window_id}")
+        registry = self.state.window_registry
+        # Check client-window mapping
+        assigned_window = registry.get_window_for_client(client_addr)
+        logger.debug(f"  assigned_window: {assigned_window.window_id if assigned_window else None}")
+        if assigned_window is not None:
+            # Client already assigned to a window
+            return assigned_window.window_id == self.window_id
+
+        # Check raw file mapping
+        if raw_file is not None:
+            file_window = registry.get_window_by_raw_file(raw_file)
+            if file_window is not None:
+                return file_window.window_id == self.window_id
+            # If raw_file provided and not mapped, and this window has no raw file loaded,
+            # accept the command (this window can load the file)
+            if self.raw_file is None:
+                logger.debug(f"  raw_file not mapped, this window has no raw file, accepting")
+                return True
+
+        # If no mapping exists, check if this is the only window
+        all_windows = registry.get_all_window_ids()
+        if len(all_windows) == 1 and all_windows[0] == self.window_id:
+            return True
+
+        # Default: not for this window
+        return False
+
+    # Xschem helper methods
+    def _send_xschem_response(self, client_addr: str, connection_state: dict,
+                              status: str = "success", data: Optional[dict] = None,
+                              error: Optional[str] = None) -> bool:
+        """
+        Send JSON response to xschem client.
+
+        Args:
+            client_addr: Client address string "ip:port"
+            connection_state: Connection state dict (contains command_id)
+            status: "success" or "error"
+            data: Optional response data dictionary
+            error: Optional error message string
+
+        Returns:
+            True if response sent successfully, False otherwise.
+        """
+        if self.state.command_handler is None:
+            logger.warning(f"Cannot send response: command_handler not available")
+            return False
+
+        response = {"status": status}
+        if data is not None:
+            response["data"] = data
+        if error is not None:
+            response["error"] = error
+
+        # Include command ID if present in connection_state
+        command_id = connection_state.get('command_id')
+        if command_id is not None:
+            response["id"] = command_id
+
+        logger.debug(f"Sending xschem response to {client_addr}: {response}")
+        return self.state.command_handler.send_response(client_addr, response)
+
+    def _query_data_point(self, x_value: float) -> list:
+        """
+        Query data point at x coordinate across all traces in this window.
+
+        Args:
+            x_value: X coordinate (linear space)
+
+        Returns:
+            List of dictionaries with keys:
+            - name: trace name (expression)
+            - var_name: variable name (unquoted)
+            - y_axis: 'Y1' or 'Y2'
+            - color: RGB tuple
+            - y_value: interpolated Y value (complex if complex data)
+            - magnitude: magnitude (if complex)
+            - phase_deg: phase in degrees (if complex)
+            - real: real component (if complex)
+            - imag: imaginary component (if complex)
+            - x_nearest: nearest X data point (for reference)
+            - y_nearest: nearest Y data point (for reference)
+            - interpolation: 'linear' or 'nearest' (if within range)
+            - out_of_range: True if x_value outside trace X range
+        """
+        results = []
+        if self.state is None or not self.state.traces:
+            return results
+
+        for trace in self.state.traces:
+            x_data = trace.x_data
+            y_data = trace.y_data
+            if len(x_data) == 0:
+                continue
+
+            x_min, x_max = np.min(x_data), np.max(x_data)
+            out_of_range = bool(x_value < x_min or x_value > x_max)  # convert numpy bool to Python bool
+
+            # Nearest neighbor indices
+            idx = np.abs(x_data - x_value).argmin()
+            x_nearest = float(x_data[idx])
+            y_nearest = y_data[idx]  # may be complex
+            # Convert numpy scalar to Python native type if not complex
+            if np.iscomplexobj(y_nearest):
+                pass  # keep as numpy complex (handled later)
+            elif isinstance(y_nearest, (np.floating, np.integer)):
+                y_nearest = float(y_nearest)
+
+            # Linear interpolation if within range and more than one point
+            if not out_of_range and len(x_data) > 1:
+                # numpy.interp does not support complex; handle separately
+                if np.iscomplexobj(y_data):
+                    y_real = np.interp(x_value, x_data, y_data.real)
+                    y_imag = np.interp(x_value, x_data, y_data.imag)
+                    y_interp = y_real + 1j * y_imag
+                else:
+                    y_interp = np.interp(x_value, x_data, y_data)
+                interpolation = 'linear'
+                y_value = y_interp
+            else:
+                interpolation = 'nearest'
+                y_value = y_nearest
+
+            # Convert numpy scalar to Python native type if not complex
+            if np.iscomplexobj(y_value):
+                pass  # keep as numpy complex (handled later)
+            elif isinstance(y_value, (np.floating, np.integer)):
+                y_value = float(y_value)
+
+            # Build result dict
+            result = {
+                'name': trace.name,
+                'var_name': trace.expression,
+                'y_axis': trace.y_axis.value,
+                'color': trace.color,
+                'y_value': y_value,
+                'x_nearest': x_nearest,
+                'y_nearest': y_nearest,
+                'interpolation': interpolation,
+                'out_of_range': out_of_range,
+            }
+
+            # Add complex data representation if applicable
+            if np.iscomplexobj(y_value):
+                result['magnitude'] = float(np.abs(y_value))
+                result['phase_deg'] = float(np.angle(y_value, deg=True))
+                result['real'] = float(y_value.real)
+                result['imag'] = float(y_value.imag)
+
+            results.append(result)
+
+        return results
+
+    def _parse_color(self, color_hex: str) -> Optional[Tuple[int, int, int]]:
+        """
+        Parse hexadecimal color string to RGB tuple (0-255).
+
+        Supports formats: #rgb, #rgba, #rrggbb, #rrggbbaa
+        Returns None if invalid.
+        """
+        if not color_hex.startswith('#'):
+            return None
+        hex_str = color_hex[1:]
+        length = len(hex_str)
+        if length not in (3, 4, 6, 8):
+            return None
+        try:
+            # Expand shorthand
+            if length == 3 or length == 4:
+                hex_str = ''.join([c*2 for c in hex_str])
+                # Now length 6 or 8
+            # Convert to integer
+            rgb_int = int(hex_str, 16)
+            # Extract components (ignore alpha)
+            if len(hex_str) >= 6:
+                r = (rgb_int >> 16) & 0xFF
+                g = (rgb_int >> 8) & 0xFF
+                b = rgb_int & 0xFF
+                return (r, g, b)
+            else:
+                return None
+        except ValueError:
+            return None
+
+    def _detect_axis_from_var_name(self, var_name: str) -> AxisAssignment:
+        """
+        Detect appropriate Y axis for a SPICE variable name.
+
+        Rules:
+        - Current variables (starting with 'i(') -> Y2
+        - Voltage variables (starting with 'v(') -> Y1
+        - Default: Y1
+        """
+        import re
+        # Match i(...) or v(...)
+        match = re.match(r'^([iv])\(', var_name)
+        if match:
+            prefix = match.group(1)
+            if prefix == 'i':
+                return AxisAssignment.Y2
+        return AxisAssignment.Y1
 
     def _connect_mark_panel(self):
         """Connect mark panel signals (called when panel is created)."""
@@ -716,6 +1328,8 @@ class MainWindow(QMainWindow):
 
             # 4. Now safe to replace self.raw_file — old one has no remaining refs
             self.raw_file = new_raw_file
+            # Update window registry mapping
+            self._update_window_registry_raw_file(filename)
 
             # 5. Populate UI with new data
             for i in range(len(self.raw_file.datasets)):
@@ -755,6 +1369,8 @@ class MainWindow(QMainWindow):
             self._update_dataset_label()
 
             logger.info(f"Successfully loaded: {filename}")
+            # Process any pending xschem commands that arrived before file was loaded
+            self._process_pending_xschem_commands()
 
         except FileNotFoundError as e:
             self._show_error("File not found", f"File not found: {filename}\n\n{e}")
@@ -765,6 +1381,16 @@ class MainWindow(QMainWindow):
                 self._show_error("Invalid RAW file", f"Invalid RAW file format: {filename}\n\n{error_msg}")
             else:
                 self._show_error("Error opening file", f"Error opening file: {filename}\n\n{error_msg}")
+
+    def _update_window_registry_raw_file(self, raw_file_path):
+        """Update window registry mapping for this window's raw file."""
+        self.raw_file_path = raw_file_path
+        # Re-register with new raw file path
+        self.state.window_registry.register_window(
+            window_id=self.window_id,
+            window_instance=self,
+            raw_file_path=self.raw_file_path
+        )
 
     def _load_initial_file(self):
         """Load the initial file provided via command line."""
@@ -992,6 +1618,12 @@ class MainWindow(QMainWindow):
     def get_axis_manager(self):
         """Get axis manager reference (for testing)."""
         return self.axis_manager
+
+    def closeEvent(self, event):
+        """Handle window close event."""
+        # Unregister window from xschem integration registry
+        self.state.window_registry.unregister_window(self.window_id)
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":

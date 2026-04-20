@@ -2,7 +2,7 @@
 pqwave - A Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 """
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 __author__ = "niuniuaba"
 
 # Export main classes and functions (conditional imports)

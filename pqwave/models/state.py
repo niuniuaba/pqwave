@@ -15,6 +15,8 @@ import numpy as np
 
 from .dataset import Dataset
 from .trace import Trace, AxisAssignment
+from pqwave.communication.window_registry import get_registry, WindowRegistry
+from pqwave.communication.command_handler import CommandHandler
 
 
 class ViewboxTheme(Enum):
@@ -113,6 +115,8 @@ class ApplicationState:
         self.toolbar_visible: bool = True
         self.plot_title: str = ''
         self.viewbox_theme: ViewboxTheme = ViewboxTheme.DARK
+        self.window_registry: WindowRegistry = get_registry()
+        self.command_handler: Optional[CommandHandler] = None
 
     # Dataset management
 

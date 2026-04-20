@@ -1,6 +1,6 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 
-![Version](https://img.shields.io/badge/version-0.2.2-blue)
+![Version](https://img.shields.io/badge/version-0.2.3-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -54,6 +54,9 @@ python pqwave.py --help
 | `--verbose` | Enable info-level logging (user feedback) |
 | `--quiet` | Suppress all output except errors |
 | `--log-file FILE` | Write logs to specified file |
+| `--xschem-port PORT` | TCP port for xschem integration server (default: 2022) |
+| `--no-xschem-server` | Disable xschem integration server |
+| `--xschem-send COMMAND` | Send command to existing xschem server and exit |
 
 **Logging level priority**: `--debug` > `--verbose` > default (WARNING) > `--quiet` (ERROR only)
 
@@ -74,6 +77,19 @@ python pqwave.py --quiet simulation.raw
 
 # Write logs to a file while running GUI
 python pqwave.py --debug --log-file pqwave.log simulation.raw
+```
+
+### Xschem Integration Examples
+
+```bash
+# Start pqwave with xschem server on default port
+pqwave --xschem-port 2022
+
+# Start pqwave with xschem server disabled
+pqwave --no-xschem-server simulation.raw
+
+# Send command to existing pqwave server
+pqwave --xschem-send "table_set /path/to/sim.raw"
 ```
 
 ### Running Tests
@@ -98,6 +114,23 @@ Test results are displayed with pass/fail status for each test file, followed by
 4. **Set X-Axis**: Click X button to set X-axis variable
 5. **Add Traces**: Click Y1 or Y2 to add traces
 6. **Adjust View**: Use logarithmic scale or manual ranges as needed
+
+## 📡 Xschem Integration
+
+pqwave integrates with [xschem](https://xschem.sourceforge.io/) schematic editor as an external waveform viewer. With proper configuration, you can click nets in xschem and send them directly to pqwave for visualization.
+
+**Key features:**
+- **Seamless integration**: Appears in xschem's viewer selection dialog (Alt+G)
+- **Single-instance server**: Only one pqwave server runs, preventing multiple windows
+- **Advanced protocol**: Supports both GAW-style commands and JSON for back-annotation
+- **Color-coded traces**: Nets are plotted with distinct colors matching xschem highlighting
+
+**Quick setup:**
+1. Add pqwave to `sim(spicewave)` array in your `xschemrc` file
+2. Restart xschem
+3. Select nets and press Alt+G to choose "pqwave viewer"
+
+For complete configuration instructions and advanced features like back-annotation, see [Xschem Integration Documentation](docs/xschem_integration.md).
 
 ## 🔧 Architecture  
 
@@ -127,10 +160,11 @@ pqwave/
 │   ├── __init__.py
 │   ├── colors.py            # Color management for traces
 │   └── log_axis.py          # LogAxisItem for logarithmic axis display
-├── communication/           # Communication layer
+├── communication/           # Xschem integration layer
 │   ├── __init__.py
-│   ├── xschem_client.py     # Xschem protocol implementation
-│   └── socket_server.py     # Optional local server
+│   ├── xschem_server.py     # TCP server for xschem commands
+│   ├── command_handler.py   # Command parsing and signal emission
+│   └── window_registry.py   # Window management for multi-instance support
 └── tests/                   # Test suite (16+ test files)
     ├── __init__.py
     ├── test_basic.py

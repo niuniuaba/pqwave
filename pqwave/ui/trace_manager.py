@@ -124,7 +124,8 @@ class TraceManager:
                   expression: str,
                   x_var_name: str,
                   y_axis: AxisAssignment = AxisAssignment.Y1,
-                  custom_color: Optional[Tuple[int, int, int]] = None) -> Optional[Trace]:
+                  custom_color: Optional[Tuple[int, int, int]] = None,
+                  error_out: Optional[list] = None) -> Optional[Trace]:
         """Add a trace for the given expression.
 
         Args:
@@ -132,17 +133,29 @@ class TraceManager:
             x_var_name: Name of X-axis variable
             y_axis: Which Y axis to plot on (Y1 or Y2)
             custom_color: Optional custom color as RGB tuple (0-255)
+            error_out: Optional list to receive error messages if trace fails
 
         Returns:
             Trace object if successful, None otherwise.
         """
+        self.logger.debug(f"add_trace called: expression={expression}, x_var_name={x_var_name}, y_axis={y_axis}")
+        # Initialize error_out list if provided
+        if error_out is not None:
+            error_out.clear()
+
         if not self.raw_file:
-            self.logger.warning("No raw file opened")
+            error_msg = "No raw file opened"
+            self.logger.warning(error_msg)
+            if error_out is not None:
+                error_out.append(error_msg)
             return None
 
         expr = expression.strip()
         if not expr:
-            self.logger.warning("Empty expression")
+            error_msg = "Empty expression"
+            self.logger.warning(error_msg)
+            if error_out is not None:
+                error_out.append(error_msg)
             return None
 
         try:
@@ -158,7 +171,10 @@ class TraceManager:
             self.logger.debug(f"Split expressions: {variables}")
 
             if not x_var_name:
-                self.logger.warning("No X-axis variable selected")
+                error_msg = "No X-axis variable selected"
+                self.logger.warning(error_msg)
+                if error_out is not None:
+                    error_out.append(error_msg)
                 return None
             x_var = x_var_name
             self.logger.debug(f"X-axis variable: {x_var}")
@@ -224,30 +240,55 @@ class TraceManager:
 
                 # Clear the trace expression input box (should be done by caller)
                 # Return the first trace if any were added
-                return traces_added[0] if traces_added else None
+                if traces_added:
+                    return traces_added[0]
+                else:
+                    error_msg = "No valid variables found in expression"
+                    self.logger.warning(error_msg)
+                    if error_out is not None:
+                        error_out.append(error_msg)
+                    return None
 
             else:
-                self.logger.error(f"No data for X variable: {x_var}")
+                error_msg = f"No data for X variable: {x_var}"
+                self.logger.error(error_msg)
+                if error_out is not None:
+                    error_out.append(error_msg)
                 return None
 
         except Exception as e:
-            self.logger.error(f"Error adding trace: {e}")
+            error_msg = f"Error adding trace: {e}"
+            self.logger.error(error_msg)
             import traceback
             self.logger.exception("Error adding trace")
+            if error_out is not None:
+                error_out.append(error_msg)
             return None
 
     def add_trace_from_variable(self,
                                 variable_name: str,
                                 x_var_name: str,
                                 y_axis: AxisAssignment = AxisAssignment.Y1,
-                                custom_color: Optional[Tuple[int, int, int]] = None) -> Optional[Trace]:
+                                custom_color: Optional[Tuple[int, int, int]] = None,
+                                error_out: Optional[list] = None) -> Optional[Trace]:
         """Add a trace for a single variable name.
 
         Convenience method for adding traces from combo box selections.
+
+        Args:
+            variable_name: Name of variable to trace
+            x_var_name: Name of X-axis variable
+            y_axis: Which Y axis to plot on (Y1 or Y2)
+            custom_color: Optional custom color as RGB tuple (0-255)
+            error_out: Optional list to receive error messages if trace fails
+
+        Returns:
+            Trace object if successful, None otherwise.
         """
         # Quote the variable name to treat it as a literal
+        self.logger.debug(f"add_trace_from_variable: variable_name={variable_name}, x_var_name={x_var_name}")
         quoted_var = f'"{variable_name}"'
-        return self.add_trace(quoted_var, x_var_name, y_axis, custom_color)
+        return self.add_trace(quoted_var, x_var_name, y_axis, custom_color, error_out)
 
     def clear_traces(self) -> None:
         """Clear all traces from plot and application state."""
@@ -303,6 +344,89 @@ class TraceManager:
         self.x_log = False
         self.y1_log = False
         self.y2_log = False
+
+    def remove_trace_by_variable_name(self, variable_name: str) -> bool:
+        """Remove a trace by variable name (unquoted or quoted).
+
+        Args:
+            variable_name: Variable name (e.g., 'v(out)') or quoted version.
+
+        Returns:
+            True if trace was removed, False if not found.
+        """
+        # Try to match variable name as-is (could be quoted or unquoted)
+        target_var = variable_name.strip()
+        # Also generate quoted version for matching
+        quoted_var = f'"{target_var}"' if not (target_var.startswith('"') and target_var.endswith('"')) else target_var
+        unquoted_var = target_var[1:-1] if (target_var.startswith('"') and target_var.endswith('"')) else target_var
+
+        self.logger.debug(f"remove_trace_by_variable_name: looking for '{target_var}' (quoted='{quoted_var}', unquoted='{unquoted_var}')")
+
+        # Search for matching trace in self.traces (var stored as expression string)
+        found_index = -1
+        for i, (var, plot_item, y_axis) in enumerate(self.traces):
+            # var is expression string (could be quoted)
+            if var == target_var or var == quoted_var or var == unquoted_var:
+                found_index = i
+                break
+            # Also check if var matches after cleaning quotes (split_expressions logic)
+            # The split_expressions method removes surrounding quotes
+            # We'll do a simple check: remove quotes from var and compare
+            cleaned_var = var
+            if len(cleaned_var) >= 2 and cleaned_var[0] in ['"', "'"] and cleaned_var[-1] == cleaned_var[0]:
+                cleaned_var = cleaned_var[1:-1]
+            if cleaned_var == target_var or cleaned_var == unquoted_var:
+                found_index = i
+                break
+
+        if found_index == -1:
+            self.logger.debug(f"Trace not found for variable '{variable_name}'")
+            return False
+
+        # Remove from visual representation
+        var, plot_item, y_axis = self.traces[found_index]
+        if y_axis == "Y2" and self.y2_viewbox:
+            self.y2_viewbox.removeItem(plot_item)
+        else:
+            self.plot_widget.plotItem.vb.removeItem(plot_item)
+
+        # Remove from legend
+        if self.legend:
+            try:
+                self.legend.removeItem(plot_item)
+            except Exception as e:
+                self.logger.error(f"Error removing trace from legend: {e}")
+
+        # Remove from internal list
+        self.traces.pop(found_index)
+
+        # Remove from application state
+        # Find corresponding trace in state.traces
+        state_trace_idx = -1
+        for i, trace in enumerate(self.state.traces):
+            # Compare trace name (expression) with var
+            if trace.name == var:
+                state_trace_idx = i
+                break
+            # Also compare with cleaned version
+            cleaned_name = trace.name
+            if len(cleaned_name) >= 2 and cleaned_name[0] in ['"', "'"] and cleaned_name[-1] == cleaned_name[0]:
+                cleaned_name = cleaned_name[1:-1]
+            if cleaned_name == target_var or cleaned_name == unquoted_var:
+                state_trace_idx = i
+                break
+
+        if state_trace_idx != -1:
+            self.state.remove_trace(state_trace_idx)
+            self.logger.info(f"Removed trace '{var}' from application state")
+        else:
+            self.logger.warning(f"Could not find matching trace in application state for '{var}'")
+
+        # Return color to color manager? Not implemented currently.
+        # Could implement color_manager.release_color(color) if needed.
+
+        self.logger.info(f"Removed trace for variable '{variable_name}'")
+        return True
 
     def update_traces_for_log_mode(self) -> None:
         """Update all existing traces for current log mode settings.
@@ -458,7 +582,7 @@ class TraceManager:
     def _auto_range_y2(self) -> None:
         """Auto-range Y2 axis."""
         if self.y2_viewbox:
-            self.y2_viewbox.autoRange(y=True, padding=0.05)
+            self.plot_widget.auto_range_axis('Y2')
 
     def _get_current_x_var(self) -> Optional[str]:
         """Get the current X-axis variable name from application state."""
