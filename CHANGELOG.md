@@ -2,7 +2,7 @@
 ## CHANGELOG.md
 
 ###  v0.2.3 — Xschem integration with bug fixes
-- **Xschem integration**: TCP socket server (port 2022) enables pqwave as external wave viewer for xschem schematic editor
+- **Xschem integration**: TCP socket server (port 2026) enables pqwave as external wave viewer for xschem schematic editor
 - **GAW-style protocol**: Support `table_set filename.raw` and `copyvar v(node) sel #color` commands for xschem compatibility
 - **Extended JSON protocol**: Additional commands (`add_trace`, `remove_trace`, `get_data_point`, `close_window`, `list_windows`) for advanced control
 - **Single-instance server**: Only one pqwave server runs; subsequent instances forward commands to existing server

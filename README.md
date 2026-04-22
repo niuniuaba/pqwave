@@ -54,7 +54,7 @@ python pqwave.py --help
 | `--verbose` | Enable info-level logging (user feedback) |
 | `--quiet` | Suppress all output except errors |
 | `--log-file FILE` | Write logs to specified file |
-| `--xschem-port PORT` | TCP port for xschem integration server (default: 2022) |
+| `--xschem-port PORT` | TCP port for xschem integration server (default: 2026) |
 | `--no-xschem-server` | Disable xschem integration server |
 | `--xschem-send COMMAND` | Send command to existing xschem server and exit |
 
@@ -83,7 +83,7 @@ python pqwave.py --debug --log-file pqwave.log simulation.raw
 
 ```bash
 # Start pqwave with xschem server on default port
-pqwave --xschem-port 2022
+pqwave --xschem-port 2026
 
 # Start pqwave with xschem server disabled
 pqwave --no-xschem-server simulation.raw

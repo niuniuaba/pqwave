@@ -64,8 +64,8 @@ def main():
     parser.add_argument(
         "--xschem-port",
         type=int,
-        default=2022,
-        help="TCP port for xschem integration server (default: 2022). Set to 0 to disable."
+        default=2026,
+        help="TCP port for xschem integration server (default: 2026). Set to 0 to disable."
     )
     parser.add_argument(
         "--no-xschem-server",

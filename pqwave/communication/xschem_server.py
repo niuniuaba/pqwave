@@ -23,7 +23,7 @@ class XschemServer(QObject):
     """
     TCP server for xschem integration.
 
-    Listens on a configurable port (default 2022) for commands from xschem.
+    Listens on a configurable port (default 2026) for commands from xschem.
     Commands are parsed and emitted as Qt signals for processing in the main thread.
 
     Signals:
@@ -41,12 +41,12 @@ class XschemServer(QObject):
     server_started = pyqtSignal(int)     # port number
     server_stopped = pyqtSignal()
 
-    def __init__(self, port: int = 2022):
+    def __init__(self, port: int = 2026):
         """
         Initialize XschemServer.
 
         Args:
-            port: TCP port to listen on (default 2022)
+            port: TCP port to listen on (default 2026)
         """
         super().__init__()
         self.port = port
@@ -200,9 +200,12 @@ class XschemServer(QObject):
 
                     # Split by newlines (multiple commands possible)
                     lines = text.split('\n')
-                    for line in lines:
-                        line = line.strip()
+                    for raw_line in lines:
+                        line = raw_line.strip()
                         if line:
+                            # Echo back the line to satisfy xschem handshake (only for non-JSON commands)
+                            if not line.startswith('json '):
+                                self._send_line(client_socket, line)
                             self._process_command(line, client_addr)
 
                 except socket.timeout:
@@ -314,6 +317,14 @@ class XschemServer(QObject):
 
         # Unknown command
         logger.warning(f"Unknown command from {client_addr}: {command_text}")
+
+    def _send_line(self, client_socket: socket.socket, line: str) -> None:
+        """Send a line back to the client (echo)."""
+        try:
+            client_socket.sendall((line + '\n').encode('utf-8'))
+        except socket.error as e:
+            logger.warning(f"Failed to send echo line to client: {e}")
+            raise  # Re-raise to let outer handler break the connection
 
     def send_response(self, client_addr_str: str, response: dict) -> bool:
         """

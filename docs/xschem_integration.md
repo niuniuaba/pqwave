@@ -7,7 +7,7 @@ pqwave can integrate with [xschem](https://xschem.sourceforge.io/stefan/xschem_m
 1. Click nets in xschem schematics and send them to pqwave for visualization
 2. Potentially back-annotate measurement points from waveforms to the schematic
 
-The integration works via TCP socket communication on port 2022 (configurable). xschem uses its built-in `sim(spicewave)` configuration array to support external viewers, requiring no modifications to xschem source code.
+The integration works via TCP socket communication on port 2026 (configurable). xschem uses its built-in `sim(spicewave)` configuration array to support external viewers, requiring no modifications to xschem source code.
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ Add the following configuration to your `~/.xschemrc` file (or system-wide `xsch
 set sim(spicewave,4,cmd) {pqwave "$n.raw"}
 set sim(spicewave,4,name) {pqwave viewer}
 set sim(spicewave,4,type) 0      ;# 0 = GAW-style TCP socket
-set sim(spicewave,4,args) {2022} ;# TCP port number (default: 2022)
+set sim(spicewave,4,args) {2026} ;# TCP port number (default: 2026)
 set sim(spicewave,4,rawfile) 1   ;# Send raw file path to viewer
 set sim(spicewave,n) 5           ;# Increase viewer count (n = max index + 1)
 
@@ -37,9 +37,39 @@ set sim(spicewave,default) 4
 
 **Important**: Adjust the index `4` based on existing entries in your `sim(spicewave)` array. Check your current xschemrc for existing viewer definitions. The `sim(spicewave,n)` value must be set to the maximum index + 1.
 
+**Complete example**: See [example_simrc](../docs/example_simrc) for a complete configuration example with both pqwave and gaw viewers.
+
 ### 2. Verify Configuration
 
 Restart xschem and press `Alt+G` in the schematic window. You should see "pqwave viewer" in the waveform viewer selection dialog.
+
+### 3. Optional: Override setup_tcp_gaw for Enhanced Compatibility
+
+For optimal compatibility with both pqwave and gaw viewers, pqwave provides an optional Tcl override file `xschem_override.tcl`. This file dynamically detects whether pqwave or gaw is configured as the default viewer and adjusts the TCP port accordingly (2026 for pqwave, 2020 for gaw).
+
+**Installation:**
+
+1. Copy the override file to your xschem configuration directory:
+   ```bash
+   cp pqwave/communication/xschem_override.tcl ~/.xschem/
+   ```
+
+2. Add the following line to your `~/.xschemrc` file:
+   ```tcl
+   # Load pqwave override after xschem.tcl initialization
+   set user_startup_commands { source $env(HOME)/.xschem/xschem_override.tcl }
+   ```
+
+**What it does:**
+
+- Dynamically detects the default waveform viewer from `sim(spicewave,default)` configuration
+- Sets TCP port to 2026 for pqwave, 2020 for gaw
+- Sends the correct `table_set` command with basename (not full path) for gaw compatibility
+- Maintains compatibility with both viewers without manual configuration changes
+
+**Note:** This override is optional but recommended if you switch between pqwave and gaw frequently.
+
+For detailed installation instructions, see [xschem_override_install.md](xschem_override_install.md).
 
 ## Using pqwave with xschem
 
@@ -47,7 +77,7 @@ Restart xschem and press `Alt+G` in the schematic window. You should see "pqwave
 
 1. **Start pqwave in server mode** (automatically done when pqwave launches):
    ```bash
-   pqwave --xschem-port 2022
+   pqwave --xschem-port 2026
    ```
    Or simply launch pqwave normally (server starts by default).
 
@@ -66,7 +96,7 @@ Restart xschem and press `Alt+G` in the schematic window. You should see "pqwave
 
 pqwave implements single-instance server behavior:
 
-- The first pqwave instance starts a TCP server on the specified port (default: 2022)
+- The first pqwave instance starts a TCP server on the specified port (default: 2026)
 - Subsequent pqwave instances detect the server is already running and forward commands to it
 - This ensures only one pqwave server runs, preventing port conflicts
 
@@ -76,7 +106,7 @@ pqwave provides several command-line options for xschem integration:
 
 | Option | Description |
 |--------|-------------|
-| `--xschem-port PORT` | TCP port for xschem server (default: 2022) |
+| `--xschem-port PORT` | TCP port for xschem server (default: 2026) |
 | `--no-xschem-server` | Disable xschem integration server |
 | `--xschem-send COMMAND` | Send command to existing xschem server and exit |
 
@@ -152,7 +182,7 @@ Add these procedures to your `~/.xschemrc` to enable back-annotation:
 ```tcl
 # Query data point from pqwave at specified X value
 proc pqwave_query_data_point {x_value} {
-  set socket [socket localhost 2022]
+  set socket [socket localhost 2026]
   set request_id [clock milliseconds]
   set json_command "{\"command\": \"get_data_point\", \"args\": {\"x\": $x_value}, \"id\": \"$request_id\"}"
   puts $socket "json $json_command"
@@ -223,10 +253,10 @@ Use `netcat` (`nc`) to test TCP communication:
 
 ```bash
 # Test GAW-style commands
-echo -e 'table_set /path/to/sim.raw\ncopyvar v(out) sel #ff0000' | nc localhost 2022
+echo -e 'table_set /path/to/sim.raw\ncopyvar v(out) sel #ff0000' | nc localhost 2026
 
 # Test JSON commands
-echo 'json {"command":"ping","id":"test1"}' | nc localhost 2022
+echo 'json {"command":"ping","id":"test1"}' | nc localhost 2026
 ```
 
 ### Using the --xschem-send Command Line Option
@@ -263,7 +293,7 @@ This is useful for scripting and automation without requiring external tools lik
 
 2. **"Connection refused" errors**
    - Ensure pqwave is running with xschem server enabled (not `--no-xschem-server`)
-   - Check port number matches (default: 2022)
+   - Check port number matches (default: 2026)
    - Verify no firewall blocking localhost TCP connections
 
 3. **Traces not appearing in pqwave**
@@ -280,13 +310,13 @@ This is useful for scripting and automation without requiring external tools lik
 Start pqwave with verbose logging to see xschem commands:
 
 ```bash
-pqwave --verbose --xschem-port 2022
+pqwave --verbose --xschem-port 2026
 ```
 
 Or with full debug output:
 
 ```bash
-pqwave --debug --xschem-port 2022
+pqwave --debug --xschem-port 2026
 ```
 
 Check the terminal output for messages like:

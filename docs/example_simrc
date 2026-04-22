@@ -1,0 +1,31 @@
+# Example xschem simrc configuration for pqwave integration
+#
+# This file shows how to configure xschem to use pqwave as a waveform viewer.
+# Add these configurations to your ~/.xschemrc file or system xschemrc.
+
+# Configure pqwave as a waveform viewer (index 0)
+set sim(spicewave,0,cmd) {/path/to/pqwave/venv/bin/pqwave "$n.raw"}
+set sim(spicewave,0,name) {pqwave viewer}
+set sim(spicewave,0,type) 0      ;# 0 = GAW-style TCP socket
+set sim(spicewave,0,args) {2026} ;# TCP port number (default: 2026)
+set sim(spicewave,0,rawfile) 1   ;# Send raw file path to viewer
+
+# Configure gaw as an alternative viewer (index 1)
+set sim(spicewave,1,cmd) {$env(HOME)/Apps/gaw/bin/gaw "$n.raw"}
+set sim(spicewave,1,name) {Gaw viewer}
+set sim(spicewave,1,type) 0      ;# 0 = GAW-style TCP socket
+set sim(spicewave,1,args) {2020} ;# TCP port number for gaw
+set sim(spicewave,1,rawfile) 1   ;# Send raw file path to viewer
+
+# Set the number of configured spicewave tools
+set sim(spicewave,n) 2
+
+# Set default viewer (0 = pqwave, 1 = gaw)
+set sim(spicewave,default) 0
+
+# Optional: Load pqwave override for enhanced compatibility
+# Add this line to load the override after xschem.tcl initialization
+# set user_startup_commands { source $env(HOME)/.xschem/xschem_override.tcl }
+
+# Note: The pqwave_override.tcl file dynamically detects the default viewer
+# and adjusts the TCP port (2026 for pqwave, 2020 for gaw) automatically.

@@ -4,7 +4,7 @@
 - open pqwave as external wave viewer from xschem 
   - **实现**: 在 xschemrc 中添加 pqwave 到 `sim(spicewave)` 数组，支持 GAW 式 TCP 套接字通信，无需修改 xschem 源代码
 - receive node_name signal from xschem schematic then plot the trace.
-  - **实现**: `pqwave/communication/xschem_server.py` TCP 服务器（默认端口 2022），解析 `table_set filename.raw` 和 `copyvar v(node) sel #color` 命令
+  - **实现**: `pqwave/communication/xschem_server.py` TCP 服务器（默认端口 2026），解析 `table_set filename.raw` 和 `copyvar v(node) sel #color` 命令
   - **实现**: `pqwave/communication/command_handler.py` 命令处理器，将 TCP 命令转换为 Qt 信号
   - **实现**: `pqwave/communication/window_registry.py` 窗口注册表，管理多窗口和客户端映射
   - **实现**: 单实例服务器模式，后续 pqwave 实例将命令转发到已有服务器
