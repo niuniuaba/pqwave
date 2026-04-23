@@ -10,7 +10,10 @@ them with the ApplicationState singleton.
 """
 
 import sys
+import time
 import traceback
+import json
+import socket
 from typing import Optional, Tuple
 import numpy as np
 import pyqtgraph as pg
@@ -177,7 +180,11 @@ class MainWindow(QMainWindow):
             'auto_range_y_toolbar': self.auto_range_y,
             'zoom_box_toolbar': self.enable_zoom_box,
             'toggle_grids_toolbar': self.toggle_grids,
-            'toggle_cross_hair': self.toggle_cross_hair
+            'toggle_cross_hair': self.toggle_cross_hair,
+            'toggle_x_cursor_a': self._toggle_x_cursor_a,
+            'toggle_x_cursor_b': self._toggle_x_cursor_b,
+            'toggle_y_cursor_A': self._toggle_y_cursor_A,
+            'toggle_y_cursor_B': self._toggle_y_cursor_B,
         }
 
     def _connect_signals(self):
@@ -191,8 +198,10 @@ class MainWindow(QMainWindow):
         # Connect plot widget signals
         self.plot_widget.mouse_moved.connect(self._on_mouse_moved)
         self.plot_widget.mouse_left.connect(self._on_mouse_left)
-        self.plot_widget.cursor_x_changed.connect(self._on_cursor_x_changed)
-        self.plot_widget.cursor_y1_changed.connect(self._on_cursor_y1_changed)
+        self.plot_widget.cursor_xa_changed.connect(self._on_cursor_xa_changed)
+        self.plot_widget.cursor_xb_changed.connect(self._on_cursor_xb_changed)
+        self.plot_widget.cursor_yA_changed.connect(self._on_cursor_yA_changed)
+        self.plot_widget.cursor_yB_changed.connect(self._on_cursor_yB_changed)
         self.plot_widget.cursor_y2_changed.connect(self._on_cursor_y2_changed)
         self.plot_widget.axis_log_mode_changed.connect(self._on_axis_log_mode_changed)
         self.plot_widget.mark_clicked.connect(self._on_mark_clicked)
@@ -204,6 +213,13 @@ class MainWindow(QMainWindow):
 
         # Connect xschem integration signals
         self._connect_xschem_signals()
+
+        # Back-annotation debounce timer (avoid sending too many updates)
+        self._backannotation_timer = QTimer()
+        self._backannotation_timer.setSingleShot(True)
+        self._backannotation_timer.setInterval(100)  # 100ms debounce
+        self._backannotation_timer.timeout.connect(self._send_data_point_update_debounced)
+        self._pending_x_value = None  # X value to send when timer fires
 
     def _connect_xschem_signals(self):
         """Connect xschem command handler signals."""
@@ -261,23 +277,26 @@ class MainWindow(QMainWindow):
     # Xschem command slot methods
     def _handle_xschem_table_set(self, raw_file: str, client_addr: str, connection_state: dict):
         """Handle xschem table_set command."""
-        logger.debug(f"Window {self.window_id} received table_set: {raw_file} from {client_addr}")
+        logger.info(f"Window {self.window_id} received table_set: {raw_file} from {client_addr}")
         # Check if this command is for this window
         is_for_this = self._is_command_for_this_window(client_addr, connection_state, raw_file=raw_file)
-        logger.debug(f"Window {self.window_id} table_set is_for_this_window: {is_for_this}")
+        logger.info(f"Window {self.window_id} table_set is_for_this_window: {is_for_this}")
         if not is_for_this:
-            logger.debug(f"Ignoring table_set, not for this window")
+            logger.info(f"Ignoring table_set, not for this window")
             return
         # Update client-window mapping
         self.state.window_registry.set_window_for_client(client_addr, self.window_id)
         # Load the raw file in this window
+        logger.info(f"Loading raw file: {raw_file}")
         self._load_raw_file(raw_file)
 
     def _handle_xschem_copyvar(self, var_name: str, color: str, client_addr: str, connection_state: dict):
         """Handle xschem copyvar command."""
-        logger.debug(f"Window {self.window_id} received copyvar: {var_name} color {color} from {client_addr}")
-        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
-            logger.debug(f"Ignoring copyvar, not for this window")
+        logger.info(f"Window {self.window_id} received copyvar: {var_name} color {color} from {client_addr}")
+        current_raw_file = connection_state.get('current_raw_file')
+        logger.info(f"Current raw file from connection_state: {current_raw_file}")
+        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=current_raw_file):
+            logger.info(f"Ignoring copyvar, not for this window")
             return
 
         # Parse color
@@ -291,7 +310,7 @@ class MainWindow(QMainWindow):
 
         # If raw file not yet loaded, queue command for later processing
         if self.raw_file is None:
-            logger.debug(f"Raw file not loaded, queuing copyvar command for {var_name}")
+            logger.info(f"Raw file not loaded, queuing copyvar command for {var_name}")
             self._queue_xschem_command('copyvar', {
                 'var_name': var_name,
                 'color': color,
@@ -302,12 +321,14 @@ class MainWindow(QMainWindow):
 
         # Get current X variable
         x_var = self._get_current_x_var()
+        logger.info(f"Current X variable: {x_var}")
         if x_var is None:
             logger.error(f"Cannot add trace: no X variable set (raw file loaded but no X variable?)")
             return
 
         # Add trace with error collection
         error_messages = []
+        logger.info(f"Adding trace for variable {var_name} on axis {axis} with color {color}")
         trace = self.trace_manager.add_trace_from_variable(
             variable_name=var_name,
             x_var_name=x_var,
@@ -321,7 +342,7 @@ class MainWindow(QMainWindow):
                 error_msg = f"Failed to add trace: {error_messages[0]}"
             logger.error(error_msg)
         else:
-            logger.info(f"Added trace for {var_name} on axis {axis} color {color}")
+            logger.info(f"Successfully added trace for {var_name} on axis {axis} color {color}")
 
     def _handle_xschem_open_file(self, raw_file: str, client_addr: str, connection_state: dict):
         """Handle xschem open_file JSON command."""
@@ -1250,10 +1271,11 @@ class MainWindow(QMainWindow):
 
         When turning ON: shows cross-hair and opens the mark data panel.
         When turning OFF: hides cross-hair, clears all marks, closes mark panel.
+        Note: X/Y cursors are independent and not affected by cross-hair toggle.
         """
         self.cross_hair_visible = not self.cross_hair_visible
 
-        # Update plot widget
+        # Update plot widget (cross-hair only — X/Y cursors are independent)
         self.plot_widget.set_cross_hair_visible(self.cross_hair_visible)
 
         # Update menu and toolbar state
@@ -1264,6 +1286,34 @@ class MainWindow(QMainWindow):
             self._open_mark_panel()
         else:
             self._close_mark_panel()
+
+    def _toggle_x_cursor_a(self, checked: bool) -> None:
+        """Toggle X cursor a on/off."""
+        self.plot_widget.set_cursor_xa_visible(checked)
+        if self.menu_manager:
+            self.menu_manager.set_x_cursor_a_checked(checked)
+        self._update_cursor_status()
+
+    def _toggle_x_cursor_b(self, checked: bool) -> None:
+        """Toggle X cursor b on/off."""
+        self.plot_widget.set_cursor_xb_visible(checked)
+        if self.menu_manager:
+            self.menu_manager.set_x_cursor_b_checked(checked)
+        self._update_cursor_status()
+
+    def _toggle_y_cursor_A(self, checked: bool) -> None:
+        """Toggle Y cursor A on/off."""
+        self.plot_widget.set_cursor_yA_visible(checked)
+        if self.menu_manager:
+            self.menu_manager.set_y_cursor_A_checked(checked)
+        self._update_cursor_status()
+
+    def _toggle_y_cursor_B(self, checked: bool) -> None:
+        """Toggle Y cursor B on/off."""
+        self.plot_widget.set_cursor_yB_visible(checked)
+        if self.menu_manager:
+            self.menu_manager.set_y_cursor_B_checked(checked)
+        self._update_cursor_status()
 
     def _open_mark_panel(self):
         """Create and show the mark data panel."""
@@ -1532,22 +1582,170 @@ class MainWindow(QMainWindow):
         self.menu_manager.update_coordinate_label(None, None, None)
 
     @pyqtSlot(float)
-    def _on_cursor_x_changed(self, value):
-        """Handle X cursor position change."""
-        # TODO: Update cursor display
-        pass
+    def _on_cursor_xa_changed(self, value):
+        """Handle X1 cursor position change — triggers back-annotation + status update."""
+        # Convert ViewBox coordinate to linear space if X axis is in log mode
+        x_linear = value
+        if self.plot_widget.get_axis_log_mode('X'):
+            x_linear = self.plot_widget._log_to_linear(value)
+
+        # Store X value and start debounce timer for back-annotation
+        self._pending_x_value = x_linear
+        self._backannotation_timer.start()
+
+        self._update_cursor_status()
 
     @pyqtSlot(float)
-    def _on_cursor_y1_changed(self, value):
-        """Handle Y1 cursor position change."""
-        # TODO: Update cursor display
-        pass
+    def _on_cursor_xb_changed(self, value):
+        """Handle X2 cursor position change."""
+        self._update_cursor_status()
+
+    @pyqtSlot(float)
+    def _on_cursor_yA_changed(self, value):
+        """Handle YA cursor position change."""
+        self._update_cursor_status()
+
+    @pyqtSlot(float)
+    def _on_cursor_yB_changed(self, value):
+        """Handle YB cursor position change."""
+        self._update_cursor_status()
 
     @pyqtSlot(float)
     def _on_cursor_y2_changed(self, value):
-        """Handle Y2 cursor position change."""
-        # TODO: Update cursor display
+        """Handle Y2 cursor position change (Y2-axis-specific cursor)."""
         pass
+
+    def _update_cursor_status(self) -> None:
+        """Read cursor positions and deltas, update status bar and legend."""
+        positions = self.plot_widget.get_cursor_positions()
+        deltas = self.plot_widget.get_cursor_deltas()
+        if self.menu_manager:
+            self.menu_manager.update_cursor_status(positions, deltas)
+        self._update_legend_cursor_values()
+
+    def _update_legend_cursor_values(self) -> None:
+        """Update trace legend with Y values at visible X cursor positions."""
+        positions = self.plot_widget.get_cursor_positions()
+        xa = positions.get('xa')
+        xb = positions.get('xb')
+
+        # Convert viewbox coordinates to linear space for data interpolation
+        xa_lin = (self.plot_widget._log_to_linear(xa)
+                  if xa is not None and self.plot_widget._x_log_mode
+                  else xa)
+        xb_lin = (self.plot_widget._log_to_linear(xb)
+                  if xb is not None and self.plot_widget._x_log_mode
+                  else xb)
+
+        self.trace_manager.update_legend_cursor_values(xa_lin, xb_lin)
+
+    def _send_data_point_update_debounced(self):
+        """Send data point update after debounce timer fires."""
+        if self._pending_x_value is not None:
+            self._send_data_point_update(self._pending_x_value)
+            self._pending_x_value = None
+
+    def _send_data_point_update(self, x_value: float):
+        """
+        Send data point update to all xschem clients connected to this window.
+
+        Args:
+            x_value: X coordinate in linear space
+        """
+        logger.debug(f"_send_data_point_update called with x={x_value}")
+        if self.state is None or self.state.command_handler is None:
+            logger.debug("State or command_handler is None, returning")
+            return
+
+        # Query data points at this X coordinate
+        results = self._query_data_point(x_value)
+        if not results:
+            return
+
+        # Get all clients associated with this window
+        registry = self.state.window_registry
+        clients = registry.get_clients_for_window(self.window_id)
+        logger.debug(f"Found {len(clients)} clients for window {self.window_id}: {clients}")
+        if not clients:
+            logger.debug("No clients found for this window")
+            return
+
+        # Prepare data for JSON serialization (similar to get_data_point response)
+        serializable_results = []
+        for res in results:
+            res_copy = res.copy()
+            y_val = res_copy.get('y_value')
+            if isinstance(y_val, complex) or np.iscomplexobj(y_val):
+                # Replace with magnitude/phase representation
+                res_copy['y_value'] = {
+                    'magnitude': float(np.abs(y_val)),
+                    'phase_deg': float(np.angle(y_val, deg=True)),
+                    'real': float(y_val.real),
+                    'imag': float(y_val.imag)
+                }
+            elif isinstance(y_val, (np.floating, np.integer)):
+                res_copy['y_value'] = float(y_val)
+            # y_nearest may also be complex
+            y_nearest = res_copy.get('y_nearest')
+            if isinstance(y_nearest, complex) or np.iscomplexobj(y_nearest):
+                res_copy['y_nearest'] = {
+                    'magnitude': float(np.abs(y_nearest)),
+                    'phase_deg': float(np.angle(y_nearest, deg=True)),
+                    'real': float(y_nearest.real),
+                    'imag': float(y_nearest.imag)
+                }
+            elif isinstance(y_nearest, (np.floating, np.integer)):
+                res_copy['y_nearest'] = float(y_nearest)
+            # Convert numpy bool to Python bool
+            out_of_range = res_copy.get('out_of_range')
+            if isinstance(out_of_range, np.bool_):
+                res_copy['out_of_range'] = bool(out_of_range)
+            serializable_results.append(res_copy)
+
+        # Send update to each client
+        for client_addr in clients:
+            # Create update message (similar to get_data_point response but with different command)
+            update_msg = {
+                "command": "data_point_update",
+                "data": {
+                    "x": x_value,
+                    "traces": serializable_results
+                },
+                "timestamp": time.time() if 'time' in sys.modules else 0
+            }
+
+            # Send via command handler with "json " prefix (xschem expects this format)
+            # Get xschem server from command handler
+            xschem_server = self.state.command_handler.xschem_server
+            if xschem_server is None:
+                logger.warning(f"Cannot send data_point_update: xschem server not available")
+                continue
+
+            # Parse client address string
+            try:
+                ip_str, port_str = client_addr.split(':')
+                client_addr_tuple = (ip_str, int(port_str))
+            except (ValueError, TypeError):
+                logger.error(f"Invalid client address format: {client_addr}")
+                continue
+
+            # Find client socket
+            client_socket = xschem_server.clients.get(client_addr_tuple)
+            if not client_socket:
+                logger.warning(f"Client socket not found: {client_addr}")
+                continue
+
+            # Send JSON command with "json " prefix
+            try:
+                json_str = json.dumps(update_msg)
+                line = f"json {json_str}"
+                logger.debug(f"Sending data_point_update to {client_addr}: {line[:100]}...")
+                client_socket.sendall((line + '\n').encode('utf-8'))
+                logger.debug(f"Sent data_point_update to {client_addr}: x={x_value}")
+            except (socket.error, TypeError) as e:
+                logger.error(f"Failed to send data_point_update to {client_addr}: {e}")
+
+    # (Cross-hair mark handlers follow below)
 
     @pyqtSlot(str, bool)
     def _on_axis_log_mode_changed(self, orientation, log_mode):

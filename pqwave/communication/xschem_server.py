@@ -266,7 +266,9 @@ class XschemServer(QObject):
         # Check for gaw-style commands
         if command_text.startswith('table_set '):
             # Format: table_set filename.raw
+            logger.debug(f"Processing table_set command: {command_text}")
             parts = command_text.split(' ', 1)
+            logger.debug(f"Table_set parts: {parts}")
             if len(parts) == 2:
                 raw_file = parts[1].strip()
                 state['current_raw_file'] = raw_file
@@ -287,7 +289,9 @@ class XschemServer(QObject):
         if command_text.startswith('copyvar '):
             # Format: copyvar v(node) sel #color
             # Example: copyvar v(out) sel #ff0000
+            logger.debug(f"Processing copyvar command: {command_text}")
             parts = command_text.split(' ', 3)
+            logger.debug(f"Copyvar parts: {parts}")
             if len(parts) >= 4 and parts[2] == 'sel':
                 var_name = parts[1].strip()
                 color = parts[3].strip()

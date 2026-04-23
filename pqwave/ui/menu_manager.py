@@ -31,7 +31,9 @@ class MenuManager:
                       'zoom_in', 'zoom_out', 'zoom_to_fit', 'auto_range_x', 'auto_range_y',
                       'enable_zoom_box', 'zoom_in_toolbar', 'zoom_out_toolbar',
                       'zoom_to_fit_toolbar', 'auto_range_x_toolbar', 'auto_range_y_toolbar',
-                      'zoom_box_toolbar', 'toggle_grids_toolbar', 'toggle_cross_hair'
+                      'zoom_box_toolbar', 'toggle_grids_toolbar', 'toggle_cross_hair',
+                      'toggle_x_cursor_a', 'toggle_x_cursor_b',
+                      'toggle_y_cursor_A', 'toggle_y_cursor_B'
         """
         self.parent = parent
         self.callbacks = callbacks or {}
@@ -115,6 +117,29 @@ class MenuManager:
         self.toggle_cross_hair_action.triggered.connect(self.callbacks.get('toggle_cross_hair', lambda: None))
         view_menu.addAction(self.toggle_cross_hair_action)
         self.actions['toggle_cross_hair'] = self.toggle_cross_hair_action
+
+        view_menu.addSeparator()
+
+        # Individual X/Y cursor toggles (independent checkable items)
+        self.toggle_x_cursor_a_action = QAction("X Cursor a", self.parent, checkable=True)
+        self.toggle_x_cursor_a_action.triggered.connect(self.callbacks.get('toggle_x_cursor_a', lambda: None))
+        view_menu.addAction(self.toggle_x_cursor_a_action)
+        self.actions['x_cursor_a'] = self.toggle_x_cursor_a_action
+
+        self.toggle_x_cursor_b_action = QAction("X Cursor b", self.parent, checkable=True)
+        self.toggle_x_cursor_b_action.triggered.connect(self.callbacks.get('toggle_x_cursor_b', lambda: None))
+        view_menu.addAction(self.toggle_x_cursor_b_action)
+        self.actions['x_cursor_b'] = self.toggle_x_cursor_b_action
+
+        self.toggle_y_cursor_A_action = QAction("Y Cursor A", self.parent, checkable=True)
+        self.toggle_y_cursor_A_action.triggered.connect(self.callbacks.get('toggle_y_cursor_A', lambda: None))
+        view_menu.addAction(self.toggle_y_cursor_A_action)
+        self.actions['y_cursor_A'] = self.toggle_y_cursor_A_action
+
+        self.toggle_y_cursor_B_action = QAction("Y Cursor B", self.parent, checkable=True)
+        self.toggle_y_cursor_B_action.triggered.connect(self.callbacks.get('toggle_y_cursor_B', lambda: None))
+        view_menu.addAction(self.toggle_y_cursor_B_action)
+        self.actions['y_cursor_B'] = self.toggle_y_cursor_B_action
 
         view_menu.addSeparator()
 
@@ -236,11 +261,40 @@ class MenuManager:
         self.toolbar.addAction(self.toggle_cross_hair_action_toolbar)
         self.actions['toggle_cross_hair_toolbar'] = self.toggle_cross_hair_action_toolbar
 
+        self.toolbar.addSeparator()
+
+        # Individual X/Y cursor toggle buttons in toolbar
+        self.toggle_x_cursor_a_toolbar = QAction("Xa", self.parent, checkable=True)
+        self.toggle_x_cursor_a_toolbar.setToolTip("Toggle X cursor a")
+        self.toggle_x_cursor_a_toolbar.triggered.connect(self.callbacks.get('toggle_x_cursor_a', lambda: None))
+        self.toolbar.addAction(self.toggle_x_cursor_a_toolbar)
+        self.actions['x_cursor_a_toolbar'] = self.toggle_x_cursor_a_toolbar
+
+        self.toggle_x_cursor_b_toolbar = QAction("Xb", self.parent, checkable=True)
+        self.toggle_x_cursor_b_toolbar.setToolTip("Toggle X cursor b")
+        self.toggle_x_cursor_b_toolbar.triggered.connect(self.callbacks.get('toggle_x_cursor_b', lambda: None))
+        self.toolbar.addAction(self.toggle_x_cursor_b_toolbar)
+        self.actions['x_cursor_b_toolbar'] = self.toggle_x_cursor_b_toolbar
+
+        self.toggle_y_cursor_A_toolbar = QAction("YA", self.parent, checkable=True)
+        self.toggle_y_cursor_A_toolbar.setToolTip("Toggle Y cursor A")
+        self.toggle_y_cursor_A_toolbar.triggered.connect(self.callbacks.get('toggle_y_cursor_A', lambda: None))
+        self.toolbar.addAction(self.toggle_y_cursor_A_toolbar)
+        self.actions['y_cursor_A_toolbar'] = self.toggle_y_cursor_A_toolbar
+
+        self.toggle_y_cursor_B_toolbar = QAction("YB", self.parent, checkable=True)
+        self.toggle_y_cursor_B_toolbar.setToolTip("Toggle Y cursor B")
+        self.toggle_y_cursor_B_toolbar.triggered.connect(self.callbacks.get('toggle_y_cursor_B', lambda: None))
+        self.toolbar.addAction(self.toggle_y_cursor_B_toolbar)
+        self.actions['y_cursor_B_toolbar'] = self.toggle_y_cursor_B_toolbar
+
     def _create_status_bar(self):
         """Create status bar with labels."""
         self.coord_label = QLabel("X: -, Y1: -, Y2: -")
+        self.cursor_status_label = QLabel("")
         self.dataset_label = QLabel("Dataset: -")
         self.statusbar.addPermanentWidget(self.coord_label)
+        self.statusbar.addPermanentWidget(self.cursor_status_label)
         self.statusbar.addPermanentWidget(self.dataset_label)
 
     def update_coordinate_label(self, x, y1, y2):
@@ -285,3 +339,77 @@ class MenuManager:
         """Update cross-hair toggle state."""
         self.toggle_cross_hair_action.setChecked(visible)
         self.toggle_cross_hair_action_toolbar.setChecked(visible)
+
+    def set_x_cursor_a_checked(self, checked: bool) -> None:
+        """Update X cursor a menu and toolbar checked state."""
+        self.toggle_x_cursor_a_action.setChecked(checked)
+        self.toggle_x_cursor_a_toolbar.setChecked(checked)
+
+    def set_x_cursor_b_checked(self, checked: bool) -> None:
+        """Update X cursor b menu and toolbar checked state."""
+        self.toggle_x_cursor_b_action.setChecked(checked)
+        self.toggle_x_cursor_b_toolbar.setChecked(checked)
+
+    def set_y_cursor_A_checked(self, checked: bool) -> None:
+        """Update Y cursor A menu and toolbar checked state."""
+        self.toggle_y_cursor_A_action.setChecked(checked)
+        self.toggle_y_cursor_A_toolbar.setChecked(checked)
+
+    def set_y_cursor_B_checked(self, checked: bool) -> None:
+        """Update Y cursor B menu and toolbar checked state."""
+        self.toggle_y_cursor_B_action.setChecked(checked)
+        self.toggle_y_cursor_B_toolbar.setChecked(checked)
+
+    def update_cursor_status(self, positions: dict, deltas: dict) -> None:
+        """Update cursor delta display in status bar.
+
+        Args:
+            positions: dict with keys xa, xb, yA, yB, y2
+            deltas: dict with keys dx, dy1, dy2
+        """
+        import math
+
+        def fmt(val):
+            if val is None:
+                return None
+            try:
+                if math.isnan(val):
+                    return None
+                return f"{val:.6g}"
+            except (TypeError, ValueError):
+                return None
+
+        parts = []
+
+        # X cursor section
+        x_parts = []
+        x1_s = fmt(positions.get('xa'))
+        x2_s = fmt(positions.get('xb'))
+        dx_s = fmt(deltas.get('dx'))
+        if x1_s is not None:
+            x_parts.append(f"Xa:{x1_s}")
+        if x2_s is not None:
+            x_parts.append(f"Xb:{x2_s}")
+        if dx_s is not None:
+            x_parts.append(f"ΔX:{dx_s}")
+        if x_parts:
+            parts.append(" | " + " ".join(x_parts))
+
+        # Y cursor section
+        y_parts = []
+        ya_s = fmt(positions.get('yA'))
+        yb_s = fmt(positions.get('yB'))
+        dy1_s = fmt(deltas.get('dy1'))
+        dy2_s = fmt(deltas.get('dy2'))
+        if ya_s is not None:
+            y_parts.append(f"YA:{ya_s}")
+        if yb_s is not None:
+            y_parts.append(f"YB:{yb_s}")
+        if dy1_s is not None:
+            y_parts.append(f"ΔY1:{dy1_s}")
+        if dy2_s is not None:
+            y_parts.append(f"ΔY2:{dy2_s}")
+        if y_parts:
+            parts.append(" | " + " ".join(y_parts))
+
+        self.cursor_status_label.setText("".join(parts))

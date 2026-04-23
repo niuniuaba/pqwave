@@ -102,6 +102,8 @@ class CommandHandler(QObject):
                 self._handle_list_windows(args, client_addr, connection_state)
             elif command == 'ping':
                 self._handle_ping(args, client_addr, connection_state)
+            elif command == 'data_point_update':
+                self._handle_data_point_update(args, client_addr, connection_state)
             else:
                 error_msg = f"Unknown command: {command}"
                 logger.warning(f"{error_msg} from {client_addr}")
@@ -125,6 +127,7 @@ class CommandHandler(QObject):
             return
 
         logger.info(f"table_set command from {client_addr}: {raw_file}")
+        logger.debug(f"table_set args: {args}, connection_state: {connection_state}")
         self.table_set_received.emit(raw_file, client_addr, connection_state)
 
     def _handle_copyvar(self, args: dict, client_addr: str, connection_state: dict) -> None:
@@ -147,6 +150,7 @@ class CommandHandler(QObject):
             color = '#ff0000'  # Default to red
 
         logger.info(f"copyvar command from {client_addr}: {var_name} color {color}")
+        logger.debug(f"copyvar args: {args}, connection_state: {connection_state}")
         self.copyvar_received.emit(var_name, color, client_addr, connection_state)
 
     def _handle_open_file(self, args: dict, client_addr: str, connection_state: dict) -> None:
@@ -248,6 +252,22 @@ class CommandHandler(QObject):
         """Handle ping JSON command."""
         logger.info(f"ping command from {client_addr}")
         self.ping_received.emit(client_addr, connection_state)
+
+    def _handle_data_point_update(self, args: dict, client_addr: str, connection_state: dict) -> None:
+        """Handle data_point_update JSON command (sent from pqwave to xschem).
+
+        This command is sent by pqwave to xschem for back-annotation. When received
+        (e.g., during testing via netcat), we log it and send a success response.
+        """
+        logger.debug(f"data_point_update command from {client_addr}: {args}")
+        # Send success response for testing purposes
+        if self.xschem_server:
+            response = {
+                'status': 'success',
+                'data': {'message': 'data_point_update received'},
+                'id': connection_state.get('command_id')
+            }
+            self.xschem_server.send_response(client_addr, response)
 
     @staticmethod
     def _is_valid_color(color: str) -> bool:

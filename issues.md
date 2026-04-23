@@ -138,3 +138,12 @@
 - how to reproduce: 打开 tests/cdg.raw, 添加"-imag(ac_data)/2/pi/250000*1E12"到Y1，然后Y1设置为log，到这里为止显示是正常的。然后点File --> Open Raw Data，打开tests/bridge.raw, 添加v(r1)到Y1，context menu --> plot option取消log Y的勾选，无论是menu bar 还是 context menu的auto range X，auto range Y1, view all (autorange x/y1/y2) 都不起作用了。但是menu --> Edit --> Setting中的autorange X和autorange Y1有用。
 - log 文件 为 ./log.1
 - 补充信息：cdg.raw包含的ac_data为复数向量，bridge.raw仅包含实数向量。先打开cdg.raw, 再打开bridge.raw会发生此issue, 但是先打开bridge.raw再打开cdg.raw则不会。因此怀疑是处理了复数向量数据之后转到实数向量时发生。
+
+### 11. back-annotation not work (v0.2.3) 
+- what is : back-annotation from pqwave to xschem doesn't work
+- how to reproduce
+  - cd ~/Apps/pqwave.git/tests/bridge && xschem bridge.sch
+  - launch pqwave from xschem menu bar Waves -> External viewer
+  - select node "r2" in xschem schematic, send add trace command to pqwave by pressing ALT+G keybind
+  - toggle cross-hair cursor in pqwave, drag X cursor, nothing shown in xschem schematic
+- what expected : r2 voltage (v(r2)) should be shown somewhere in xschem schematic when drag X cursor in pqwave.

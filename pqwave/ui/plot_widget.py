@@ -36,9 +36,11 @@ class PlotWidget(pg.PlotWidget):
     Signals:
         mouse_moved(x, y1, y2): Emitted when mouse moves over plot
         mouse_left(): Emitted when mouse leaves plot
-        cursor_x_changed(value): Emitted when X cursor position changes
-        cursor_y1_changed(value): Emitted when Y1 cursor position changes
-        cursor_y2_changed(value): Emitted when Y2 cursor position changes
+        cursor_xa_changed(value): Emitted when XA cursor position changes
+        cursor_xb_changed(value): Emitted when XB cursor position changes
+        cursor_yA_changed(value): Emitted when YA cursor position changes
+        cursor_yB_changed(value): Emitted when YB cursor position changes
+        cursor_y2_changed(value): Emitted when Y2 axis cursor position changes
         mark_clicked(x, y1, y2): Emitted when user clicks to place a mark
     """
 
@@ -46,8 +48,10 @@ class PlotWidget(pg.PlotWidget):
 
     mouse_moved = pyqtSignal(float, float, float)  # x, y1, y2
     mouse_left = pyqtSignal()
-    cursor_x_changed = pyqtSignal(float)
-    cursor_y1_changed = pyqtSignal(float)
+    cursor_xa_changed = pyqtSignal(float)
+    cursor_xb_changed = pyqtSignal(float)
+    cursor_yA_changed = pyqtSignal(float)
+    cursor_yB_changed = pyqtSignal(float)
     cursor_y2_changed = pyqtSignal(float)
     axis_log_mode_changed = pyqtSignal(str, bool)  # orientation, log_mode
     mark_clicked = pyqtSignal(float, float, float, float, float)  # x_vb, y1_vb, x_linear, y1_linear, y2_linear
@@ -77,14 +81,18 @@ class PlotWidget(pg.PlotWidget):
         self.right_axis: Optional[pg.AxisItem] = None
         self.cross_hair_vline: Optional[pg.InfiniteLine] = None
         self.cross_hair_hline: Optional[pg.InfiniteLine] = None
-        self.cursor_x_line: Optional[pg.InfiniteLine] = None
-        self.cursor_y1_line: Optional[pg.InfiniteLine] = None
+        self.cursor_xa_line: Optional[pg.InfiniteLine] = None
+        self.cursor_xb_line: Optional[pg.InfiniteLine] = None
+        self.cursor_yA_line: Optional[pg.InfiniteLine] = None
+        self.cursor_yB_line: Optional[pg.InfiniteLine] = None
         self.cursor_y2_line: Optional[pg.InfiniteLine] = None
 
         # Cursor visibility and drag state
         self.cross_hair_visible = False
-        self.cursor_x_visible = False
-        self.cursor_y1_visible = False
+        self.cursor_xa_visible = False
+        self.cursor_xb_visible = False
+        self.cursor_yA_visible = False
+        self.cursor_yB_visible = False
         self.cursor_y2_visible = False
 
         # Mouse tracking state
@@ -267,33 +275,55 @@ class PlotWidget(pg.PlotWidget):
             self._mark_label.setVisible(False)
             self._mark_label_visible = False
 
-    def set_cursor_x_visible(self, visible: bool, position: Optional[float] = None) -> None:
-        """Show/hide X cursor line.
+    # --- X/Y Cursor line visibility ---
 
-        Args:
-            visible: Whether to show the cursor
-            position: Initial position (uses current X range center if None)
-        """
-        self.cursor_x_visible = visible
-        if self.cursor_x_line:
-            self.cursor_x_line.setVisible(visible)
+    def set_cursor_xa_visible(self, visible: bool, position: Optional[float] = None) -> None:
+        """Show/hide XA cursor line."""
+        self.cursor_xa_visible = visible
+        if self.cursor_xa_line:
+            self.cursor_xa_line.setVisible(visible)
             if position is not None:
-                self.cursor_x_line.setValue(position)
+                self.cursor_xa_line.setValue(position)
             elif visible:
-                # Set to center of X range
                 x_range = self.plotItem.vb.viewRange()[0]
-                self.cursor_x_line.setValue(sum(x_range) / 2)
+                self.cursor_xa_line.setValue(sum(x_range) / 2)
 
-    def set_cursor_y1_visible(self, visible: bool, position: Optional[float] = None) -> None:
-        """Show/hide Y1 cursor line."""
-        self.cursor_y1_visible = visible
-        if self.cursor_y1_line:
-            self.cursor_y1_line.setVisible(visible)
+    def set_cursor_xb_visible(self, visible: bool, position: Optional[float] = None) -> None:
+        """Show/hide XB cursor line (offset from center if no position given)."""
+        self.cursor_xb_visible = visible
+        if self.cursor_xb_line:
+            self.cursor_xb_line.setVisible(visible)
             if position is not None:
-                self.cursor_y1_line.setValue(position)
+                self.cursor_xb_line.setValue(position)
+            elif visible:
+                x_range = self.plotItem.vb.viewRange()[0]
+                center = sum(x_range) / 2
+                offset = (x_range[1] - x_range[0]) * 0.1
+                self.cursor_xb_line.setValue(center + offset)
+
+    def set_cursor_yA_visible(self, visible: bool, position: Optional[float] = None) -> None:
+        """Show/hide YA cursor line."""
+        self.cursor_yA_visible = visible
+        if self.cursor_yA_line:
+            self.cursor_yA_line.setVisible(visible)
+            if position is not None:
+                self.cursor_yA_line.setValue(position)
             elif visible:
                 y_range = self.plotItem.vb.viewRange()[1]
-                self.cursor_y1_line.setValue(sum(y_range) / 2)
+                self.cursor_yA_line.setValue(sum(y_range) / 2)
+
+    def set_cursor_yB_visible(self, visible: bool, position: Optional[float] = None) -> None:
+        """Show/hide YB cursor line (offset from center if no position given)."""
+        self.cursor_yB_visible = visible
+        if self.cursor_yB_line:
+            self.cursor_yB_line.setVisible(visible)
+            if position is not None:
+                self.cursor_yB_line.setValue(position)
+            elif visible:
+                y_range = self.plotItem.vb.viewRange()[1]
+                center = sum(y_range) / 2
+                offset = (y_range[1] - y_range[0]) * 0.1
+                self.cursor_yB_line.setValue(center + offset)
 
     def set_cursor_y2_visible(self, visible: bool, position: Optional[float] = None) -> None:
         """Show/hide Y2 cursor line."""
@@ -306,16 +336,66 @@ class PlotWidget(pg.PlotWidget):
                 y_range = self.y2_viewbox.viewRange()[1]
                 self.cursor_y2_line.setValue(sum(y_range) / 2)
 
-    def get_cursor_positions(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-        """Get current cursor positions.
+    # --- Cursor position and delta queries ---
+
+    def get_cursor_positions(self) -> dict:
+        """Get all cursor positions.
 
         Returns:
-            Tuple of (x_cursor, y1_cursor, y2_cursor) positions
+            dict with keys: x1, x2, ya, yb, y2 (None if invisible/not created)
         """
-        x_pos = self.cursor_x_line.value() if self.cursor_x_line else None
-        y1_pos = self.cursor_y1_line.value() if self.cursor_y1_line else None
-        y2_pos = self.cursor_y2_line.value() if self.cursor_y2_line else None
-        return x_pos, y1_pos, y2_pos
+        def _val(line, visible):
+            return line.value() if line is not None and visible else None
+        return {
+            'xa': _val(self.cursor_xa_line, self.cursor_xa_visible),
+            'xb': _val(self.cursor_xb_line, self.cursor_xb_visible),
+            'yA': _val(self.cursor_yA_line, self.cursor_yA_visible),
+            'yB': _val(self.cursor_yB_line, self.cursor_yB_visible),
+            'y2': _val(self.cursor_y2_line, self.cursor_y2_visible),
+        }
+
+    def get_cursor_deltas(self) -> dict:
+        """Compute delta values between paired cursors.
+
+        For Y cursors, also compute Y2-space deltas when Y2 viewbox exists.
+        Returns dict with keys: dx, dy1, dy2 (None if pair not active).
+        """
+        positions = self.get_cursor_positions()
+        result = {'dx': None, 'dy1': None, 'dy2': None}
+
+        # Helper: convert viewbox coord to linear if axis in log mode
+        def _lin(val, log_mode):
+            return self._log_to_linear(val) if log_mode else val
+
+        # Delta X (always linear space for display)
+        if positions['xa'] is not None and positions['xb'] is not None:
+            x1_lin = _lin(positions['xa'], self._x_log_mode)
+            x2_lin = _lin(positions['xb'], self._x_log_mode)
+            result['dx'] = abs(x2_lin - x1_lin)
+
+        # Delta Y1
+        if positions['yA'] is not None and positions['yB'] is not None:
+            ya_lin = _lin(positions['yA'], self._y1_log_mode)
+            yb_lin = _lin(positions['yB'], self._y1_log_mode)
+            result['dy1'] = abs(yb_lin - ya_lin)
+
+        # Delta Y2 — map YA/YB through scene coords to Y2 viewbox
+        if (result['dy1'] is not None and self.y2_viewbox is not None
+                and positions['yA'] is not None and positions['yB'] is not None):
+            try:
+                from PyQt6.QtCore import QPointF
+                vb = self.plotItem.vb
+                scene_ya = vb.mapViewToScene(QPointF(0, positions['yA']))
+                scene_yb = vb.mapViewToScene(QPointF(0, positions['yB']))
+                y2_ya = self.y2_viewbox.mapSceneToView(scene_ya).y()
+                y2_yb = self.y2_viewbox.mapSceneToView(scene_yb).y()
+                y2_ya_lin = _lin(y2_ya, self._y2_log_mode)
+                y2_yb_lin = _lin(y2_yb, self._y2_log_mode)
+                result['dy2'] = abs(y2_yb_lin - y2_ya_lin)
+            except Exception:
+                pass
+
+        return result
 
     # Dual Y-axis support
 
@@ -413,6 +493,24 @@ class PlotWidget(pg.PlotWidget):
             return float('inf') if value > 0 else float('-inf')
         except (ValueError, ZeroDivisionError):
             return float('nan')
+
+    def get_axis_log_mode(self, axis: str) -> bool:
+        """Get log mode for an axis.
+
+        Args:
+            axis: 'X', 'Y1', or 'Y2'
+
+        Returns:
+            True if axis is in log mode, False otherwise
+        """
+        if axis == 'X':
+            return self._x_log_mode
+        elif axis == 'Y1':
+            return self._y1_log_mode
+        elif axis == 'Y2':
+            return self._y2_log_mode
+        else:
+            raise ValueError(f"Invalid axis: {axis}")
 
     def set_axis_label(self, axis: str, label: str) -> None:
         """Set label for an axis."""
@@ -532,20 +630,36 @@ class PlotWidget(pg.PlotWidget):
         self.plotItem.addItem(self.cross_hair_vline)
         self.plotItem.addItem(self.cross_hair_hline)
 
-        # X cursor line (draggable)
-        self.cursor_x_line = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('cyan', width=2))
-        self.cursor_x_line.setVisible(False)
-        self.plotItem.addItem(self.cursor_x_line)
-        self.cursor_x_line.sigPositionChanged.connect(
-            lambda line: self.cursor_x_changed.emit(line.value())
+        # XA cursor line (draggable, vertical, cyan solid)
+        self.cursor_xa_line = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('cyan', width=2))
+        self.cursor_xa_line.setVisible(False)
+        self.plotItem.addItem(self.cursor_xa_line)
+        self.cursor_xa_line.sigPositionChanged.connect(
+            lambda line: self.cursor_xa_changed.emit(line.value())
         )
 
-        # Y1 cursor line (draggable)
-        self.cursor_y1_line = pg.InfiniteLine(angle=0, movable=True, pen=pg.mkPen('yellow', width=2))
-        self.cursor_y1_line.setVisible(False)
-        self.plotItem.addItem(self.cursor_y1_line)
-        self.cursor_y1_line.sigPositionChanged.connect(
-            lambda line: self.cursor_y1_changed.emit(line.value())
+        # XB cursor line (draggable, vertical, orange dash)
+        self.cursor_xb_line = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('orange', width=2, style=Qt.PenStyle.DashLine))
+        self.cursor_xb_line.setVisible(False)
+        self.plotItem.addItem(self.cursor_xb_line)
+        self.cursor_xb_line.sigPositionChanged.connect(
+            lambda line: self.cursor_xb_changed.emit(line.value())
+        )
+
+        # YA cursor line (draggable, horizontal, yellow solid)
+        self.cursor_yA_line = pg.InfiniteLine(angle=0, movable=True, pen=pg.mkPen('yellow', width=2))
+        self.cursor_yA_line.setVisible(False)
+        self.plotItem.addItem(self.cursor_yA_line)
+        self.cursor_yA_line.sigPositionChanged.connect(
+            lambda line: self.cursor_yA_changed.emit(line.value())
+        )
+
+        # YB cursor line (draggable, horizontal, lime dash)
+        self.cursor_yB_line = pg.InfiniteLine(angle=0, movable=True, pen=pg.mkPen('lime', width=2, style=Qt.PenStyle.DashLine))
+        self.cursor_yB_line.setVisible(False)
+        self.plotItem.addItem(self.cursor_yB_line)
+        self.cursor_yB_line.sigPositionChanged.connect(
+            lambda line: self.cursor_yB_changed.emit(line.value())
         )
 
         # Y2 cursor line will be created when Y2 axis is enabled

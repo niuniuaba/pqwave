@@ -471,6 +471,47 @@ class TraceManager:
 
         self.logger.debug(f"  Trace update complete")
 
+    def update_legend_cursor_values(self, xa_linear: Optional[float], xb_linear: Optional[float]) -> None:
+        """Update legend labels with Y values at X cursor positions.
+
+        Appends bare Y value(s) to each trace's legend label:
+          one cursor:  -- v(out) @ Y1 4
+          two cursors: -- v(out) @ Y1 4 8
+
+        Args:
+            xa_linear: Xa cursor position in linear space, or None if hidden
+            xb_linear: Xb cursor position in linear space, or None if hidden
+        """
+        if not self.traces or not self.legend:
+            return
+
+        state_traces = self.state.traces
+
+        for i, (var, plot_item, y_axis) in enumerate(self.traces):
+            trace = state_traces[i] if i < len(state_traces) else None
+            if trace is None:
+                self.logger.warning(f"No state trace found for legend item {i}")
+                continue
+
+            base_name = f"{var} @ {y_axis}"
+
+            # Collect Y values for visible X cursors
+            values = []
+            for cursor_x in (xa_linear, xb_linear):
+                if cursor_x is not None and len(trace.x_data) > 0:
+                    x_min, x_max = float(trace.x_data[0]), float(trace.x_data[-1])
+                    clipped_x = max(x_min, min(cursor_x, x_max))
+                    y_val = float(np.interp(clipped_x, trace.x_data, trace.y_data))
+                    values.append(f"{y_val:.6g}")
+
+            suffix = " " + " ".join(values) if values else ""
+            full_name = base_name + suffix
+
+            # Update legend label via pyqtgraph's public API
+            label = self.legend.getLabel(plot_item)
+            if label is not None:
+                label.setText(full_name)
+
     def ensure_y2_axis(self) -> None:
         """Ensure Y2 axis and viewbox are created and configured."""
         if self.y2_viewbox is not None:

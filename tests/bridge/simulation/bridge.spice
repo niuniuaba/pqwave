@@ -1,0 +1,28 @@
+** sch_path: /home/wing/Apps/pqwave.git/tests/bridge/bridge.sch
+**.subckt bridge
+R1 net2 net1 1k
+R2 net1 0 1k
+D1 AC_p net2 D1N4148 area=1
+D2 AC_n net2 D1N4148 area=1
+D3 0 AC_p D1N4148 area=1
+D4 0 AC_n D1N4148 area=1
+C1 net2 0 47uF
+V1 AC_p AC_n SIN(0 100 100)
+**** begin user architecture code
+
+
+.control
+tran 1e-05 0.04 0
+write bridge.raw v(ac_p) v(ac_n) v(r1) v(r2)
+gnuplot bridge v(ac_p,ac_n) v(r1) v(r2)
+.endc
+
+
+**** end user architecture code
+**.ends
+**** begin user architecture code
+
+.model D1N4148 D(Is=2.55e-9 N=1.75 Rs=42e-3 Cj0=42.4e-12 Vj=0.75 M=0.333 Fc=0.5 Tt=4.32e-6 Bv=800 Ibv=80e-6 Af=1 Kf=0)
+
+**** end user architecture code
+.end

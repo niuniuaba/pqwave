@@ -71,6 +71,42 @@ For optimal compatibility with both pqwave and gaw viewers, pqwave provides an o
 
 For detailed installation instructions, see [xschem_override_install.md](xschem_override_install.md).
 
+### 4. Complete Configuration Example
+
+Here's a complete example `~/.xschemrc` configuration that includes pqwave as a waveform viewer, the optional compatibility override, and back-annotation support:
+
+```tcl
+# ===== pqwave Waveform Viewer Configuration =====
+# Add pqwave to the list of available waveform viewers
+set sim(spicewave,4,cmd) {pqwave "$n.raw"}
+set sim(spicewave,4,name) {pqwave viewer}
+set sim(spicewave,4,type) 0      ;# 0 = GAW-style TCP socket
+set sim(spicewave,4,args) {2026} ;# TCP port number (default: 2026)
+set sim(spicewave,4,rawfile) 1   ;# Send raw file path to viewer
+set sim(spicewave,n) 5           ;# Increase viewer count (n = max index + 1)
+
+# Optional: set pqwave as default viewer
+set sim(spicewave,default) 4
+
+# ===== Optional Compatibility Override =====
+# Load pqwave override after xschem.tcl initialization
+set user_startup_commands { source $env(HOME)/.xschem/xschem_override.tcl }
+
+# ===== Back-Annotation Support =====
+# Load pqwave back-annotation support
+source $env(HOME)/.xschem/back_annotate.tcl
+```
+
+**Installation steps:**
+1. Copy both Tcl scripts to your xschem configuration directory:
+   ```bash
+   cp pqwave/communication/xschem_override.tcl ~/.xschem/
+   cp pqwave/communication/back_annotate.tcl ~/.xschem/
+   ```
+2. Add the above configuration to your `~/.xschemrc` file
+3. Install Tcl json package: `sudo apt install tcllib`
+4. Restart xschem to apply the changes
+
 ## Using pqwave with xschem
 
 ### Basic Workflow
@@ -236,7 +272,80 @@ proc pqwave_add_query_menu {} {
 after idle pqwave_add_query_menu
 ```
 
-**Note:** The above example requires Tcl's `json` package. Install with:
+### Active Back-Annotation with data_point_update
+
+pqwave can actively push data points to xschem when the vertical cursor moves in the waveform view. This enables live back-annotation where node voltages/currents are displayed directly on the schematic as the cursor moves.
+
+**Note:** For easier configuration, pqwave provides a standalone Tcl script `back_annotate.tcl` that can be used alongside the optional `xschem_override.tcl` file. This allows you to keep your `xschemrc` clean while enabling advanced back-annotation features.
+
+#### Command Format
+
+pqwave sends the following JSON command when the vertical cursor position changes:
+
+```json
+{
+  "command": "data_point_update",
+  "data": {
+    "x": 0.001,
+    "traces": [
+      {
+        "var_name": "v(out)",
+        "y_value": 3.456,
+        "magnitude": 3.456,
+        "phase": 0.0,
+        "real": 3.456,
+        "imag": 0.0
+      }
+    ]
+  }
+}
+```
+
+- `x`: X-coordinate in seconds (linear space value)
+- `traces`: Array of trace data at the cursor position
+  - `var_name`: SPICE variable name (e.g., `v(out)`, `i(v1)`)
+  - `y_value`: Y value in linear space (real part for complex data)
+  - `magnitude`, `phase`: For complex data (AC analysis)
+  - `real`, `imag`: Alternative representation for complex data
+
+#### Using the Standalone Back-Annotation Tcl Script
+
+Instead of adding large Tcl code blocks directly to your `xschemrc`, pqwave provides a standalone Tcl script `back_annotate.tcl` that can be sourced from your xschem configuration.
+
+**Installation:**
+
+1. Copy the back-annotation script to your xschem configuration directory:
+   ```bash
+   cp pqwave/communication/back_annotate.tcl ~/.xschem/
+   ```
+
+2. Add the following line to your `~/.xschemrc` file (after any existing `source` commands):
+   ```tcl
+   # Load pqwave back-annotation support
+   source $env(HOME)/.xschem/back_annotate.tcl
+   ```
+
+3. The script will automatically set up back-annotation support:
+   - If `gaw_echoline` doesn't exist, it will be defined with full pqwave support
+   - If `gaw_echoline` already exists, you'll see instructions on how to modify it
+   
+   **Manual integration (if needed):** If you have an existing `gaw_echoline` procedure, add this check at the beginning:
+   ```tcl
+   # Let pqwave handle data_point_update commands first
+   if {[info procs pqwave_gaw_echoline_wrapper] ne ""} {
+     if {[pqwave_gaw_echoline_wrapper]} {
+       return  ;# Command was handled by pqwave
+     }
+   }
+   ```
+
+**What the script provides:**
+
+- `handle_data_point_update`: Parses `data_point_update` JSON commands and displays node voltages/currents
+- `pqwave_gaw_echoline_wrapper`: Wrapper function that intercepts `data_point_update` commands
+- `pqwave_back_annotation_setup`: Initialization procedure that checks for JSON package dependency
+
+**Dependencies:** The script requires Tcl's `json` package. Install with:
 ```bash
 # Debian/Ubuntu
 sudo apt install tcllib
@@ -257,6 +366,9 @@ echo -e 'table_set /path/to/sim.raw\ncopyvar v(out) sel #ff0000' | nc localhost 
 
 # Test JSON commands
 echo 'json {"command":"ping","id":"test1"}' | nc localhost 2026
+
+# Test data_point_update command (for back-annotation testing)
+echo 'json {"command":"data_point_update","data":{"x":0.001,"traces":[{"var_name":"v(out)","y_value":3.456}]}}' | nc localhost 2026
 ```
 
 ### Using the --xschem-send Command Line Option
@@ -269,6 +381,9 @@ pqwave --xschem-send "table_set /path/to/sim.raw"
 
 # Send JSON command (note the 'json ' prefix)
 pqwave --xschem-send 'json {"command":"ping","id":"test1"}'
+
+# Send data_point_update command for back-annotation testing
+pqwave --xschem-send 'json {"command":"data_point_update","data":{"x":0.001,"traces":[{"var_name":"v(out)","y_value":3.456}]}}'
 ```
 
 This is useful for scripting and automation without requiring external tools like netcat.

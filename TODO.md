@@ -1,4 +1,19 @@
 ## TODO.md
+###  ✅ v0.2.3 independent vertical (x) and horizon (y) cursors✅ **已完成**  
+13. independent horizon (y) and vertical (x) cursors ✅ **已完成**  
+- 与cross-hair cursor分离，可以独立使用
+- 支持两个x cursors，两个y cursor
+- 用户可以使用一个x/y cursor，也可以使用两个
+- 当使用两个x cursor时，在status bar显示delta x 的值
+- 当使用两个y cursor时，在status bar显示 delta y1和delta y2的值
+- 与cross-hair的区别：cross-hair用于在trace上打点并获取该点的数值，x/y cursor用于拖动，显示delta值，并为后续的back-anotate做准备（TODO No. 12）。
+
+###  v0.2.3 introduce new feature : back-anotate from pqwave to xschem 
+12. back-anotate to xschem schematic 
+- 当用户使用cross-hair cursor扫过某个或多个trace时，将数据点发送给xschem，xschem在电路图上这些trace对应的node处显示接收到的数值。
+- live backannotation: You can place / move a (vertical) cursor in the  and see voltages and currents annotated in the schematic.
+- 可能需要参考xschem的graph的实现方法。./xschem_graph.md; ../xschem.git/src
+
 ### ✅ v0.2.3 introduce new feature : communicate with external eda tools. ✅ **已完成**   
 11. communicate with xschem ✅ **已完成**
 - open pqwave as external wave viewer from xschem 

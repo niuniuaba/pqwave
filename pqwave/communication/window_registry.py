@@ -166,6 +166,22 @@ class WindowRegistry(QObject):
         """Get list of all registered window IDs."""
         return list(self._windows.keys())
 
+    def get_clients_for_window(self, window_id: str) -> List[str]:
+        """
+        Get list of client addresses associated with a window.
+
+        Args:
+            window_id: Window ID to look up
+
+        Returns:
+            List of client address strings "ip:port"
+        """
+        clients = []
+        for client_addr, win_id in self._client_to_window.items():
+            if win_id == window_id:
+                clients.append(client_addr)
+        return clients
+
     def clear(self) -> None:
         """Clear all registry data (for testing)."""
         self._windows.clear()
