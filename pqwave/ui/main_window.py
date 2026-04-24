@@ -47,12 +47,13 @@ logger = get_logger(__name__)
 class MainWindow(QMainWindow):
     """Main application window orchestrating all UI components."""
 
-    def __init__(self, initial_file=None):
+    def __init__(self, initial_file=None, xschem_ba_port=2021):
         """
         Initialize MainWindow.
 
         Args:
             initial_file: Optional path to initial raw file to load
+            xschem_ba_port: TCP port for xschem back-annotation (xschem_listen_port)
         """
         super().__init__()
         self.setWindowTitle("pqwave - SPICE Waveform Viewer")
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
         # Xschem integration: window ID and registry
         self.window_id = str(uuid.uuid4())
         self.raw_file_path = initial_file  # current raw file path (may be updated when loading new file)
+        self._xschem_ba_port = xschem_ba_port
         self.state.window_registry.register_window(
             window_id=self.window_id,
             window_instance=self,
@@ -220,6 +222,13 @@ class MainWindow(QMainWindow):
         self._backannotation_timer.setInterval(100)  # 100ms debounce
         self._backannotation_timer.timeout.connect(self._send_data_point_update_debounced)
         self._pending_x_value = None  # X value to send when timer fires
+
+        # Xschem back-annotation timer (separate from the data point update above)
+        self._xschem_ba_timer = QTimer()
+        self._xschem_ba_timer.setSingleShot(True)
+        self._xschem_ba_timer.setInterval(250)  # 250ms debounce
+        self._xschem_ba_timer.timeout.connect(self._xschem_ba_debounced)
+        self._xschem_ba_x = None  # XB cursor value to send when timer fires
 
     def _connect_xschem_signals(self):
         """Connect xschem command handler signals."""
@@ -1576,6 +1585,11 @@ class MainWindow(QMainWindow):
         """Handle mouse movement in plot."""
         self.menu_manager.update_coordinate_label(x, y1, y2)
 
+        # Trigger xschem back-annotation from cross-hair position when ON
+        if self.plot_widget.cross_hair_visible:
+            self._xschem_ba_x = x  # x is already in linear space
+            self._xschem_ba_timer.start()
+
     @pyqtSlot()
     def _on_mouse_left(self):
         """Handle mouse leaving plot."""
@@ -1593,12 +1607,25 @@ class MainWindow(QMainWindow):
         self._pending_x_value = x_linear
         self._backannotation_timer.start()
 
+        # Also trigger xschem schematic back-annotation
+        self._xschem_ba_x = x_linear
+        self._xschem_ba_timer.start()
+
         self._update_cursor_status()
 
     @pyqtSlot(float)
     def _on_cursor_xb_changed(self, value):
-        """Handle X2 cursor position change."""
+        """Handle X2 cursor position change — triggers xschem back-annotation + status update."""
         self._update_cursor_status()
+
+        # Convert ViewBox coordinate to linear space if X axis is in log mode
+        x_linear = value
+        if self.plot_widget.get_axis_log_mode('X'):
+            x_linear = self.plot_widget._log_to_linear(value)
+
+        # Store and start debounce timer for xschem back-annotation
+        self._xschem_ba_x = x_linear
+        self._xschem_ba_timer.start()
 
     @pyqtSlot(float)
     def _on_cursor_yA_changed(self, value):
@@ -1644,6 +1671,32 @@ class MainWindow(QMainWindow):
         if self._pending_x_value is not None:
             self._send_data_point_update(self._pending_x_value)
             self._pending_x_value = None
+
+    def _xschem_ba_debounced(self):
+        """Send xschem back-annotation after debounce timer fires."""
+        if self._xschem_ba_x is not None:
+            self._send_xschem_backannotation(self._xschem_ba_x)
+            self._xschem_ba_x = None
+
+    def _send_xschem_backannotation(self, x_value: float):
+        """Send cursor X position to xschem via TCP for schematic back-annotation.
+
+        Opens a short-lived TCP connection to xschem's built-in command server
+        (xschem_listen_port) and sends:
+
+            xschem set annotate_cursor_x <value>
+
+        The connection is closed immediately after sending. Failures are silently
+        logged (xschem not running, port not open, etc.).
+        """
+        try:
+            sock = socket.create_connection(('localhost', self._xschem_ba_port), timeout=0.5)
+            msg = f"xschem set annotate_cursor_x {x_value:.10g}\n"
+            sock.sendall(msg.encode('utf-8'))
+            sock.close()
+            logger.debug(f"xschem back-annotation sent: x={x_value:.10g}")
+        except (socket.error, ConnectionRefusedError, OSError) as e:
+            logger.debug(f"xschem back-annotation connection failed: {e}")
 
     def _send_data_point_update(self, x_value: float):
         """

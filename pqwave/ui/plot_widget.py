@@ -537,19 +537,29 @@ class PlotWidget(pg.PlotWidget):
         clipToView on PlotDataItem can work (pyqtgraph skips clipping
         when autoRange is enabled). This matches xschem's behavior where
         the view only changes on explicit user action.
+
+        Note: InfiniteLine cursors (Xa/Xb, Ya/Yb, cross-hair) are excluded
+        from range calculation so cursor placement before traces are loaded
+        doesn't corrupt auto-range.
         """
         vb = self.plotItem.vb
         if axis == 'X':
             vb.enableAutoRange(x=True)
-            vb.autoRange(padding=0.05)
+            items = [it for it in vb.addedItems
+                     if not isinstance(it, pg.InfiniteLine)]
+            vb.autoRange(padding=0.05, items=items or None)
             # Disable X autoRange so clipToView works during pan/zoom
             vb.enableAutoRange(x=False)
         elif axis == 'Y1':
             vb.enableAutoRange(y=True)
-            vb.autoRange(padding=0.05)
+            items = [it for it in vb.addedItems
+                     if not isinstance(it, pg.InfiniteLine)]
+            vb.autoRange(padding=0.05, items=items or None)
         elif axis == 'Y2' and self.y2_viewbox:
             self.y2_viewbox.enableAutoRange(y=True)
-            self.y2_viewbox.autoRange(padding=0.05)
+            items = [it for it in self.y2_viewbox.addedItems
+                     if not isinstance(it, pg.InfiniteLine)]
+            self.y2_viewbox.autoRange(padding=0.05, items=items or None)
 
     # Grid control
 

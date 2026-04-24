@@ -68,6 +68,12 @@ def main():
         help="TCP port for xschem integration server (default: 2026). Set to 0 to disable."
     )
     parser.add_argument(
+        "--xschem-ba-port",
+        type=int,
+        default=2021,
+        help="TCP port for xschem back-annotation (xschem_listen_port, default: 2021)."
+    )
+    parser.add_argument(
         "--no-xschem-server",
         action="store_true",
         help="Disable xschem integration server"
@@ -183,9 +189,9 @@ def main():
     # Create window with optional initial file
     if args.raw_file:
         logger.info(f"Opening file from command line: {args.raw_file}")
-        window = MainWindow(initial_file=args.raw_file)
+        window = MainWindow(initial_file=args.raw_file, xschem_ba_port=args.xschem_ba_port)
     else:
-        window = MainWindow()
+        window = MainWindow(xschem_ba_port=args.xschem_ba_port)
 
     # Start xschem server after window is created (so signals are connected)
     if xschem_server is not None:

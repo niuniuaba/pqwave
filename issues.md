@@ -139,7 +139,7 @@
 - log 文件 为 ./log.1
 - 补充信息：cdg.raw包含的ac_data为复数向量，bridge.raw仅包含实数向量。先打开cdg.raw, 再打开bridge.raw会发生此issue, 但是先打开bridge.raw再打开cdg.raw则不会。因此怀疑是处理了复数向量数据之后转到实数向量时发生。
 
-### 11. back-annotation not work (v0.2.3) 
+### ✅ 11. back-annotation not work (v0.2.3)✅ **已完成** 
 - what is : back-annotation from pqwave to xschem doesn't work
 - how to reproduce
   - cd ~/Apps/pqwave.git/tests/bridge && xschem bridge.sch
@@ -147,3 +147,20 @@
   - select node "r2" in xschem schematic, send add trace command to pqwave by pressing ALT+G keybind
   - toggle cross-hair cursor in pqwave, drag X cursor, nothing shown in xschem schematic
 - what expected : r2 voltage (v(r2)) should be shown somewhere in xschem schematic when drag X cursor in pqwave.
+
+### 13. X cursor out-of-range shows misleading floater values ✅ **fixed**
+- what is: When X cursors are positioned outside the dataset range, floaters in xschem still show interpolated numbers, which can mislead users into thinking data exists at that X value.
+- what expected: Show "-" (dash) instead of interpolated values when cursor is outside data range.
+- root cause: The sign-change detection in backannotate_cursor_x only triggers when cursor_x is between two data points. When cursor_x is before the first or after the last data point, no sign change occurs, the loop falls through to found:, and the nearest edge point's value is shown.
+- fix: Added `cursor_in_range` flag, set to 1 only on sign change or exact match. At `found:`, if flag is 0, all ngspice::ngspice_data values are set to "-" instead of interpolating.
+- files changed:
+  - `/home/wing/Apps/xschem.git/src/callback.c` — cursor_in_range flag + out-of-range dash logic
+
+###  12. bugs found after implementation of back-annotation (v0.2.3) ✅ **fixed**
+- xschem complained about undefined Tcl variables (backannotate_sync_draw, backannotate_min_delta, backannotate_last_x)
+- all objects other than text such as components, wires, etc. dismiss (not rendered) when doing back-annotation.
+- Xa / Xb cursor break autorange. when toggle Xa or Xb cursor before adding any trace to plot widget, autorange doesn't work. Y cursors doesn't cause this problem. And if traces are plot prior to trigger x cursors on there is no this problem either.  
+- root causes and fixes:
+  1. xschem complained: tclgetboolvar/tclgetdoublevar call dbg(0) when Tcl var doesn't exist. Fixed by adding defaults via `info exists` before first access.
+  2. components disappear: backannotate_redraw used draw_single_layer=-2 (text-only). Fixed by removing -2 mode — backannotate_redraw now calls draw() directly (full redraw).
+  3. Xa/Xb break autorange: autoRange includes InfiniteLine cursors in bounding calculation, extending range to cursor's default position (0.5). Fixed by filtering out pg.InfiniteLine items from autoRange calculation in auto_range_axis().
