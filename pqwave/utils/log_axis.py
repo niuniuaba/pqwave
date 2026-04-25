@@ -6,13 +6,18 @@ LogAxisItem - Custom AxisItem for log scale that shows actual values instead of 
 
 This module provides a custom AxisItem subclass that improves the display of
 logarithmic axis ticks by showing values as 10^exponent with superscript formatting.
+It also overrides grid-line rendering to use a dashed pen style, reducing
+visual interference with traces.
 """
 
 from pyqtgraph import AxisItem
+from PyQt6.QtGui import QPen
+from PyQt6.QtCore import Qt
 
 
 class LogAxisItem(AxisItem):
     """Custom AxisItem for log scale that shows actual values instead of exponents"""
+
     def __init__(self, orientation='left', log_mode_changed_callback=None, **kwargs):
         super().__init__(orientation, **kwargs)
         self.log_mode = False
@@ -21,7 +26,22 @@ class LogAxisItem(AxisItem):
         # It will be disabled when log mode is enabled
         self.enableAutoSIPrefix(True)
 
-
+    def generateDrawSpecs(self, p):
+        """Override to render grid lines with dash-line style."""
+        specs = super().generateDrawSpecs(p)
+        if specs is None:
+            return None
+        axisSpec, tickSpecs, textSpecs = specs
+        # When grid is active, all ticks are full-width grid lines.
+        # Replace their pen style with DashLine to reduce visual interference.
+        if self.grid is not False and tickSpecs:
+            new_specs = []
+            for pen, p1, p2 in tickSpecs:
+                dash_pen = QPen(pen)
+                dash_pen.setStyle(Qt.PenStyle.DashLine)
+                new_specs.append((dash_pen, p1, p2))
+            tickSpecs = new_specs
+        return (axisSpec, tickSpecs, textSpecs)
 
     def setLogMode(self, x=None, y=None):
         """Set log mode for this axis"""

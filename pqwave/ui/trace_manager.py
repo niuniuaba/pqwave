@@ -170,6 +170,20 @@ class TraceManager:
             variables = self.split_expressions(expr)
             self.logger.debug(f"Split expressions: {variables}")
 
+            # Filter out variables that already exist (prevent duplicates)
+            existing = {v for v, _, _ in self.traces}
+            filtered = [v for v in variables if v not in existing]
+            skipped = [v for v in variables if v in existing]
+            if skipped:
+                self.logger.info(f"Skipping duplicate traces: {', '.join(skipped)}")
+            variables = filtered
+            if not variables:
+                error_msg = f"Expression already exists as a trace"
+                self.logger.info(error_msg)
+                if error_out is not None:
+                    error_out.append(error_msg)
+                return None
+
             if not x_var_name:
                 error_msg = "No X-axis variable selected"
                 self.logger.warning(error_msg)
@@ -289,6 +303,15 @@ class TraceManager:
         self.logger.debug(f"add_trace_from_variable: variable_name={variable_name}, x_var_name={x_var_name}")
         quoted_var = f'"{variable_name}"'
         return self.add_trace(quoted_var, x_var_name, y_axis, custom_color, error_out)
+
+    def _refresh_legend(self) -> None:
+        """Clear and re-populate the legend from the current trace list."""
+        if not self.legend:
+            return
+        self.legend.clear()
+        for var, plot_item, y_axis in self.traces:
+            legend_name = f"{var} @ {y_axis}"
+            self.legend.addItem(plot_item, legend_name)
 
     def clear_traces(self) -> None:
         """Clear all traces from plot and application state."""

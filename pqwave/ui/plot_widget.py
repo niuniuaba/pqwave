@@ -16,9 +16,9 @@ This module provides a PlotWidget subclass that adds:
 from typing import Optional, Tuple, Callable
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer
+from PyQt6.QtWidgets import QApplication, QGraphicsTextItem, QInputDialog
+from PyQt6.QtGui import QColor, QPainter, QFont
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QEvent
 
 from pqwave.utils.log_axis import LogAxisItem
 from pqwave.logging_config import get_logger
@@ -55,6 +55,7 @@ class PlotWidget(pg.PlotWidget):
     cursor_y2_changed = pyqtSignal(float)
     axis_log_mode_changed = pyqtSignal(str, bool)  # orientation, log_mode
     mark_clicked = pyqtSignal(float, float, float, float, float)  # x_vb, y1_vb, x_linear, y1_linear, y2_linear
+    title_changed = pyqtSignal(str)
 
     def __init__(self, parent=None):
         """Initialize the enhanced plot widget.
@@ -95,6 +96,10 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_yB_visible = False
         self.cursor_y2_visible = False
 
+        # Cursor selection for keyboard movement
+        self._selected_x_cursor: Optional[str] = None  # 'xa' or 'xb'
+        self._selected_y_cursor: Optional[str] = None  # 'yA' or 'yB'
+
         # Mouse tracking state
         self._mouse_inside_viewbox = False
 
@@ -111,6 +116,9 @@ class PlotWidget(pg.PlotWidget):
 
         # Apply viewbox theme and styling
         self._apply_viewbox_theme(ViewboxTheme.DARK)
+
+        # Set default plot title (reminds users they can customize it)
+        self.plotItem.setTitle("Title")
 
         # Initialize cursors
         self._create_cursors()
@@ -413,6 +421,7 @@ class PlotWidget(pg.PlotWidget):
         self.scene().addItem(self.y2_viewbox)
         self.y2_viewbox.setXLink(self.plotItem)
         self.right_axis.linkToView(self.y2_viewbox)
+        self.right_axis.setLogMode(y=self._y2_log_mode)
 
         # Update geometry on resize
         def update_viewbox():
@@ -473,10 +482,10 @@ class PlotWidget(pg.PlotWidget):
         elif axis == 'Y1':
             self._y1_log_mode = log_mode
             self.getAxis('left').setLogMode(y=log_mode)
-        elif axis == 'Y2' and self.y2_viewbox:
+        elif axis == 'Y2':
             self._y2_log_mode = log_mode
             if self.right_axis:
-                self.right_axis.setLogMode(log_mode)
+                self.right_axis.setLogMode(y=log_mode)
 
     @staticmethod
     def _log_to_linear(value: float) -> float:
@@ -531,7 +540,7 @@ class PlotWidget(pg.PlotWidget):
             self.y2_viewbox.setYRange(min_val, max_val, padding=0)
 
     def auto_range_axis(self, axis: str) -> None:
-        """Auto-range an axis based on current data and immediately update the view.
+        """Auto-range a single axis while preserving the other axis range.
 
         For X axis: after auto-ranging, autoRange is disabled so that
         clipToView on PlotDataItem can work (pyqtgraph skips clipping
@@ -541,37 +550,54 @@ class PlotWidget(pg.PlotWidget):
         Note: InfiniteLine cursors (Xa/Xb, Ya/Yb, cross-hair) are excluded
         from range calculation so cursor placement before traces are loaded
         doesn't corrupt auto-range.
+
+        Uses vb.autoRange() directly (same mechanism as pyqtgraph's context
+        menu), but explicitly disables auto-range on the non-target axis
+        so only the target axis is adjusted.
         """
         vb = self.plotItem.vb
         if axis == 'X':
-            vb.enableAutoRange(x=True)
             items = [it for it in vb.addedItems
                      if not isinstance(it, pg.InfiniteLine)]
-            vb.autoRange(padding=0.05, items=items or None)
-            # Disable X autoRange so clipToView works during pan/zoom
+            if not items:
+                return
+            vb.enableAutoRange(x=True, y=False)
+            vb.autoRange(padding=0.05, items=items)
             vb.enableAutoRange(x=False)
         elif axis == 'Y1':
-            vb.enableAutoRange(y=True)
             items = [it for it in vb.addedItems
                      if not isinstance(it, pg.InfiniteLine)]
-            vb.autoRange(padding=0.05, items=items or None)
+            if not items:
+                return
+            vb.enableAutoRange(x=False, y=True)
+            vb.autoRange(padding=0.05, items=items)
         elif axis == 'Y2' and self.y2_viewbox:
-            self.y2_viewbox.enableAutoRange(y=True)
-            items = [it for it in self.y2_viewbox.addedItems
+            y2vb = self.y2_viewbox
+            items = [it for it in y2vb.addedItems
                      if not isinstance(it, pg.InfiniteLine)]
-            self.y2_viewbox.autoRange(padding=0.05, items=items or None)
+            if not items:
+                return
+            y2vb.enableAutoRange(y=True)
+            y2vb.autoRange(padding=0.05, items=items)
 
     # Grid control
 
     def set_grid_visible(self, visible: bool) -> None:
-        """Show/hide grid lines."""
-        self.plotItem.showGrid(x=visible, y=visible, alpha=0.3)
+        """Show/hide grid lines with dot-line style."""
+        # Grid line style (DashLine) is handled by LogAxisItem.generateDrawSpecs.
+        # Here we only toggle visibility via setGrid(), which properly
+        # invalidates the QPicture cache.  Directly setting axis.grid would
+        # bypass the cache-invalidation logic and the toggle would appear
+        # broken until the next resize/repaint.
+        grid_val = 76 if visible else False  # 76 ≈ 0.3 * 255
+
+        for axis_name in ('bottom', 'left'):
+            axis = self.getAxis(axis_name)
+            if axis:
+                axis.setGrid(grid_val)
+
         if self.right_axis:
-            # Update Y2 grid visibility
-            fg_color = THEME_COLORS[self._current_theme]['foreground']
-            grid_color = QColor(fg_color)
-            grid_color.setAlpha(100)
-            self.right_axis.gridPen = pg.mkPen(color=grid_color) if visible else pg.mkPen(None)
+            self.right_axis.setGrid(grid_val)
 
     # Internal methods
 
@@ -593,14 +619,6 @@ class PlotWidget(pg.PlotWidget):
                 axis.setPen(fg_color)
                 axis.labelStyle['color'] = fg_color
                 axis._updateLabel()
-
-        # Set grid colors
-        grid_color = QColor(fg_color)
-        grid_color.setAlpha(100)
-        self.getAxis('bottom').gridPen = pg.mkPen(color=grid_color)
-        self.getAxis('left').gridPen = pg.mkPen(color=grid_color)
-        if self.right_axis:
-            self.right_axis.gridPen = pg.mkPen(color=grid_color)
 
         # Set viewbox border
         self.plotItem.vb.setBorder(pg.mkPen(color=fg_color, width=1))
@@ -630,6 +648,68 @@ class PlotWidget(pg.PlotWidget):
         """Apply a viewbox theme and update all visual elements."""
         self._apply_viewbox_theme(theme)
 
+    # --- Font application ---
+
+    def apply_fonts(self, state: 'ApplicationState') -> None:
+        """Apply all font configurations from ApplicationState to plot elements."""
+        colors = THEME_COLORS[self._current_theme]
+        fg_color = colors['foreground']
+
+        def _resolve(fc) -> str:
+            return fc.color if fc.color else fg_color
+
+        # -- Plot Title (pyqtgraph LabelItem) --
+        if self.plotItem.titleLabel:
+            opts = self.plotItem.titleLabel.opts
+            opts['color'] = _resolve(state.title_font)
+            if state.title_font.family:
+                opts['family'] = state.title_font.family
+            else:
+                opts.pop('family', None)
+            if state.title_font.size > 0:
+                opts['size'] = f'{state.title_font.size}pt'
+            else:
+                opts.pop('size', None)
+            title_text = self.plotItem.titleLabel.text
+            if title_text:
+                self.plotItem.titleLabel.setText(title_text)
+
+        # -- Axis Labels (QGraphicsTextItem + labelStyle color) --
+        for axis_name in ('bottom', 'left', 'right'):
+            axis = self.getAxis(axis_name)
+            if axis and hasattr(axis, 'label') and axis.label:
+                color = _resolve(state.label_font)
+                axis.labelStyle['color'] = color
+
+                font = QFont()
+                default_font = QFont()
+                if state.label_font.family:
+                    font.setFamily(state.label_font.family)
+                else:
+                    font.setFamily(default_font.family())
+                if state.label_font.size > 0:
+                    font.setPointSize(state.label_font.size)
+                else:
+                    font.setPointSize(default_font.pointSize())
+                axis.label.setFont(font)
+                axis._updateLabel()
+
+        # -- Tick Labels --
+        tick_color = _resolve(state.tick_font)
+        for axis_name in ('bottom', 'left', 'right'):
+            axis = self.getAxis(axis_name)
+            if axis:
+                if state.tick_font.family or state.tick_font.size > 0:
+                    tick_font = QFont()
+                    if state.tick_font.family:
+                        tick_font.setFamily(state.tick_font.family)
+                    if state.tick_font.size > 0:
+                        tick_font.setPointSize(state.tick_font.size)
+                    axis.setTickFont(tick_font)
+                else:
+                    axis.setTickFont(None)
+                axis.setTextPen(tick_color)
+
     def _create_cursors(self) -> None:
         """Create cursor lines."""
         # Cross-hair lines (non-interactive)
@@ -645,7 +725,7 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_xa_line.setVisible(False)
         self.plotItem.addItem(self.cursor_xa_line)
         self.cursor_xa_line.sigPositionChanged.connect(
-            lambda line: self.cursor_xa_changed.emit(line.value())
+            lambda line: self._on_cursor_dragged('xa', line)
         )
 
         # XB cursor line (draggable, vertical, orange dash)
@@ -653,7 +733,7 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_xb_line.setVisible(False)
         self.plotItem.addItem(self.cursor_xb_line)
         self.cursor_xb_line.sigPositionChanged.connect(
-            lambda line: self.cursor_xb_changed.emit(line.value())
+            lambda line: self._on_cursor_dragged('xb', line)
         )
 
         # YA cursor line (draggable, horizontal, yellow solid)
@@ -661,7 +741,7 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_yA_line.setVisible(False)
         self.plotItem.addItem(self.cursor_yA_line)
         self.cursor_yA_line.sigPositionChanged.connect(
-            lambda line: self.cursor_yA_changed.emit(line.value())
+            lambda line: self._on_cursor_dragged('yA', line)
         )
 
         # YB cursor line (draggable, horizontal, lime dash)
@@ -669,10 +749,153 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_yB_line.setVisible(False)
         self.plotItem.addItem(self.cursor_yB_line)
         self.cursor_yB_line.sigPositionChanged.connect(
-            lambda line: self.cursor_yB_changed.emit(line.value())
+            lambda line: self._on_cursor_dragged('yB', line)
         )
 
         # Y2 cursor line will be created when Y2 axis is enabled
+
+    def _on_cursor_dragged(self, cursor_name: str, line: pg.InfiniteLine) -> None:
+        """Called when a cursor is dragged by the user.
+
+        Updates the selected-cursor tracking and emits the appropriate signal.
+        """
+        value = line.value()
+        if cursor_name == 'xa':
+            self._selected_x_cursor = 'xa'
+            self.cursor_xa_changed.emit(value)
+        elif cursor_name == 'xb':
+            self._selected_x_cursor = 'xb'
+            self.cursor_xb_changed.emit(value)
+        elif cursor_name == 'yA':
+            self._selected_y_cursor = 'yA'
+            self.cursor_yA_changed.emit(value)
+        elif cursor_name == 'yB':
+            self._selected_y_cursor = 'yB'
+            self.cursor_yB_changed.emit(value)
+
+    def _check_cursor_click(self, scene_pos) -> None:
+        """Check if a mouse click is near a visible cursor line and select it.
+
+        Uses pixel-space distance so hit detection works regardless of zoom level.
+        """
+        from PyQt6.QtCore import QPointF
+
+        threshold_px = 10.0
+        vb = self.plotItem.vb
+
+        # Check X cursors (vertical lines) — use horizontal distance
+        for name, line, visible in [
+            ('xa', self.cursor_xa_line, self.cursor_xa_visible),
+            ('xb', self.cursor_xb_line, self.cursor_xb_visible),
+        ]:
+            if line is not None and visible:
+                try:
+                    line_scene = vb.mapViewToScene(QPointF(line.value(), 0))
+                    if abs(scene_pos.x() - line_scene.x()) < threshold_px:
+                        self._selected_x_cursor = name
+                        return
+                except Exception:
+                    continue
+
+        # Check Y cursors (horizontal lines) — use vertical distance
+        for name, line, visible in [
+            ('yA', self.cursor_yA_line, self.cursor_yA_visible),
+            ('yB', self.cursor_yB_line, self.cursor_yB_visible),
+        ]:
+            if line is not None and visible:
+                try:
+                    line_scene = vb.mapViewToScene(QPointF(0, line.value()))
+                    if abs(scene_pos.y() - line_scene.y()) < threshold_px:
+                        self._selected_y_cursor = name
+                        return
+                except Exception:
+                    continue
+
+    def select_x_cursor(self, name: str) -> None:
+        """Set which X cursor is selected for keyboard movement."""
+        self._selected_x_cursor = name
+
+    def select_y_cursor(self, name: str) -> None:
+        """Set which Y cursor is selected for keyboard movement."""
+        self._selected_y_cursor = name
+
+    def move_selected_cursor(self, direction: str) -> None:
+        """Move the selected cursor by one screen pixel.
+
+        Args:
+            direction: 'left', 'right', 'up', or 'down'
+
+        The step size = view_range / viewport_pixel_size, giving pixel-level
+        precision regardless of zoom level.  Works correctly in log mode
+        since the ViewBox coordinate space is linear (data is pre-transformed
+        by TraceManager).
+        """
+        vb = self.plotItem.vb
+        view_rect = vb.sceneBoundingRect()
+        if view_rect.isNull() or not view_rect.isValid():
+            return
+        pixel_width = view_rect.width()
+        pixel_height = view_rect.height()
+        if pixel_width < 1 or pixel_height < 1:
+            return
+
+        x_range = vb.viewRange()[0]
+        y_range = vb.viewRange()[1]
+
+        dx = (x_range[1] - x_range[0]) / pixel_width if pixel_width > 0 else 0
+        dy = (y_range[1] - y_range[0]) / pixel_height if pixel_height > 0 else 0
+
+        if direction in ('left', 'right'):
+            if self._selected_x_cursor == 'xa' and self.cursor_xa_line and self.cursor_xa_visible:
+                cur = self.cursor_xa_line.value()
+                step = -dx if direction == 'left' else dx
+                self.cursor_xa_line.setValue(cur + step)
+                self.cursor_xa_changed.emit(cur + step)
+            elif self._selected_x_cursor == 'xb' and self.cursor_xb_line and self.cursor_xb_visible:
+                cur = self.cursor_xb_line.value()
+                step = -dx if direction == 'left' else dx
+                self.cursor_xb_line.setValue(cur + step)
+                self.cursor_xb_changed.emit(cur + step)
+            else:
+                # No X cursor selected — see if exactly one is visible and auto-select
+                self._auto_select_x_cursor()
+                if self._selected_x_cursor:
+                    self.move_selected_cursor(direction)
+        elif direction in ('up', 'down'):
+            target = self._selected_y_cursor
+            if self._selected_y_cursor == 'yA' and self.cursor_yA_line and self.cursor_yA_visible:
+                cur = self.cursor_yA_line.value()
+                step = dy if direction == 'up' else -dy  # up → increase Y
+                self.cursor_yA_line.setValue(cur + step)
+                self.cursor_yA_changed.emit(cur + step)
+            elif self._selected_y_cursor == 'yB' and self.cursor_yB_line and self.cursor_yB_visible:
+                cur = self.cursor_yB_line.value()
+                step = dy if direction == 'up' else -dy
+                self.cursor_yB_line.setValue(cur + step)
+                self.cursor_yB_changed.emit(cur + step)
+            else:
+                self._auto_select_y_cursor()
+                if self._selected_y_cursor:
+                    self.move_selected_cursor(direction)
+
+    def _auto_select_x_cursor(self) -> None:
+        """Auto-select the sole visible X cursor (or do nothing if ambiguous)."""
+        xa_vis = self.cursor_xa_line is not None and self.cursor_xa_visible
+        xb_vis = self.cursor_xb_line is not None and self.cursor_xb_visible
+        if xa_vis and not xb_vis:
+            self._selected_x_cursor = 'xa'
+        elif xb_vis and not xa_vis:
+            self._selected_x_cursor = 'xb'
+        # If both visible or neither visible, leave current selection
+
+    def _auto_select_y_cursor(self) -> None:
+        """Auto-select the sole visible Y cursor (or do nothing if ambiguous)."""
+        yA_vis = self.cursor_yA_line is not None and self.cursor_yA_visible
+        yB_vis = self.cursor_yB_line is not None and self.cursor_yB_visible
+        if yA_vis and not yB_vis:
+            self._selected_y_cursor = 'yA'
+        elif yB_vis and not yA_vis:
+            self._selected_y_cursor = 'yB'
 
     def _on_mouse_moved(self, pos) -> None:
         """Handle mouse movement for coordinate display and cross-hair."""
@@ -741,11 +964,17 @@ class PlotWidget(pg.PlotWidget):
             self.mouse_moved.emit(float('nan'), float('nan'), float('nan'))
 
     def _on_mouse_clicked(self, event) -> None:
-        """Handle mouse clicks for mark placement.
+        """Handle mouse clicks for cursor selection and mark placement.
 
-        Only places a mark when cross-hair is visible and the click
-        is inside the main viewbox with the left button.
+        Left-clicking near a cursor line selects it for keyboard movement.
+        When cross-hair is visible, left-click inside the viewbox also
+        places a measurement mark.
         """
+        # Always check for cursor line clicks first (selection)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._check_cursor_click(event.scenePos())
+
+        # Then handle mark placement (only when cross-hair is visible)
         if not self.cross_hair_visible:
             return
         if not event.button() == Qt.MouseButton.LeftButton:
@@ -818,6 +1047,60 @@ class PlotWidget(pg.PlotWidget):
     def get_plot_title(self) -> str:
         """Get the current plot title."""
         return self.plotItem.titleLabel.text if self.plotItem.titleLabel else ''
+
+    # --- Double-click title / axis labels to edit ---
+
+    def mouseDoubleClickEvent(self, event):
+        """Detect double-clicks on plot title and axis labels for in-place editing."""
+        scene_pos = self.mapToScene(event.pos())
+        items = self.scene().items(scene_pos)
+
+        for item in items:
+            # Title label
+            if item is self.plotItem.titleLabel:
+                self._edit_title()
+                return
+
+            # Axis labels
+            if isinstance(item, QGraphicsTextItem):
+                for axis_name in ('bottom', 'left'):
+                    axis = self.getAxis(axis_name)
+                    if item is getattr(axis, 'label', None):
+                        self._edit_axis_label(axis_name)
+                        return
+                if self.right_axis and item is getattr(self.right_axis, 'label', None):
+                    self._edit_axis_label('right')
+                    return
+
+        super().mouseDoubleClickEvent(event)
+
+    def _edit_title(self) -> None:
+        """Show a dialog to edit the plot title."""
+        current = self.get_plot_title()
+        new_title, ok = QInputDialog.getText(
+            self, "Edit Title", "Plot title:",
+            text=current if current != "Title" else ""
+        )
+        if ok:
+            final = new_title.strip()
+            self.set_plot_title(final)
+            self.title_changed.emit(final)
+
+    def _edit_axis_label(self, axis_name: str) -> None:
+        """Show a dialog to edit an axis label."""
+        axis = self.getAxis(axis_name)
+        if not axis:
+            return
+        current = axis.labelText or ""
+        axis_title = {'bottom': 'X Axis', 'left': 'Y1 Axis', 'right': 'Y2 Axis'}.get(axis_name, axis_name)
+        axis_id = {'bottom': 'X', 'left': 'Y1', 'right': 'Y2'}[axis_name]
+        new_label, ok = QInputDialog.getText(
+            self, f"Edit {axis_title} Label", f"{axis_title} label:",
+            text=current
+        )
+        if ok:
+            final = new_label.strip()
+            self.set_axis_label(axis_id, final)
 
     # --- ViewBox throttle: coalesce rapid pan/zoom into fewer paints ---
 

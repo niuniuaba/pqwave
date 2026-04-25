@@ -64,7 +64,7 @@ class Trace:
         return (x_min, x_max, y_min, y_max)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert trace to serializable dictionary."""
+        """Convert trace to serializable dictionary (includes data arrays)."""
         return {
             'name': self.name,
             'expression': self.expression,
@@ -77,6 +77,35 @@ class Trace:
             'dataset_idx': self.dataset_idx,
             'metadata': self.metadata
         }
+
+    def to_per_file_dict(self) -> Dict[str, Any]:
+        """Convert trace to dict without data arrays (for per-file state)."""
+        return {
+            'name': self.name,
+            'expression': self.expression,
+            'y_axis': self.y_axis.value,
+            'color': self.color,
+            'line_width': self.line_width,
+            'visible': self.visible,
+            'dataset_idx': self.dataset_idx,
+            'metadata': self.metadata
+        }
+
+    @classmethod
+    def from_per_file_dict(cls, data: Dict[str, Any]) -> 'Trace':
+        """Create trace from per-file dict (no data arrays)."""
+        return cls(
+            name=data['name'],
+            expression=data['expression'],
+            x_data=np.array([]),
+            y_data=np.array([]),
+            y_axis=AxisAssignment(data['y_axis']),
+            color=tuple(data['color']),
+            line_width=data['line_width'],
+            visible=data['visible'],
+            dataset_idx=data['dataset_idx'],
+            metadata=data.get('metadata', {})
+        )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Trace':

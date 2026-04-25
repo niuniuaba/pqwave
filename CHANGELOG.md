@@ -1,6 +1,20 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 ## CHANGELOG.md
 
+###  v0.2.3 — Keybindings, auto-range fixes, and log mode improvements
+- **Keybinding system**: New `KeyBindingManager` with customizable shortcuts (JSON-based config), `KeyBindingsDialog` under Help menu showing all bindings with custom binding highlighting, and `WidgetWithChildrenShortcut` for plot-contextual keys
+- **Auto-range fix**: Auto-range X and Y now only affect their respective axis (previously both acted like zoom-to-fit). Context-menu auto-range still works correctly
+- **Y cursor direction fix**: Up arrow now increases Y cursor value, down arrow decreases it (was reversed)
+- **Cursor click selection**: Clicking on a cursor line selects it for keyboard movement; auto-selects when dragging a cursor
+- **Log Y2 fix**: Y2 axis log mode tick labels now display correctly (10⁻²⁰ instead of -20). Root cause: `setLogMode()` positional argument bound to `x` instead of `y` for right-axis
+- **Y2 axis always visible**: Y2 axis now enabled by default from initialization with label "Y2", like Y1. Double-click label to edit in-place
+- **Per-file state persistence**: Save/restore axis configs (log mode, range, auto-range), plot title, grid/legend visibility, and trace properties per raw file (`.json` alongside `.raw`)
+- **Font configuration**: New font controls in Plot Settings with family/size/color for Title, Axis Labels, Tick Labels, and UI. Colors are persistent per global preferences
+- **Double-click editing**: Double-click plot title or axis labels to edit in-place via input dialog
+- **Grid visibility fix**: Per-file state loading now correctly applies saved grid visibility to the plot widget
+- **Action key collision fix**: Toolbar cross-hair action uses distinct key (`toggle_cross_hair_toolbar`) to avoid overwriting menu action reference
+- **Codex review**: All 37 keybinding tests passing, covering unit tests for KeyBindingManager, UI tests for KeyBindingsDialog, and integration tests for menu shortcuts, main window wiring, cursor selection/movement, and auto-range
+
 ###  v0.2.3 — Xschem integration with bug fixes
 - **Xschem integration**: TCP socket server (port 2026) enables pqwave as external wave viewer for xschem schematic editor
 - **GAW-style protocol**: Support `table_set filename.raw` and `copyvar v(node) sel #color` commands for xschem compatibility

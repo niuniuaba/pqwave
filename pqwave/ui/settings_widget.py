@@ -11,11 +11,13 @@ This widget provides controls for:
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox,
-    QGroupBox, QGridLayout, QPushButton, QDoubleSpinBox, QComboBox
+    QGroupBox, QGridLayout, QPushButton, QDoubleSpinBox, QComboBox,
+    QFontComboBox, QSpinBox, QColorDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QColor
 
-from pqwave.models.state import AxisId, ApplicationState, ViewboxTheme, THEME_COLORS
+from pqwave.models.state import AxisId, ApplicationState, ViewboxTheme, THEME_COLORS, FontConfig
 from pqwave.ui.axis_manager import AxisManager
 
 
@@ -23,8 +25,8 @@ class SettingsWidget(QWidget):
     """Settings widget for plot title and axis configuration."""
 
     # Signal emitted when plot title changes
-    plot_title_changed = pyqtSignal(str)
     viewbox_theme_changed = pyqtSignal(ViewboxTheme)
+    font_changed = pyqtSignal()
 
     def __init__(self,
                  axis_manager: AxisManager,
@@ -48,6 +50,11 @@ class SettingsWidget(QWidget):
         self.auto_buttons = {}
         self.label_edits = {}
 
+        # Font control storage
+        self.font_family_combos = {}
+        self.font_size_spinboxes = {}
+        self.font_color_buttons = {}
+
         self.setWindowTitle("Plot Settings")
         self.setMinimumWidth(600)
         # Set window flags to make it independent window
@@ -62,18 +69,6 @@ class SettingsWidget(QWidget):
         """Create the user interface."""
         layout = QVBoxLayout(self)
 
-        # Plot title
-        title_group = QGroupBox("Plot Title")
-        title_layout = QHBoxLayout()
-        title_label = QLabel("Title:")
-        self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("Enter plot title...")
-        self.title_edit.textChanged.connect(self._on_title_changed)
-        title_layout.addWidget(title_label)
-        title_layout.addWidget(self.title_edit)
-        title_group.setLayout(title_layout)
-        layout.addWidget(title_group)
-
         # Viewbox theme selector
         theme_group = QGroupBox("Viewbox Theme")
         theme_layout = QHBoxLayout()
@@ -87,6 +82,54 @@ class SettingsWidget(QWidget):
         theme_layout.addStretch()
         theme_group.setLayout(theme_layout)
         layout.addWidget(theme_group)
+
+        # Fonts
+        fonts_group = QGroupBox("Fonts")
+        fonts_layout = QGridLayout()
+
+        _FONT_ELEMENTS = [
+            ("Title:", "title_font"),
+            ("Axis Labels:", "label_font"),
+            ("Tick Labels:", "tick_font"),
+            ("UI:", "ui_font"),
+        ]
+
+        for row, (label_text, key) in enumerate(_FONT_ELEMENTS):
+            label = QLabel(label_text)
+            fonts_layout.addWidget(label, row, 0)
+
+            # Font family
+            family_combo = QFontComboBox()
+            family_combo.setEditable(False)
+            family_combo.insertItem(0, "Default")
+            family_combo.currentIndexChanged.connect(lambda idx, k=key: self._on_font_changed())
+            self.font_family_combos[key] = family_combo
+            fonts_layout.addWidget(family_combo, row, 1)
+
+            # Size
+            size_spin = QSpinBox()
+            size_spin.setRange(0, 48)
+            size_spin.setSuffix(" pt")
+            size_spin.setSpecialValueText("Default")
+            size_spin.valueChanged.connect(lambda v, k=key: self._on_font_changed())
+            self.font_size_spinboxes[key] = size_spin
+            fonts_layout.addWidget(size_spin, row, 2)
+
+            # Color button
+            color_btn = QPushButton()
+            color_btn.setFixedSize(28, 28)
+            color_btn.setToolTip("Select font color (empty = use theme foreground)")
+            color_btn.clicked.connect(lambda checked, k=key: self._pick_font_color(k))
+            self.font_color_buttons[key] = color_btn
+            fonts_layout.addWidget(color_btn, row, 3)
+
+            # Reset
+            reset_btn = QPushButton("Reset")
+            reset_btn.clicked.connect(lambda checked, k=key: self._reset_font(k))
+            fonts_layout.addWidget(reset_btn, row, 4)
+
+        fonts_group.setLayout(fonts_layout)
+        layout.addWidget(fonts_group)
 
         # Axes settings
         axes_group = QGroupBox("Axes Settings")
@@ -204,9 +247,6 @@ class SettingsWidget(QWidget):
 
     def _load_current_settings(self):
         """Load current settings from application state."""
-        # Plot title
-        self.title_edit.setText(self.state.plot_title)
-
         # Viewbox theme
         theme = self.state.viewbox_theme
         index = self.theme_combo.findData(theme)
@@ -226,17 +266,38 @@ class SettingsWidget(QWidget):
             # Range
             if config.range and not config.auto_range:
                 min_val, max_val = config.range
+                self.min_spinboxes[axis_id].blockSignals(True)
+                self.max_spinboxes[axis_id].blockSignals(True)
                 self.min_spinboxes[axis_id].setValue(min_val)
                 self.max_spinboxes[axis_id].setValue(max_val)
+                self.min_spinboxes[axis_id].blockSignals(False)
+                self.max_spinboxes[axis_id].blockSignals(False)
             else:
                 # Auto-range mode - clear spinboxes
+                self.min_spinboxes[axis_id].blockSignals(True)
+                self.max_spinboxes[axis_id].blockSignals(True)
                 self.min_spinboxes[axis_id].setValue(0.0)
                 self.max_spinboxes[axis_id].setValue(1.0)
+                self.min_spinboxes[axis_id].blockSignals(False)
+                self.max_spinboxes[axis_id].blockSignals(False)
 
-    def _on_title_changed(self, text: str):
-        """Handle plot title changes."""
-        self.state.plot_title = text
-        self.plot_title_changed.emit(text)
+        # Load font settings (block signals to avoid premature emits)
+        for key in ("title_font", "label_font", "tick_font", "ui_font"):
+            fc = getattr(self.state, key)
+            combo = self.font_family_combos[key]
+            combo.blockSignals(True)
+            if fc.family:
+                idx = combo.findText(fc.family)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            else:
+                combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+            spin = self.font_size_spinboxes[key]
+            spin.blockSignals(True)
+            spin.setValue(fc.size)
+            spin.blockSignals(False)
+            self._update_color_button(key)
 
     def _on_theme_changed(self, index: int) -> None:
         """Handle viewbox theme selection changes."""
@@ -267,3 +328,54 @@ class SettingsWidget(QWidget):
         # Clear spinboxes to indicate auto-range mode
         self.min_spinboxes[axis_id].setValue(0.0)
         self.max_spinboxes[axis_id].setValue(1.0)
+
+    # --- Font settings handlers ---
+
+    def _on_font_changed(self):
+        """Handle any font control change -- save to state and notify."""
+        self._save_fonts_to_state()
+        self.font_changed.emit()
+
+    def _save_fonts_to_state(self):
+        """Write current font control values into ApplicationState."""
+        for key in ("title_font", "label_font", "tick_font", "ui_font"):
+            fc = getattr(self.state, key)
+            combo = self.font_family_combos[key]
+            fc.family = "" if combo.currentIndex() == 0 else combo.currentFont().family()
+            fc.size = self.font_size_spinboxes[key].value()
+
+    def _pick_font_color(self, key: str):
+        """Open QColorDialog and update the font color."""
+        fc = getattr(self.state, key)
+        current = QColor(fc.color) if fc.color else QColor()
+        color = QColorDialog.getColor(current, self, f"Select Font Color")
+        if color.isValid():
+            fc.color = color.name()
+            self._update_color_button(key)
+            self.font_changed.emit()
+
+    def _reset_font(self, key: str):
+        """Reset a font config to defaults."""
+        fc = getattr(self.state, key)
+        fc.family = ""
+        fc.size = 0
+        fc.color = ""
+        self.font_family_combos[key].blockSignals(True)
+        self.font_family_combos[key].setCurrentIndex(0)
+        self.font_family_combos[key].blockSignals(False)
+        self.font_size_spinboxes[key].blockSignals(True)
+        self.font_size_spinboxes[key].setValue(0)
+        self.font_size_spinboxes[key].blockSignals(False)
+        self._update_color_button(key)
+        self.font_changed.emit()
+
+    def _update_color_button(self, key: str):
+        """Update color button background to reflect current font color."""
+        fc = getattr(self.state, key)
+        btn = self.font_color_buttons[key]
+        if fc.color:
+            btn.setStyleSheet(
+                f"background-color: {fc.color}; border: 1px solid #888; border-radius: 2px;"
+            )
+        else:
+            btn.setStyleSheet("")

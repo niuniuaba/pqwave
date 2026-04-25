@@ -1,4 +1,18 @@
 ## TODO.md
+###  ✅ v0.2.4 keybindings ✅ **已完成**
+15.  keybindings ✅ **已完成**  
+- 提供一套快捷键系统，目前需要实现的keybindings记录在./keybindings.md，今后可继续扩展
+- 提供一个用户可以设定keybindings的方法
+- 提供Help - Keybindings菜单项，为用户提示默认的keybindings列表以及定制化设定的方法
+
+###   v0.2.3   
+14.  ✅ attach states to plot✅ **已完成**  
+- 提供一个机制，将当前state与当前的plot绑定，这样当用户下次打开同一个raw时自动加载绑定的state，这样用户不用重复去调整各种参数设置。
+- 默认将状态json文件保存到与打开的raw文件相同的目录下，文件名与raw文件名相同。比如打开name.raw文件，则保存name.json文件。
+- 当前窗口关闭时自动保存状态json文件，同时增加一个File - Save Current State菜单项，用户可以在任意时候保存状态。
+- 状态文件不要保存x_data，对于大的raw文件来说数据量太庞大了。
+- 不再保存stat.json到$HOME/.pqwave，也不要再从该位置读取stat.json，防止冲突。
+
 ###  ✅ v0.2.3 independent vertical (x) and horizon (y) cursors✅ **已完成**  
 13. independent horizon (y) and vertical (x) cursors ✅ **已完成**  
 - 与cross-hair cursor分离，可以独立使用
@@ -8,8 +22,8 @@
 - 当使用两个y cursor时，在status bar显示 delta y1和delta y2的值
 - 与cross-hair的区别：cross-hair用于在trace上打点并获取该点的数值，x/y cursor用于拖动，显示delta值，并为后续的back-anotate做准备（TODO No. 12）。
 
-###  v0.2.3 introduce new feature : back-anotate from pqwave to xschem 
-12. back-anotate to xschem schematic 
+###  ✅ v0.2.3 introduce new feature : back-anotate from pqwave to xschem✅ **已完成**   
+12. back-anotate to xschem schematic✅ **已完成**  
 - 当用户使用cross-hair cursor扫过某个或多个trace时，将数据点发送给xschem，xschem在电路图上这些trace对应的node处显示接收到的数值。
 - live backannotation: You can place / move a (vertical) cursor in the  and see voltages and currents annotated in the schematic.
 - 可能需要参考xschem的graph的实现方法。./xschem_graph.md; ../xschem.git/src

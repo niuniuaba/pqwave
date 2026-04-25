@@ -12,20 +12,20 @@ and action management.
 from PyQt6.QtWidgets import (
     QMenuBar, QMenu, QToolBar, QStatusBar, QLabel, QStyle
 )
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QIcon
 from PyQt6.QtCore import Qt
 
 
 class MenuManager:
     """Manages menus, toolbars, and status bar for the main window."""
 
-    def __init__(self, parent, callbacks=None):
+    def __init__(self, parent, callbacks=None, keybinding_manager=None):
         """Initialize MenuManager.
 
         Args:
             parent: The parent QMainWindow
             callbacks: Dictionary mapping action names to callback functions.
-                      Required keys: 'open_file', 'open_new_window', 'convert_raw_data',
+                      Required keys: 'open_file', 'open_new_window', 'save_current_state', 'convert_raw_data',
                       'edit_trace_properties',
                       'show_settings', 'toggle_toolbar', 'toggle_statusbar', 'toggle_grids',
                       'zoom_in', 'zoom_out', 'zoom_to_fit', 'auto_range_x', 'auto_range_y',
@@ -33,10 +33,13 @@ class MenuManager:
                       'zoom_to_fit_toolbar', 'auto_range_x_toolbar', 'auto_range_y_toolbar',
                       'zoom_box_toolbar', 'toggle_grids_toolbar', 'toggle_cross_hair',
                       'toggle_x_cursor_a', 'toggle_x_cursor_b',
-                      'toggle_y_cursor_A', 'toggle_y_cursor_B'
+                      'toggle_y_cursor_A', 'toggle_y_cursor_B',
+                      'show_keybindings'
+            keybinding_manager: Optional KeyBindingManager instance.
         """
         self.parent = parent
         self.callbacks = callbacks or {}
+        self.keybinding_manager = keybinding_manager
 
         # Action references for external access
         self.actions = {}
@@ -57,17 +60,44 @@ class MenuManager:
         parent.setStatusBar(self.statusbar)
         self._create_status_bar()
 
+    def _set_action_shortcut(self, action, action_name):
+        """Set a QAction's shortcut from the keybinding manager, if available.
+
+        Only sets shortcuts with a Ctrl modifier (or other modifiers) — skips
+        bare single-key and arrow-key sequences to prevent double-fire when
+        the same shortcut is also installed via QShortcut on the plot widget.
+        """
+        if self.keybinding_manager is not None:
+            seq = self.keybinding_manager.get_sequence(action_name)
+            if not seq:
+                return
+            # Skip bare letter keys and arrow keys — they are installed
+            # as WidgetWithChildrenShortcut on the plot area instead.
+            if seq in ('A', 'B', 'Z', 'F', '+', 'Left', 'Right', 'Up', 'Down',
+                       'Shift+A', 'Shift+B'):
+                return
+            if len(seq) == 1 and seq.isalpha():
+                return
+            action.setShortcut(QKeySequence(seq))
+
     def _create_menus(self):
         """Create menus and their actions."""
         # File menu
         file_menu = QMenu("File", self.parent)
 
+        save_current_state_action = QAction("Save Current State", self.parent)
+        save_current_state_action.triggered.connect(self.callbacks.get('save_current_state', lambda: None))
+        self._set_action_shortcut(save_current_state_action, 'save_current_state')
+        file_menu.addAction(save_current_state_action)
+
         open_raw_action = QAction("Open Raw File", self.parent)
         open_raw_action.triggered.connect(self.callbacks.get('open_file', lambda: None))
+        self._set_action_shortcut(open_raw_action, 'open_file')
         file_menu.addAction(open_raw_action)
 
         open_new_window_action = QAction("Open New Window", self.parent)
         open_new_window_action.triggered.connect(self.callbacks.get('open_new_window', lambda: None))
+        self._set_action_shortcut(open_new_window_action, 'open_new_window')
         file_menu.addAction(open_new_window_action)
 
         convert_raw_action = QAction("Convert Raw Data...", self.parent)
@@ -81,10 +111,12 @@ class MenuManager:
 
         edit_properties_action = QAction("Edit Trace Properties", self.parent)
         edit_properties_action.triggered.connect(self.callbacks.get('edit_trace_properties', lambda: None))
+        self._set_action_shortcut(edit_properties_action, 'edit_trace_properties')
         edit_menu.addAction(edit_properties_action)
 
         settings_action = QAction("Settings", self.parent)
         settings_action.triggered.connect(self.callbacks.get('show_settings', lambda: None))
+        self._set_action_shortcut(settings_action, 'show_settings')
         edit_menu.addAction(settings_action)
 
         self.menubar.addMenu(edit_menu)
@@ -107,13 +139,14 @@ class MenuManager:
 
         self.toggle_grids_action = QAction("Toggle Grids", self.parent, checkable=True)
         self.toggle_grids_action.setChecked(True)
-        self.toggle_grids_action.setShortcut(QKeySequence("Ctrl+G"))
+        self._set_action_shortcut(self.toggle_grids_action, 'toggle_grids')
         self.toggle_grids_action.triggered.connect(self.callbacks.get('toggle_grids', lambda: None))
         view_menu.addAction(self.toggle_grids_action)
         self.actions['toggle_grids'] = self.toggle_grids_action
 
         self.toggle_cross_hair_action = QAction("Toggle Cross-hair", self.parent, checkable=True)
         self.toggle_cross_hair_action.setChecked(False)
+        self._set_action_shortcut(self.toggle_cross_hair_action, 'toggle_cross_hair')
         self.toggle_cross_hair_action.triggered.connect(self.callbacks.get('toggle_cross_hair', lambda: None))
         view_menu.addAction(self.toggle_cross_hair_action)
         self.actions['toggle_cross_hair'] = self.toggle_cross_hair_action
@@ -122,21 +155,25 @@ class MenuManager:
 
         # Individual X/Y cursor toggles (independent checkable items)
         self.toggle_x_cursor_a_action = QAction("X Cursor a", self.parent, checkable=True)
+        self._set_action_shortcut(self.toggle_x_cursor_a_action, 'toggle_xa_cursor')
         self.toggle_x_cursor_a_action.triggered.connect(self.callbacks.get('toggle_x_cursor_a', lambda: None))
         view_menu.addAction(self.toggle_x_cursor_a_action)
         self.actions['x_cursor_a'] = self.toggle_x_cursor_a_action
 
         self.toggle_x_cursor_b_action = QAction("X Cursor b", self.parent, checkable=True)
+        self._set_action_shortcut(self.toggle_x_cursor_b_action, 'toggle_xb_cursor')
         self.toggle_x_cursor_b_action.triggered.connect(self.callbacks.get('toggle_x_cursor_b', lambda: None))
         view_menu.addAction(self.toggle_x_cursor_b_action)
         self.actions['x_cursor_b'] = self.toggle_x_cursor_b_action
 
         self.toggle_y_cursor_A_action = QAction("Y Cursor A", self.parent, checkable=True)
+        self._set_action_shortcut(self.toggle_y_cursor_A_action, 'toggle_ya_cursor')
         self.toggle_y_cursor_A_action.triggered.connect(self.callbacks.get('toggle_y_cursor_A', lambda: None))
         view_menu.addAction(self.toggle_y_cursor_A_action)
         self.actions['y_cursor_A'] = self.toggle_y_cursor_A_action
 
         self.toggle_y_cursor_B_action = QAction("Y Cursor B", self.parent, checkable=True)
+        self._set_action_shortcut(self.toggle_y_cursor_B_action, 'toggle_yb_cursor')
         self.toggle_y_cursor_B_action.triggered.connect(self.callbacks.get('toggle_y_cursor_B', lambda: None))
         view_menu.addAction(self.toggle_y_cursor_B_action)
         self.actions['y_cursor_B'] = self.toggle_y_cursor_B_action
@@ -145,148 +182,143 @@ class MenuManager:
 
         # Zoom actions
         self.zoom_in_action = QAction("Zoom In", self.parent)
-        self.zoom_in_action.setShortcut(QKeySequence("Ctrl++"))
+        self._set_action_shortcut(self.zoom_in_action, 'zoom_in')
         self.zoom_in_action.triggered.connect(self.callbacks.get('zoom_in', lambda: None))
         view_menu.addAction(self.zoom_in_action)
         self.actions['zoom_in'] = self.zoom_in_action
 
         self.zoom_out_action = QAction("Zoom Out", self.parent)
-        self.zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
+        self._set_action_shortcut(self.zoom_out_action, 'zoom_out')
         self.zoom_out_action.triggered.connect(self.callbacks.get('zoom_out', lambda: None))
         view_menu.addAction(self.zoom_out_action)
         self.actions['zoom_out'] = self.zoom_out_action
 
         self.zoom_to_fit_action = QAction("Zoom to Fit", self.parent)
-        self.zoom_to_fit_action.setShortcut(QKeySequence("Ctrl+0"))
+        self._set_action_shortcut(self.zoom_to_fit_action, 'zoom_to_fit')
         self.zoom_to_fit_action.triggered.connect(self.callbacks.get('zoom_to_fit', lambda: None))
         view_menu.addAction(self.zoom_to_fit_action)
         self.actions['zoom_to_fit'] = self.zoom_to_fit_action
 
         self.auto_range_x_action = QAction("Auto-range X-axis", self.parent)
+        self._set_action_shortcut(self.auto_range_x_action, 'auto_range_x')
         self.auto_range_x_action.triggered.connect(self.callbacks.get('auto_range_x', lambda: None))
         view_menu.addAction(self.auto_range_x_action)
         self.actions['auto_range_x'] = self.auto_range_x_action
 
         self.auto_range_y_action = QAction("Auto-range Y1 & Y2 axes", self.parent)
+        self._set_action_shortcut(self.auto_range_y_action, 'auto_range_y')
         self.auto_range_y_action.triggered.connect(self.callbacks.get('auto_range_y', lambda: None))
         view_menu.addAction(self.auto_range_y_action)
         self.actions['auto_range_y'] = self.auto_range_y_action
 
         self.zoom_box_action = QAction("Zoom Box", self.parent, checkable=True)
         self.zoom_box_action.setChecked(False)
+        self._set_action_shortcut(self.zoom_box_action, 'toggle_zoom_box')
         self.zoom_box_action.triggered.connect(self.callbacks.get('enable_zoom_box', lambda: None))
         view_menu.addAction(self.zoom_box_action)
         self.actions['zoom_box'] = self.zoom_box_action
 
         self.menubar.addMenu(view_menu)
 
+        # Help menu
+        help_menu = QMenu("Help", self.parent)
+
+        keybindings_action = QAction("Keybindings", self.parent)
+        keybindings_action.triggered.connect(self.callbacks.get('show_keybindings', lambda: None))
+        help_menu.addAction(keybindings_action)
+
+        self.menubar.addMenu(help_menu)
+
+    @staticmethod
+    def _make_icon(theme_name: str, fallback: QStyle.StandardPixmap, style) -> QIcon:
+        """Create a QIcon from theme with QStyle fallback."""
+        if QIcon.hasThemeIcon(theme_name):
+            return QIcon.fromTheme(theme_name)
+        return style.standardIcon(fallback)
+
     def _create_toolbar(self):
-        """Create toolbar with actions."""
+        """Create toolbar with actions using system icon theme."""
         style = self.parent.style()
+        SI = QStyle.StandardPixmap  # shorthand
+
+        def add_action(key: str, text: str, tooltip: str, theme: str,
+                       fallback: QStyle.StandardPixmap, checkable: bool = False,
+                       checked: bool = False):
+            icon = self._make_icon(theme, fallback, style)
+            action = QAction(icon, text, self.parent)
+            action.setToolTip(tooltip)
+            action.setCheckable(checkable)
+            action.setChecked(checked)
+            action.triggered.connect(self.callbacks.get(key, lambda: None))
+            self.toolbar.addAction(action)
+            self.actions[key] = action
+            return action
 
         # Open File
-        open_file_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open File", self.parent)
-        open_file_action.setToolTip("Open RAW file")
-        open_file_action.triggered.connect(self.callbacks.get('open_file', lambda: None))
-        self.toolbar.addAction(open_file_action)
-        self.actions['open_file_toolbar'] = open_file_action
+        add_action('open_file', "Open File", "Open RAW file",
+                   'document-open', SI.SP_DialogOpenButton)
 
         # Open New Window
-        open_new_window_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder), "Open New Window", self.parent)
-        open_new_window_action.setToolTip("Open new window")
-        open_new_window_action.triggered.connect(self.callbacks.get('open_new_window', lambda: None))
-        self.toolbar.addAction(open_new_window_action)
-        self.actions['open_new_window_toolbar'] = open_new_window_action
+        add_action('open_new_window', "Open New Window", "Open new window",
+                   'window-new', SI.SP_ComputerIcon)
 
         self.toolbar.addSeparator()
 
         # Zoom In
-        self.zoom_in_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp), "Zoom In", self.parent)
-        self.zoom_in_action_toolbar.setToolTip("Zoom in (Ctrl++)")
-        self.zoom_in_action_toolbar.triggered.connect(self.callbacks.get('zoom_in_toolbar', lambda: None))
-        self.toolbar.addAction(self.zoom_in_action_toolbar)
-        self.actions['zoom_in_toolbar'] = self.zoom_in_action_toolbar
+        self.zoom_in_action_toolbar = add_action(
+            'zoom_in_toolbar', "Zoom In", "Zoom in (Ctrl+=)",
+            'zoom-in', SI.SP_ArrowUp)
 
         # Zoom Out
-        self.zoom_out_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowDown), "Zoom Out", self.parent)
-        self.zoom_out_action_toolbar.setToolTip("Zoom out (Ctrl+-)")
-        self.zoom_out_action_toolbar.triggered.connect(self.callbacks.get('zoom_out_toolbar', lambda: None))
-        self.toolbar.addAction(self.zoom_out_action_toolbar)
-        self.actions['zoom_out_toolbar'] = self.zoom_out_action_toolbar
+        self.zoom_out_action_toolbar = add_action(
+            'zoom_out_toolbar', "Zoom Out", "Zoom out (Ctrl+-)",
+            'zoom-out', SI.SP_ArrowDown)
 
         # Zoom to Fit
-        self.zoom_to_fit_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogResetButton), "Zoom to Fit", self.parent)
-        self.zoom_to_fit_action_toolbar.setToolTip("Auto-range all axes (Ctrl+0)")
-        self.zoom_to_fit_action_toolbar.triggered.connect(self.callbacks.get('zoom_to_fit_toolbar', lambda: None))
-        self.toolbar.addAction(self.zoom_to_fit_action_toolbar)
-        self.actions['zoom_to_fit_toolbar'] = self.zoom_to_fit_action_toolbar
+        self.zoom_to_fit_action_toolbar = add_action(
+            'zoom_to_fit_toolbar', "Zoom to Fit", "Auto-range all axes (Ctrl+0)",
+            'zoom-fit-best', SI.SP_BrowserReload)
 
         # Auto-range X-axis
-        self.auto_range_x_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowRight), "Auto-range X-axis", self.parent)
-        self.auto_range_x_action_toolbar.setToolTip("Auto-range X-axis")
-        self.auto_range_x_action_toolbar.triggered.connect(self.callbacks.get('auto_range_x_toolbar', lambda: None))
-        self.toolbar.addAction(self.auto_range_x_action_toolbar)
-        self.actions['auto_range_x_toolbar'] = self.auto_range_x_action_toolbar
+        self.auto_range_x_action_toolbar = add_action(
+            'auto_range_x_toolbar', "Auto-range X-axis", "Auto-range X-axis",
+            'zoom-fit-width', SI.SP_ArrowRight)
 
         # Auto-range Y axes
-        self.auto_range_y_action_toolbar = QAction("Y", self.parent)
-        self.auto_range_y_action_toolbar.setToolTip("Auto-range Y1 & Y2 axes")
-        self.auto_range_y_action_toolbar.triggered.connect(self.callbacks.get('auto_range_y_toolbar', lambda: None))
-        self.toolbar.addAction(self.auto_range_y_action_toolbar)
-        self.actions['auto_range_y_toolbar'] = self.auto_range_y_action_toolbar
+        self.auto_range_y_action_toolbar = add_action(
+            'auto_range_y_toolbar', "Auto-range Y-axis", "Auto-range Y1 & Y2 axes",
+            'zoom-fit-height', SI.SP_ArrowDown)
 
         # Zoom Box (checkable)
-        self.zoom_box_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_TitleBarNormalButton), "Zoom Box", self.parent)
-        self.zoom_box_action_toolbar.setToolTip("Rectangle zoom mode (toggle)")
-        self.zoom_box_action_toolbar.setCheckable(True)
-        self.zoom_box_action_toolbar.triggered.connect(self.callbacks.get('zoom_box_toolbar', lambda: None))
-        self.toolbar.addAction(self.zoom_box_action_toolbar)
-        self.actions['zoom_box_toolbar'] = self.zoom_box_action_toolbar
+        self.zoom_box_action_toolbar = add_action(
+            'zoom_box_toolbar', "Zoom Box", "Rectangle zoom mode (toggle)",
+            'select-rectangular', SI.SP_FileDialogContentsView, checkable=True)
 
         # Toggle Grids (checkable)
-        self.toggle_grids_action_toolbar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogListView), "Toggle Grids", self.parent)
-        self.toggle_grids_action_toolbar.setToolTip("Toggle grid visibility (Ctrl+G)")
-        self.toggle_grids_action_toolbar.setCheckable(True)
-        self.toggle_grids_action_toolbar.setChecked(True)
-        self.toggle_grids_action_toolbar.triggered.connect(self.callbacks.get('toggle_grids_toolbar', lambda: None))
-        self.toolbar.addAction(self.toggle_grids_action_toolbar)
-        self.actions['toggle_grids_toolbar'] = self.toggle_grids_action_toolbar
+        self.toggle_grids_action_toolbar = add_action(
+            'toggle_grids_toolbar', "Toggle Grids", "Toggle grid visibility (Ctrl+G)",
+            'view-grid', SI.SP_FileDialogDetailedView, checkable=True, checked=True)
 
         # Toggle Cross-hair (checkable)
-        self.toggle_cross_hair_action_toolbar = QAction("+", self.parent)
-        self.toggle_cross_hair_action_toolbar.setToolTip("Toggle cross-hair cursor (click to place marks)")
-        self.toggle_cross_hair_action_toolbar.setCheckable(True)
-        self.toggle_cross_hair_action_toolbar.setChecked(False)
-        self.toggle_cross_hair_action_toolbar.triggered.connect(self.callbacks.get('toggle_cross_hair', lambda: None))
-        self.toolbar.addAction(self.toggle_cross_hair_action_toolbar)
-        self.actions['toggle_cross_hair_toolbar'] = self.toggle_cross_hair_action_toolbar
+        self.toggle_cross_hair_action_toolbar = add_action(
+            'toggle_cross_hair_toolbar', "Toggle Cross-hair", "Toggle cross-hair cursor (click to place marks)",
+            'cursor-cross', SI.SP_DialogHelpButton, checkable=True)
 
         self.toolbar.addSeparator()
 
         # Individual X/Y cursor toggle buttons in toolbar
-        self.toggle_x_cursor_a_toolbar = QAction("Xa", self.parent, checkable=True)
-        self.toggle_x_cursor_a_toolbar.setToolTip("Toggle X cursor a")
-        self.toggle_x_cursor_a_toolbar.triggered.connect(self.callbacks.get('toggle_x_cursor_a', lambda: None))
-        self.toolbar.addAction(self.toggle_x_cursor_a_toolbar)
-        self.actions['x_cursor_a_toolbar'] = self.toggle_x_cursor_a_toolbar
-
-        self.toggle_x_cursor_b_toolbar = QAction("Xb", self.parent, checkable=True)
-        self.toggle_x_cursor_b_toolbar.setToolTip("Toggle X cursor b")
-        self.toggle_x_cursor_b_toolbar.triggered.connect(self.callbacks.get('toggle_x_cursor_b', lambda: None))
-        self.toolbar.addAction(self.toggle_x_cursor_b_toolbar)
-        self.actions['x_cursor_b_toolbar'] = self.toggle_x_cursor_b_toolbar
-
-        self.toggle_y_cursor_A_toolbar = QAction("YA", self.parent, checkable=True)
-        self.toggle_y_cursor_A_toolbar.setToolTip("Toggle Y cursor A")
-        self.toggle_y_cursor_A_toolbar.triggered.connect(self.callbacks.get('toggle_y_cursor_A', lambda: None))
-        self.toolbar.addAction(self.toggle_y_cursor_A_toolbar)
-        self.actions['y_cursor_A_toolbar'] = self.toggle_y_cursor_A_toolbar
-
-        self.toggle_y_cursor_B_toolbar = QAction("YB", self.parent, checkable=True)
-        self.toggle_y_cursor_B_toolbar.setToolTip("Toggle Y cursor B")
-        self.toggle_y_cursor_B_toolbar.triggered.connect(self.callbacks.get('toggle_y_cursor_B', lambda: None))
-        self.toolbar.addAction(self.toggle_y_cursor_B_toolbar)
-        self.actions['y_cursor_B_toolbar'] = self.toggle_y_cursor_B_toolbar
+        self.toggle_x_cursor_a_toolbar = add_action(
+            'toggle_x_cursor_a', "Xa", "Toggle X cursor A",
+            'go-first', SI.SP_MediaSeekBackward, checkable=True)
+        self.toggle_x_cursor_b_toolbar = add_action(
+            'toggle_x_cursor_b', "Xb", "Toggle X cursor B",
+            'go-last', SI.SP_MediaSeekForward, checkable=True)
+        self.toggle_y_cursor_A_toolbar = add_action(
+            'toggle_y_cursor_A', "YA", "Toggle Y cursor A",
+            'go-top', SI.SP_ArrowUp, checkable=True)
+        self.toggle_y_cursor_B_toolbar = add_action(
+            'toggle_y_cursor_B', "YB", "Toggle Y cursor B",
+            'go-bottom', SI.SP_ArrowDown, checkable=True)
 
     def _create_status_bar(self):
         """Create status bar with labels."""

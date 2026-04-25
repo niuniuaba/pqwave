@@ -79,6 +79,25 @@ class AxisConfig:
         )
 
 
+@dataclass
+class FontConfig:
+    """Font configuration for a UI element group."""
+    family: str = ''    # empty = system default
+    size: int = 0       # 0 = system default point size
+    color: str = ''     # empty = use theme foreground color
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {'family': self.family, 'size': self.size, 'color': self.color}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'FontConfig':
+        return cls(
+            family=data.get('family', ''),
+            size=data.get('size', 0),
+            color=data.get('color', ''),
+        )
+
+
 class ApplicationState:
     """Singleton class managing global application state.
 
@@ -115,6 +134,13 @@ class ApplicationState:
         self.toolbar_visible: bool = True
         self.plot_title: str = ''
         self.viewbox_theme: ViewboxTheme = ViewboxTheme.DARK
+
+        # Font configurations (all empty = use defaults)
+        self.title_font: FontConfig = FontConfig()
+        self.label_font: FontConfig = FontConfig()
+        self.tick_font: FontConfig = FontConfig()
+        self.ui_font: FontConfig = FontConfig()
+
         self.window_registry: WindowRegistry = get_registry()
         self.command_handler: Optional[CommandHandler] = None
 
@@ -233,7 +259,22 @@ class ApplicationState:
             'status_bar_visible': self.status_bar_visible,
             'toolbar_visible': self.toolbar_visible,
             'plot_title': self.plot_title,
-            'viewbox_theme': self.viewbox_theme.value
+            'viewbox_theme': self.viewbox_theme.value,
+            'title_font': self.title_font.to_dict(),
+            'label_font': self.label_font.to_dict(),
+            'tick_font': self.tick_font.to_dict(),
+            'ui_font': self.ui_font.to_dict(),
+        }
+
+    def to_per_file_dict(self) -> Dict[str, Any]:
+        """Convert to dict for per-file state (excludes data arrays)."""
+        return {
+            'traces': [trace.to_per_file_dict() for trace in self.traces],
+            'current_x_var': self.current_x_var,
+            'axis_configs': {axis.value: config.to_dict() for axis, config in self.axis_configs.items()},
+            'plot_title': self.plot_title,
+            'grid_visible': self.grid_visible,
+            'legend_visible': self.legend_visible,
         }
 
     def __repr__(self) -> str:

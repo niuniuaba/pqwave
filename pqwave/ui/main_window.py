@@ -11,6 +11,7 @@ them with the ApplicationState singleton.
 
 import sys
 import time
+import os
 import traceback
 import json
 import socket
@@ -19,12 +20,12 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox,
-    QDialog, QCheckBox, QDialogButtonBox, QLabel
+    QDialog, QCheckBox, QDialogButtonBox, QLabel, QApplication
 )
 from PyQt6.QtCore import QTimer, pyqtSlot
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 
-from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme
+from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme, FontConfig, AxisConfig
 from pqwave.models.rawfile import RawFile
 from pqwave.models.raw_converter import write_raw_file, FORMAT_CONFIG
 from pqwave.models.dataset import Dataset
@@ -39,6 +40,8 @@ from pqwave.ui.mark_panel import MarkPanel
 from pqwave.utils.colors import ColorManager
 from pqwave.logging_config import get_logger
 from pqwave.communication.window_registry import get_registry
+from pqwave.ui.keybinding_manager import KeyBindingManager
+from pqwave.ui.keybindings_dialog import KeyBindingsDialog
 import uuid
 
 
@@ -102,6 +105,13 @@ class MainWindow(QMainWindow):
         # Connect signals
         self._connect_signals()
 
+        # Load global preferences (theme) and apply to UI
+        self._load_global_prefs()
+        self.axis_manager._initialize_axes()
+        self.plot_widget.enable_y2_axis()
+        self.plot_widget.apply_fonts(self.state)
+        self._apply_ui_font()
+
         # Flag to prevent double loading from timer
         self.initial_file_loaded = False
 
@@ -142,9 +152,10 @@ class MainWindow(QMainWindow):
         # Create control panel
         self.control_panel = ControlPanel()
 
-        # Create menu manager with callbacks
+        # Create menu manager with callbacks and keybinding manager
+        self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
-        self.menu_manager = MenuManager(self, callbacks)
+        self.menu_manager = MenuManager(self, callbacks, keybinding_manager=self.keybinding_manager)
 
         # Add plot widget to layout (with stretch factor)
         main_layout.addWidget(self.plot_widget, 1)
@@ -158,11 +169,15 @@ class MainWindow(QMainWindow):
         # Initialize log mode flags in trace manager
         self._update_trace_manager_log_modes()
 
+        # Install keyboard shortcuts that fire only in the plot area
+        self._install_keyboard_shortcuts()
+
     def _create_menu_callbacks(self):
         """Create callback dictionary for menu manager."""
         return {
             'open_file': self.open_file,
             'open_new_window': self.open_new_window,
+            'save_current_state': self.save_current_state,
             'convert_raw_data': self.convert_raw_data,
             'edit_trace_properties': self.edit_trace_properties,
             'show_settings': self.show_settings,
@@ -183,10 +198,12 @@ class MainWindow(QMainWindow):
             'zoom_box_toolbar': self.enable_zoom_box,
             'toggle_grids_toolbar': self.toggle_grids,
             'toggle_cross_hair': self.toggle_cross_hair,
+            'toggle_cross_hair_toolbar': self.toggle_cross_hair,
             'toggle_x_cursor_a': self._toggle_x_cursor_a,
             'toggle_x_cursor_b': self._toggle_x_cursor_b,
             'toggle_y_cursor_A': self._toggle_y_cursor_A,
             'toggle_y_cursor_B': self._toggle_y_cursor_B,
+            'show_keybindings': self._show_keybindings,
         }
 
     def _connect_signals(self):
@@ -207,7 +224,7 @@ class MainWindow(QMainWindow):
         self.plot_widget.cursor_y2_changed.connect(self._on_cursor_y2_changed)
         self.plot_widget.axis_log_mode_changed.connect(self._on_axis_log_mode_changed)
         self.plot_widget.mark_clicked.connect(self._on_mark_clicked)
-
+        self.plot_widget.title_changed.connect(self._on_plot_title_changed)
         # Connect axis manager signals
         self.axis_manager.axis_log_mode_changed.connect(self._on_axis_log_mode_changed_from_manager)
         self.axis_manager.axis_range_changed.connect(self._on_axis_range_changed)
@@ -1184,8 +1201,8 @@ class MainWindow(QMainWindow):
                 parent=self
             )
             # Connect signals
-            self._settings_widget.plot_title_changed.connect(self._on_plot_title_changed)
             self._settings_widget.viewbox_theme_changed.connect(self._on_viewbox_theme_changed)
+            self._settings_widget.font_changed.connect(self._on_font_changed)
             self._settings_widget.destroyed.connect(lambda: setattr(self, '_settings_widget', None))
 
         # Show and raise the widget
@@ -1194,13 +1211,34 @@ class MainWindow(QMainWindow):
         self._settings_widget.activateWindow()
 
     def _on_plot_title_changed(self, title: str):
-        """Handle plot title changes from settings widget."""
-        # Update plot widget title
+        """Handle plot title changes."""
+        self.state.plot_title = title
         self.plot_widget.set_plot_title(title)
 
     def _on_viewbox_theme_changed(self, theme: ViewboxTheme) -> None:
         """Handle viewbox theme changes from settings widget."""
         self.plot_widget.set_viewbox_theme(theme)
+        self.plot_widget.apply_fonts(self.state)
+        self._save_global_prefs()
+
+    def _on_font_changed(self):
+        """Handle font settings changes from settings widget."""
+        self.plot_widget.apply_fonts(self.state)
+        self._apply_ui_font()
+        self._save_global_prefs()
+
+    def _apply_ui_font(self):
+        """Apply UI font configuration to the application."""
+        fc = self.state.ui_font
+        font = QFont()
+        if fc.family:
+            font.setFamily(fc.family)
+        if fc.size > 0:
+            font.setPointSize(fc.size)
+        if fc.family or fc.size > 0:
+            QApplication.instance().setFont(font)
+        else:
+            QApplication.instance().setFont(QFont())
 
     def toggle_toolbar(self):
         """Toggle toolbar visibility."""
@@ -1222,11 +1260,13 @@ class MainWindow(QMainWindow):
         """Set toolbar visibility and update state."""
         self.menu_manager.set_toolbar_visible(visible)
         self.state.toolbar_visible = visible
+        self._save_global_prefs()
 
     def set_statusbar_visible(self, visible):
         """Set status bar visibility and update state."""
         self.menu_manager.set_statusbar_visible(visible)
         self.state.status_bar_visible = visible
+        self._save_global_prefs()
 
     def set_legend_visible(self, visible):
         """Set legend visibility and update state."""
@@ -1414,6 +1454,9 @@ class MainWindow(QMainWindow):
             # Set raw file reference in trace manager
             self.trace_manager.set_raw_file(self.raw_file)
 
+            # Load per-file state (traces, axis configs) if available
+            self._load_per_file_state()
+
             # Update trace manager with current log mode settings from state
             self._update_trace_manager_log_modes()
 
@@ -1501,15 +1544,19 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_vector_selected(self, vector):
         """Handle vector selection."""
-        # Add selected vector to trace expression, avoiding duplicates
         if not vector:
             return
+
+        # If this vector is already plotted as a trace, don't add to input box
+        for var, _, _ in self.trace_manager.traces:
+            if var == vector:
+                return
+
         current_text = self.control_panel.trace_expr.text()
         if current_text:
-            # Split by whitespace to check if vector already present
+            # Split by whitespace to check if vector already present in text
             parts = current_text.split()
             if vector in parts:
-                # Vector already in expression, do nothing
                 return
             new_text = f"{current_text} {vector}"
         else:
@@ -1870,11 +1917,262 @@ class MainWindow(QMainWindow):
         """Get axis manager reference (for testing)."""
         return self.axis_manager
 
+    def _global_prefs_path(self) -> str:
+        """Return the path to the global preferences JSON file."""
+        config_dir = os.path.join(os.path.expanduser("~"), ".pqwave")
+        return os.path.join(config_dir, "prefs.json")
+
+    def _save_global_prefs(self) -> None:
+        """Save global preferences (theme, fonts, UI toggles) to disk."""
+        filepath = self._global_prefs_path()
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        try:
+            data = {
+                'viewbox_theme': self.state.viewbox_theme.value,
+                'title_font': self.state.title_font.to_dict(),
+                'label_font': self.state.label_font.to_dict(),
+                'tick_font': self.state.tick_font.to_dict(),
+                'ui_font': self.state.ui_font.to_dict(),
+                'toolbar_visible': self.state.toolbar_visible,
+                'status_bar_visible': self.state.status_bar_visible,
+            }
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_global_prefs(self) -> None:
+        """Load global preferences from disk and apply to singleton."""
+        filepath = self._global_prefs_path()
+        if not os.path.exists(filepath):
+            return
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return
+
+        # Viewbox theme
+        theme_str = data.get('viewbox_theme', 'dark')
+        try:
+            self.state.viewbox_theme = ViewboxTheme(theme_str)
+            self.plot_widget.set_viewbox_theme(self.state.viewbox_theme)
+        except ValueError:
+            pass
+
+        # Font configs
+        self.state.title_font = FontConfig.from_dict(data.get('title_font', {}))
+        self.state.label_font = FontConfig.from_dict(data.get('label_font', {}))
+        self.state.tick_font = FontConfig.from_dict(data.get('tick_font', {}))
+        self.state.ui_font = FontConfig.from_dict(data.get('ui_font', {}))
+        self.plot_widget.apply_fonts(self.state)
+        self._apply_ui_font()
+
+        # UI toggles
+        self.state.toolbar_visible = data.get('toolbar_visible', True)
+        self.state.status_bar_visible = data.get('status_bar_visible', True)
+        self.set_toolbar_visible(self.state.toolbar_visible)
+        self.set_statusbar_visible(self.state.status_bar_visible)
+
+    def _per_file_state_path(self) -> Optional[str]:
+        """Return the per-file state path (.json next to the current raw file)."""
+        if not self.raw_file_path:
+            return None
+        base, _ = os.path.splitext(self.raw_file_path)
+        return base + '.json'
+
+    def _save_per_file_state(self) -> None:
+        """Save per-file state to .json next to the raw file."""
+        if not self.raw_file_path or not os.path.exists(self.raw_file_path):
+            logger.debug("No raw file loaded, skipping per-file state save")
+            return
+        filepath = self._per_file_state_path()
+        if not filepath:
+            return
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(self.state.to_per_file_dict(), f, indent=2, default=str)
+            logger.info(f"Per-file state saved to {filepath}")
+        except Exception:
+            logger.warning(f"Failed to save per-file state to {filepath}")
+
+    def _load_per_file_state(self) -> None:
+        """Load per-file state from .json next to the raw file and apply to UI."""
+        filepath = self._per_file_state_path()
+        if not filepath or not os.path.exists(filepath):
+            return
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            logger.warning(f"Failed to load per-file state from {filepath}")
+            return
+
+        logger.info(f"Loading per-file state from {filepath}")
+
+        # Apply axis configs before adding traces (log mode must be correct)
+        if 'axis_configs' in data:
+            for key, ax_data in data['axis_configs'].items():
+                try:
+                    axis_id = AxisId(key)
+                    self.state.axis_configs[axis_id] = AxisConfig.from_dict(ax_data)
+                except ValueError:
+                    continue
+            self.axis_manager._initialize_axes()
+
+        # Sync trace manager log modes before re-creating traces
+        self._update_trace_manager_log_modes()
+
+        # Apply plot title
+        title = data.get('plot_title', '')
+        if title:
+            self.state.plot_title = title
+            self.plot_widget.set_plot_title(title)
+
+        # Apply UI toggles
+        self.state.grid_visible = data.get('grid_visible', True)
+        self.state.legend_visible = data.get('legend_visible', True)
+        self.axis_manager.set_grid_visible(self.state.grid_visible)
+        self.menu_manager.set_grids_visible(self.state.grid_visible)
+        self.set_legend_visible(self.state.legend_visible)
+
+        # Set current X variable
+        self.state.current_x_var = data.get('current_x_var', self.state.current_x_var)
+
+        # Re-create traces from saved expressions
+        x_var = self.state.current_x_var
+        saved_traces = data.get('traces', [])
+        for t_data in saved_traces:
+            expression = t_data.get('expression', '')
+            if not expression:
+                continue
+
+            y_axis_str = t_data.get('y_axis', 'Y1')
+            y_axis = AxisAssignment.Y1 if y_axis_str == 'Y1' else AxisAssignment.Y2
+            color = tuple(t_data.get('color', (0, 0, 255)))
+
+            self.trace_manager.add_trace(
+                expression=expression,
+                x_var_name=x_var,
+                y_axis=y_axis,
+                custom_color=color,
+            )
+
+        # Apply saved visual properties (name alias, line width, visibility)
+        # Match saved traces to state traces by expression
+        for saved_t in saved_traces:
+            expr = saved_t.get('expression', '')
+            if not expr:
+                continue
+            for st in self.state.traces:
+                if st.expression == expr:
+                    st.name = saved_t.get('name', expr)
+                    st.line_width = saved_t.get('line_width', 1.0)
+                    st.visible = saved_t.get('visible', True)
+                    break
+
+        # Update plot-item pens and names to match state traces
+        for i, (_, plot_item, y_axis) in enumerate(self.trace_manager.traces):
+            if i < len(self.state.traces):
+                st = self.state.traces[i]
+                pen = pg.mkPen(color=st.color, width=st.line_width)
+                plot_item.setPen(pen)
+                plot_item.opts['name'] = st.name
+
+        # Refresh legend with updated names
+        self.trace_manager._refresh_legend()
+
+    def save_current_state(self) -> None:
+        """Save current state to per-file JSON (File > Save Current State)."""
+        self._save_per_file_state()
+
     def closeEvent(self, event):
         """Handle window close event."""
-        # Unregister window from xschem integration registry
+        self._save_per_file_state()
+        self._save_global_prefs()
         self.state.window_registry.unregister_window(self.window_id)
         super().closeEvent(event)
+
+    # ------------------------------------------------------------------
+    # Keyboard shortcuts (plot-contextual and log-toggles)
+    # ------------------------------------------------------------------
+
+    def _install_keyboard_shortcuts(self) -> None:
+        """Install keyboard shortcuts that should only fire on the plot widget.
+
+        Single-key toggles (A, B, z, f, +) and arrow keys are installed on the
+        central widget with ``WidgetWithChildrenShortcut`` so they don't fire
+        when the user is typing in the trace expression input.
+
+        Log-mode toggles (Ctrl+Shift+X/Y/Z) are also installed here since they
+        don't have corresponding menu actions.
+        """
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        from PyQt6.QtCore import Qt as QtCore
+
+        pw = self.plot_widget
+        ctx_widget = self.centralWidget()
+        ctxt = QtCore.ShortcutContext.WidgetWithChildrenShortcut
+        seq = self.keybinding_manager.get_sequence
+
+        # ---- single-key toggles (only when plot area has focus) ----
+        toggle_map = {
+            'toggle_xa_cursor':  lambda: self._toggle_x_cursor_a(not self.plot_widget.cursor_xa_visible),
+            'toggle_xb_cursor':  lambda: self._toggle_x_cursor_b(not self.plot_widget.cursor_xb_visible),
+            'toggle_ya_cursor':  lambda: self._toggle_y_cursor_A(not self.plot_widget.cursor_yA_visible),
+            'toggle_yb_cursor':  lambda: self._toggle_y_cursor_B(not self.plot_widget.cursor_yB_visible),
+            'toggle_cross_hair': lambda: self.toggle_cross_hair(),
+            'toggle_zoom_box':   lambda: self.enable_zoom_box(),
+            'zoom_to_fit_alt':   lambda: self.zoom_to_fit(),
+        }
+
+        for action_name, callback in toggle_map.items():
+            ks = seq(action_name)
+            if ks:
+                # For single-character shortcuts, use the character directly.
+                # QShortcut with WidgetWithChildrenShortcut will not fire
+                # when the trace-expression input has focus.
+                sc = QShortcut(QKeySequence(ks), ctx_widget)
+                sc.setContext(ctxt)
+                sc.activated.connect(callback)
+
+        # ---- arrow keys for cursor movement (plot-contextual) ----
+        arrow_map = {
+            'move_x_cursor_left':  lambda: pw.move_selected_cursor('left'),
+            'move_x_cursor_right': lambda: pw.move_selected_cursor('right'),
+            'move_y_cursor_up':    lambda: pw.move_selected_cursor('up'),
+            'move_y_cursor_down':  lambda: pw.move_selected_cursor('down'),
+        }
+        for action_name, callback in arrow_map.items():
+            ks = seq(action_name)
+            if ks:
+                sc = QShortcut(QKeySequence(ks), ctx_widget)
+                sc.setContext(ctxt)
+                sc.activated.connect(callback)
+
+        # ---- log-mode toggles (global, no menu action) ----
+        log_map = {
+            'log_x':  lambda: self._toggle_log_axis(AxisId.X),
+            'log_y1': lambda: self._toggle_log_axis(AxisId.Y1),
+            'log_y2': lambda: self._toggle_log_axis(AxisId.Y2),
+        }
+        for action_name, callback in log_map.items():
+            ks = seq(action_name)
+            if ks:
+                sc = QShortcut(QKeySequence(ks), self)
+                sc.activated.connect(callback)
+
+    def _toggle_log_axis(self, axis_id: AxisId) -> None:
+        """Toggle log/linear mode for an axis."""
+        config = self.state.get_axis_config(axis_id)
+        self.axis_manager.set_axis_log_mode(axis_id, not config.log_mode)
+
+    def _show_keybindings(self) -> None:
+        """Open the Keybindings help dialog."""
+        bindings = self.keybinding_manager.get_all_bindings()
+        config_path = self.keybinding_manager._config_path()
+        dialog = KeyBindingsDialog(bindings, config_path, self)
+        dialog.exec()
 
 
 if __name__ == "__main__":
