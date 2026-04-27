@@ -1,5 +1,18 @@
 ## TODO.md
-###  ✅ v0.2.4 keybindings ✅ **已完成**
+###   v0.2.3 enhance functions and expressions
+- 16.1 support more functions and binary operators
+  - to support functions and binary operators listed in ./expr.md 
+- 16.2 Add a Functions compo and help doc
+  - Add a Functions compo to list up supported functions and binary operators
+  - similar to Vectors compo, when clicked add the function / operator into Add Trace expr, waiting for user edition
+  - when a function or binary operator is selected (or mouse approximat that item) show a tip of description (what it is)
+  - Add a Help - Functions menu item to show function and operator description.
+  - 如果添加的是一个需要变量的函数，当其被加到Add Trace expr之后，光标停留在该函数的()内，等待用户编辑，此时如果用户从Vectors compo内选择一个向量，则把该向量添加到前述函数的()内，因为以一个向量作为一个函数的变量是正常的操作逻辑。
+- 16.3 增加Calculation widget
+  - 增加一个类似Mark Data widget的Calculation widget，用以显示计算结果
+  - 当某个函数和/或表达式不是与X变量同维度时，无论用户把它加到Y1或者Y2都不要作为曲线绘制在plot widget上，因为没有意义，应该把计算结果记录在一个data widget上。比如，mean(v(r1))明显是求节点r1的电压的平均值，它的结果是一个scalar（长度为1的向量），不是一条曲线，不应该绘图。
+
+###  ✅ v0.2.3 keybindings ✅ **已完成**
 15.  keybindings ✅ **已完成**  
 - 提供一套快捷键系统，目前需要实现的keybindings记录在./keybindings.md，今后可继续扩展
 - 提供一个用户可以设定keybindings的方法

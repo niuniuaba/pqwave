@@ -133,7 +133,7 @@
 - files changed:
   - `pqwave/models/rawfile.py` — _SPECIAL_CHAR_MAP, _decode_header_bytes, _parse_header_variables, preprocess_raw_file, RawFile 重构
 
-### 10. auto-range doesn't work 
+### ✅ 10. auto-range doesn't work✅ **fixed** 
 - what is: 打开一个raw文件，再打开另一个文件后auto-range不起作用
 - how to reproduce: 打开 tests/cdg.raw, 添加"-imag(ac_data)/2/pi/250000*1E12"到Y1，然后Y1设置为log，到这里为止显示是正常的。然后点File --> Open Raw Data，打开tests/bridge.raw, 添加v(r1)到Y1，context menu --> plot option取消log Y的勾选，无论是menu bar 还是 context menu的auto range X，auto range Y1, view all (autorange x/y1/y2) 都不起作用了。但是menu --> Edit --> Setting中的autorange X和autorange Y1有用。
 - log 文件 为 ./log.1

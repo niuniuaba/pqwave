@@ -900,19 +900,16 @@ class MainWindow(QMainWindow):
         is_ac_or_complex = dataset.get('_is_ac_or_complex', False)
 
         # Detect source format from spicelib's dialect detection
-        if self.raw_file.raw_data:
-            detected = self.raw_file.raw_data.dialect
-            if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
-                src_format = detected
-            else:
-                # Fallback to extension-based detection
-                src_file = self.raw_file.filename.lower()
-                if src_file.endswith('.qraw'):
-                    src_format = 'qspice'
-                else:
-                    src_format = 'ltspice'
+        detected = self.raw_file.detected_format
+        if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
+            src_format = detected
         else:
-            src_format = 'ltspice'
+            # Fallback to extension-based detection
+            src_file = self.raw_file.filename.lower()
+            if src_file.endswith('.qraw'):
+                src_format = 'qspice'
+            else:
+                src_format = 'ltspice'
 
         # Show format selection dialog
         dialog = QDialog(self)

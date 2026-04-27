@@ -261,6 +261,7 @@ class RawFile:
         self.filename = filename
         self.datasets = []
         self.raw_data = None
+        self.detected_format = None
         self._tmp_file = None  # Temp file path for preprocessed encoding
         self._mmap_path = None  # Temp file path for np.memmap backing store
         self._name_map = {}    # correct_name -> spicelib_name mapping
@@ -344,6 +345,9 @@ class RawFile:
 
         try:
             self.raw_data = RawRead(load_path)
+
+            # Save detected dialect before raw_data is released
+            self.detected_format = self.raw_data.dialect
 
             # Get raw properties from spicelib
             raw_props = self.raw_data.get_raw_properties()
@@ -536,6 +540,18 @@ class RawFile:
             return self._get_complex_imag(base_var, dataset_idx)
         elif var_name.startswith('ph(') and var_name.endswith(')'):
             base_var = var_name[3:-1]
+            return self._get_complex_phase(base_var, dataset_idx)
+        elif var_name.startswith('re(') and var_name.endswith(')'):
+            base_var = var_name[3:-1]
+            return self._get_complex_real(base_var, dataset_idx)
+        elif var_name.startswith('im(') and var_name.endswith(')'):
+            base_var = var_name[3:-1]
+            return self._get_complex_imag(base_var, dataset_idx)
+        elif var_name.startswith('phase(') and var_name.endswith(')'):
+            base_var = var_name[6:-1]
+            return self._get_complex_phase(base_var, dataset_idx)
+        elif var_name.startswith('cph(') and var_name.endswith(')'):
+            base_var = var_name[4:-1]
             return self._get_complex_phase(base_var, dataset_idx)
 
         # Regular variable: find column index and return view
