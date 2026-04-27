@@ -42,6 +42,7 @@ from pqwave.logging_config import get_logger
 from pqwave.communication.window_registry import get_registry
 from pqwave.ui.keybinding_manager import KeyBindingManager
 from pqwave.ui.keybindings_dialog import KeyBindingsDialog
+from pqwave.ui.functions_help_dialog import FunctionsHelpDialog
 import uuid
 
 
@@ -204,6 +205,7 @@ class MainWindow(QMainWindow):
             'toggle_y_cursor_A': self._toggle_y_cursor_A,
             'toggle_y_cursor_B': self._toggle_y_cursor_B,
             'show_keybindings': self._show_keybindings,
+            'show_functions_help': self._show_functions_help,
         }
 
     def _connect_signals(self):
@@ -213,6 +215,7 @@ class MainWindow(QMainWindow):
         self.control_panel.vector_selected.connect(self._on_vector_selected)
         self.control_panel.add_trace_to_axis.connect(self._on_add_trace_to_axis)
         self.control_panel.expression_changed.connect(self._on_expression_changed)
+        self.control_panel.function_selected.connect(self._on_function_selected)
 
         # Connect plot widget signals
         self.plot_widget.mouse_moved.connect(self._on_mouse_moved)
@@ -1549,16 +1552,42 @@ class MainWindow(QMainWindow):
             if var == vector:
                 return
 
-        current_text = self.control_panel.trace_expr.text()
+        trace_expr = self.control_panel.trace_expr
+        current_text = trace_expr.text()
         if current_text:
             # Split by whitespace to check if vector already present in text
             parts = current_text.split()
             if vector in parts:
                 return
+            # If cursor is inside function parens, insert at cursor position
+            if self._cursor_in_parens(current_text, trace_expr.cursorPosition()):
+                trace_expr.insert(f" {vector} ")
+                return
             new_text = f"{current_text} {vector}"
         else:
             new_text = vector
-        self.control_panel.trace_expr.setText(new_text)
+        trace_expr.setText(new_text)
+
+    @staticmethod
+    def _cursor_in_parens(text: str, pos: int) -> bool:
+        """Check if cursor position is inside any parenthesized group."""
+        return text[:pos].count('(') > text[:pos].count(')')
+
+    @pyqtSlot(object)
+    def _on_function_selected(self, info):
+        """Insert a function, constant, or operator at the current cursor position."""
+        from pqwave.ui.function_registry import FunctionInfo
+
+        trace_expr = self.control_panel.trace_expr
+        cursor = trace_expr.cursorPosition()
+
+        if info.arg_count == 0:
+            # Constant: insert name
+            trace_expr.insert(info.name)
+        else:
+            # Function with arguments: insert name() and place cursor inside parens
+            trace_expr.insert(f"{info.name}()")
+            trace_expr.setCursorPosition(cursor + len(info.name) + 1)
 
     @pyqtSlot(str)
     def _on_add_trace_to_axis(self, axis):
@@ -2169,6 +2198,11 @@ class MainWindow(QMainWindow):
         bindings = self.keybinding_manager.get_all_bindings()
         config_path = self.keybinding_manager._config_path()
         dialog = KeyBindingsDialog(bindings, config_path, self)
+        dialog.exec()
+
+    def _show_functions_help(self) -> None:
+        """Open the Functions Reference help dialog."""
+        dialog = FunctionsHelpDialog(self)
         dialog.exec()
 
 

@@ -34,7 +34,7 @@ class MenuManager:
                       'zoom_box_toolbar', 'toggle_grids_toolbar', 'toggle_cross_hair',
                       'toggle_x_cursor_a', 'toggle_x_cursor_b',
                       'toggle_y_cursor_A', 'toggle_y_cursor_B',
-                      'show_keybindings'
+                      'show_keybindings', 'show_functions_help'
             keybinding_manager: Optional KeyBindingManager instance.
         """
         self.parent = parent
@@ -226,6 +226,10 @@ class MenuManager:
         keybindings_action = QAction("Keybindings", self.parent)
         keybindings_action.triggered.connect(self.callbacks.get('show_keybindings', lambda: None))
         help_menu.addAction(keybindings_action)
+
+        functions_help_action = QAction("Functions", self.parent)
+        functions_help_action.triggered.connect(self.callbacks.get('show_functions_help', lambda: None))
+        help_menu.addAction(functions_help_action)
 
         self.menubar.addMenu(help_menu)
 

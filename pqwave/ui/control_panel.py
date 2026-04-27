@@ -9,9 +9,12 @@ expression entry field, and X/Y1/Y2 buttons for adding traces.
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton,
+    QCompleter,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
+
+from pqwave.ui.functions_combo import FunctionsCombo
 
 
 class ControlPanel(QWidget):
@@ -28,12 +31,14 @@ class ControlPanel(QWidget):
     vector_selected = pyqtSignal(str)
     add_trace_to_axis = pyqtSignal(str)  # "X", "Y1", "Y2"
     expression_changed = pyqtSignal(str)
+    function_selected = pyqtSignal(object)  # carries FunctionInfo
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.dataset_combo = None
         self.vector_combo = None
+        self.func_combo = None
         self.trace_expr = None
         self.x_button = None
         self.y1_button = None
@@ -66,10 +71,28 @@ class ControlPanel(QWidget):
         # Vector controls
         vector_label = QLabel("Vector:")
         self.vector_combo = QComboBox()
-        self.vector_combo.currentTextChanged.connect(self.vector_selected.emit)
+        self.vector_combo.textActivated.connect(self.vector_selected.emit)
         self.vector_combo.setMaximumWidth(200)
+        self.vector_combo.setEditable(True)
+        self.vector_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        completer = QCompleter(self.vector_combo.model(), self.vector_combo)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.vector_combo.setCompleter(completer)
+        self.vector_combo.lineEdit().editingFinished.connect(self._on_vector_editing_finished)
         first_row.addWidget(vector_label)
         first_row.addWidget(self.vector_combo)
+
+        # Add spacing
+        first_row.addSpacing(20)
+
+        # Function controls
+        func_label = QLabel("Func:")
+        self.func_combo = FunctionsCombo()
+        self.func_combo.setMaximumWidth(160)
+        self.func_combo.function_selected.connect(self.function_selected.emit)
+        first_row.addWidget(func_label)
+        first_row.addWidget(self.func_combo)
 
         # Add stretch to push controls to the left
         first_row.addStretch()
@@ -123,6 +146,14 @@ class ControlPanel(QWidget):
         main_layout.addLayout(second_row)
 
         self.setLayout(main_layout)
+
+    def _on_vector_editing_finished(self):
+        """Restore the last valid selection if the typed text doesn't match any item."""
+        text = self.vector_combo.currentText()
+        if text and self.vector_combo.findText(text) < 0:
+            self.vector_combo.setEditText(
+                self.vector_combo.itemText(self.vector_combo.currentIndex())
+            )
 
     # Public API for updating controls
 
