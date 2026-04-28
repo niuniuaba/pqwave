@@ -33,7 +33,7 @@ from pqwave.models.trace import AxisAssignment
 from pqwave.ui.menu_manager import MenuManager
 from pqwave.ui.control_panel import ControlPanel
 from pqwave.ui.plot_widget import PlotWidget
-from pqwave.ui.trace_manager import TraceManager
+from pqwave.ui.trace_manager import TraceManager, SelectableItemSample
 from pqwave.ui.settings_widget import SettingsWidget
 from pqwave.ui.axis_manager import AxisManager
 from pqwave.ui.mark_panel import MarkPanel
@@ -136,7 +136,7 @@ class MainWindow(QMainWindow):
         self.plot_widget = PlotWidget()
 
         # Create legend (attached to plot widget)
-        legend = self.plot_widget.addLegend()
+        legend = self.plot_widget.addLegend(sampleType=SelectableItemSample)
         self.legend = legend
 
         # Create axis manager
@@ -1291,18 +1291,8 @@ class MainWindow(QMainWindow):
             self._refresh_legend_for_trace(row, new_alias if new_alias else var, y_axis)
 
     def _refresh_legend_for_trace(self, trace_idx, trace_name, y_axis):
-        """Refresh legend entry for a specific trace"""
-        # The legend is managed by trace manager, but we need to update the legend item.
-        # Since trace manager's legend items are added with format "{name} @ {y_axis}",
-        # we can clear and re-add all legend items, or find and update the specific one.
-        # For simplicity, we'll clear and re-add all legend items.
-        legend = self.trace_manager.legend
-        if legend:
-            legend.clear()
-            # Re-add all traces to legend
-            for i, (var, plot_item, axis) in enumerate(self.trace_manager.traces):
-                legend_name = f"{var} @ {axis}"
-                legend.addItem(plot_item, legend_name)
+        """Refresh legend entry for a specific trace."""
+        self.trace_manager._refresh_legend()
 
     def show_settings(self):
         """Show application settings widget."""
@@ -2217,6 +2207,7 @@ class MainWindow(QMainWindow):
                     st.name = saved_t.get('name', expr)
                     st.line_width = saved_t.get('line_width', 1.0)
                     st.visible = saved_t.get('visible', True)
+                    st.selected = saved_t.get('selected', False)
                     break
 
         # Update plot-item pens and names to match state traces

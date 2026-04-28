@@ -34,6 +34,7 @@ class Trace:
         line_width: Line width in pixels
         visible: Whether the trace is visible
         dataset_idx: Index of the source dataset (for multi-dataset support)
+        selected: Whether the trace is selected in the legend
         metadata: Additional metadata (e.g., variable names, units)
     """
     name: str
@@ -45,6 +46,7 @@ class Trace:
     line_width: float = 1.0
     visible: bool = True
     dataset_idx: int = 0
+    selected: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -74,6 +76,7 @@ class Trace:
             'color': self.color,
             'line_width': self.line_width,
             'visible': self.visible,
+            'selected': self.selected,
             'dataset_idx': self.dataset_idx,
             'metadata': self.metadata
         }
@@ -87,6 +90,7 @@ class Trace:
             'color': self.color,
             'line_width': self.line_width,
             'visible': self.visible,
+            'selected': self.selected,
             'dataset_idx': self.dataset_idx,
             'metadata': self.metadata
         }
@@ -104,6 +108,7 @@ class Trace:
             line_width=data['line_width'],
             visible=data['visible'],
             dataset_idx=data['dataset_idx'],
+            selected=data.get('selected', False),
             metadata=data.get('metadata', {})
         )
 
@@ -122,6 +127,7 @@ class Trace:
             line_width=data['line_width'],
             visible=data['visible'],
             dataset_idx=data['dataset_idx'],
+            selected=data.get('selected', False),
             metadata=data.get('metadata', {})
         )
 

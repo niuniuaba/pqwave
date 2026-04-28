@@ -25,6 +25,24 @@ from pqwave.logging_config import get_logger
 DOWNSAMPLE_TARGET = 1600
 
 
+from pyqtgraph.graphicsItems.LegendItem import ItemSample
+
+
+class SelectableItemSample(ItemSample):
+    """ItemSample that does NOT toggle visibility on left click.
+
+    pyqtgraph's default ItemSample toggles plot_item visibility on every
+    left click.  We replace that with a clean signal emission so the
+    TraceManager selection handler controls all click behaviour.
+    """
+
+    def mouseClickEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            event.accept()
+            self.update()
+            self.sigClicked.emit(self.item)
+
+
 class _StaticCurveItem(pg.PlotCurveItem):
     """PlotCurveItem that caches its bounding rect between setData() calls.
 
@@ -103,6 +121,9 @@ class TraceManager:
         self.x_log = False
         self.y1_log = False
         self.y2_log = False
+
+        # Connect legend click signal for trace selection
+        self.legend.sigSampleClicked.connect(self._on_legend_sample_clicked)
 
     # Public API
 
@@ -248,6 +269,9 @@ class TraceManager:
 
                     self.logger.info(f"Added trace: {var} on {y_axis.value}")
 
+                # Refresh legend after adding all new traces
+                self._refresh_legend()
+
                 # Auto-range the appropriate Y axis
                 self._auto_range_y_axis(y_axis)
 
@@ -311,9 +335,14 @@ class TraceManager:
         if not self.legend:
             return
         self.legend.clear()
-        for var, plot_item, y_axis in self.traces:
+        for i, (var, plot_item, y_axis) in enumerate(self.traces):
             legend_name = f"{var} @ {y_axis}"
             self.legend.addItem(plot_item, legend_name)
+            # Apply bold styling to selected traces
+            if i < len(self.state.traces) and self.state.traces[i].selected:
+                label = self.legend.getLabel(plot_item)
+                if label is not None:
+                    label.setText(legend_name, bold=True)
 
     def clear_traces(self) -> None:
         """Clear all traces from plot and application state."""
@@ -370,6 +399,68 @@ class TraceManager:
         self.y1_log = False
         self.y2_log = False
 
+    # --- Trace selection ---
+
+    def _on_legend_sample_clicked(self, plot_item) -> None:
+        """Handle left click on a legend item sample.
+
+        Plain left click: select that trace (deselect others).
+        Ctrl+left click: toggle selection of that trace (multi-select).
+        Clicking the only selected trace again: toggle visibility.
+        """
+        idx = self._find_trace_index(plot_item)
+        if idx is None:
+            return
+
+        from PyQt6.QtWidgets import QApplication
+        modifiers = QApplication.keyboardModifiers()
+        ctrl_held = bool(modifiers & QtCore.Qt.KeyboardModifier.ControlModifier)
+
+        trace = self.state.traces[idx] if idx < len(self.state.traces) else None
+        if trace is None:
+            return
+
+        if ctrl_held:
+            # Toggle selection of this trace
+            trace.selected = not trace.selected
+        else:
+            # If clicking the only selected trace, toggle visibility instead
+            if trace.selected and self._selected_count() == 1:
+                trace.visible = not trace.visible
+                plot_item.setVisible(trace.visible)
+                self._refresh_legend()
+                return
+            # Single-select: deselect all, select this one
+            self.deselect_all()
+            trace.selected = True
+
+        self._refresh_legend()
+
+    def select_trace(self, idx: int) -> None:
+        """Select the trace at *idx* and deselect all others."""
+        for i, trace in enumerate(self.state.traces):
+            trace.selected = (i == idx)
+
+    def deselect_all(self) -> None:
+        """Deselect all traces."""
+        for trace in self.state.traces:
+            trace.selected = False
+
+    def get_selected_traces(self) -> list[tuple[int, Trace]]:
+        """Return (index, Trace) pairs for all selected traces."""
+        return [(i, t) for i, t in enumerate(self.state.traces) if t.selected]
+
+    def _find_trace_index(self, plot_item) -> int | None:
+        """Find the index of *plot_item* in self.traces, or None."""
+        for i, (_, pi, _) in enumerate(self.traces):
+            if pi is plot_item:
+                return i
+        return None
+
+    def _selected_count(self) -> int:
+        """Return the number of selected traces."""
+        return sum(1 for t in self.state.traces if t.selected)
+
     def remove_trace_by_variable_name(self, variable_name: str) -> bool:
         """Remove a trace by variable name (unquoted or quoted).
 
@@ -415,15 +506,11 @@ class TraceManager:
         else:
             self.plot_widget.plotItem.vb.removeItem(plot_item)
 
-        # Remove from legend
-        if self.legend:
-            try:
-                self.legend.removeItem(plot_item)
-            except Exception as e:
-                self.logger.error(f"Error removing trace from legend: {e}")
-
-        # Remove from internal list
+        # Remove from internal list (before refreshing legend)
         self.traces.pop(found_index)
+
+        # Refresh legend to reflect removal
+        self._refresh_legend()
 
         # Remove from application state
         # Find corresponding trace in state.traces
@@ -587,7 +674,7 @@ class TraceManager:
             # Update legend label via pyqtgraph's public API
             label = self.legend.getLabel(plot_item)
             if label is not None:
-                label.setText(full_name)
+                label.setText(full_name, bold=trace.selected)
 
     def ensure_y2_axis(self) -> None:
         """Ensure Y2 axis and viewbox are created and configured."""
@@ -670,15 +757,9 @@ class TraceManager:
             self.ensure_y2_axis()
             # Add to Y2 viewbox
             self.y2_viewbox.addItem(plot_item)
-            # Add to legend with Y2 prefix
-            legend_name = f"{trace.name} @ Y2"
-            self.legend.addItem(plot_item, legend_name)
         else:
             # Add to main viewbox (Y1)
             self.plot_widget.plotItem.vb.addItem(plot_item)
-            # Add to legend with Y1 prefix
-            legend_name = f"{trace.name} @ Y1"
-            self.legend.addItem(plot_item, legend_name)
 
         return plot_item
 

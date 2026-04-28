@@ -31,6 +31,7 @@ class KeyBindingManager:
         'open_file':               ('Ctrl+O',       'Open Raw File'),
         'open_new_window':         ('Ctrl+N',       'Open New Window'),
         'save_current_state':      ('Ctrl+S',       'Save Current State'),
+        'save_as_raw_data':        ('Ctrl+Shift+S', 'Save As Raw Data'),
 
         # === Edit / Settings ===
         'edit_trace_properties':   ('Ctrl+E',       'Edit Trace Properties'),

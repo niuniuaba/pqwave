@@ -1,4 +1,40 @@
 ## TODO.md
+###   v0.2.5 enhance analysis capability
+- 18.1 run a .meas script
+  - run a .meas script
+  - built-in meas functions (上升/下降时间、过冲/下冲、周期、频率、占空比、RMS、THD、SINAD 等)
+- 18.2 Compute the average or RMS of a trace (credit goes to LTspice)
+  - integrate a trace to obtain the average and RMS value over the displayed region
+  - First zoom the waveform to the region of interest, then move the mouse to the label of the trace, hold down the control key and left mouse click 
+  - RMS average is reported only if the physical units of the integrated quantity is volts or amps to avoid confusing people that need the average when power is integrated.
+- 18.3 FFT
+- 数字波形（时序图风格）
+- 18.4 功率分析（瞬态、平均）
+- 18.5 multiple plot permanently
+- 18.6 power supply - specific analysis 
+
+###   v0.2.4 feature add 
+17. add some features
+- ✅ 17.1 save only data of current traces to a raw file.✅ **已完成**
+  - only save the data of current traces. the result is a subset of original raw which is useful to save interested data after exploration of a large dataset.
+  - support qspiec .qraw, ltspice .raw, ngspice .raw
+  - a "File - Save as" item and a toolbar entry.
+- ✅ 17.2 a command line to do the same as 17.1✅ **已完成** 
+  - something like `pqwave --extract <inputfile> <expr1[,expr2[,...]]> -ngspice|-ltspice|-qspice <outputfile>`  
+- ✅ 17.3 a command line to convert raw files.✅ **已完成** 
+  - don't extract subset of data but just convert raw type.
+  - `pqwave --convert <inputfile> -ngspice|-ltspice|-qspice <outputfile>`
+  - the same feature is already available in 'File - Convert Raw Data'.  
+- ✅ 17.4 add a 'select trace' mechanism ✅ **已完成**
+  - left click on legend: select trace (deselect others)
+  - ctrl+left click: toggle multi-select
+  - clicking the sole selected trace toggles its visibility (LTspice-like)
+  - selected traces shown with bold legend text
+  - selection state persisted in per-file state JSON
+- ✅ 17.5 fix save-as_raw_data keybinding warning ✅ **已完成**
+  - Added Ctrl+Shift+S keybinding for Save As Raw Data action
+  - Fixed "WARNING: Unknown action 'save-as_raw_data'" on startup
+
 ###   v0.2.4 enhance functions and expressions
 - ✅ 16.1 support more functions and binary operators✅ **已完成**
   - to support functions and binary operators listed in ./expr.md 

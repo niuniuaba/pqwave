@@ -164,3 +164,52 @@
   1. xschem complained: tclgetboolvar/tclgetdoublevar call dbg(0) when Tcl var doesn't exist. Fixed by adding defaults via `info exists` before first access.
   2. components disappear: backannotate_redraw used draw_single_layer=-2 (text-only). Fixed by removing -2 mode — backannotate_redraw now calls draw() directly (full redraw).
   3. Xa/Xb break autorange: autoRange includes InfiniteLine cursors in bounding calculation, extending range to cursor's default position (0.5). Fixed by filtering out pg.InfiniteLine items from autoRange calculation in auto_range_axis().
+
+### ✅ 13. change X variable doesn't affect in current session ✅ **fixed**
+- What is : when change X to another variable, the trace doesn't redraw against new x variable in current session.
+- How to reproduce : open tests/bridge.raw, add v(r1) to Y1. change X variable to v(r2), toggle autorange, the trace still in shape of v(r1) vs. time, not v(r1) vs. v(r2). close the window and open tests/bridge.raw again, now the trace is in shape of v(r1) vs. v(r2) which is correct.
+- root cause: `_on_add_trace_to_axis()` in main_window.py only updated `state.current_x_var`, the axis label, and auto-ranged X when the user set a new X variable. It never re-evaluated or redrew existing traces with the new X data. Traces retained their original `x_data` copied at creation time. Close-and-reopen worked because `_load_per_file_state()` re-creates all traces from scratch with the current `current_x_var`.
+- fix:
+  - trace_manager.py: Added `update_x_variable()` method that reads new X data from the raw file, updates each state trace's `x_data`, then redraws all plot items via `setData()` with proper log-transform and downsampling
+  - main_window.py: `_on_add_trace_to_axis()` calls `self.trace_manager.update_x_variable(x_var)` after setting the new X variable
+- files changed:
+  - `pqwave/ui/trace_manager.py` — new `update_x_variable()` method
+  - `pqwave/ui/main_window.py` — calls `update_x_variable()` in X variable change handler
+
+### ✅ 14. cannot add trace with name in a form of expressions✅ **fixed**
+- what is : when a vector's name is in form of expressions, it cannot be plot by add trace.
+- how to reproduce : 1)pqwave --extract tests/bridge.raw "v(ac_p)-v(ac_n)","v(r2)" -ngspice tests/bridge_extract.raw; 2) pqwave tests/bridge_extract.raw --debug; 3) select "v(ac_p)-v(ac_n)" from vector combo; 4) quote v(ac_p)-v(ac_n) inside ""; 5) press Y1 button. a pop up message says failed to add trace as expression "v(ac_p)-v(ac_n)"
+- reference tests/bridge_extract.log.
+
+### ✅ 15. `--extract` from AC files stored real data as complex, making traces unplottable ✅ **fixed**
+- what is : `--extract` from AC files stored real-valued expressions as complex128 (all imag=0), causing "Can not plot complex data types" when loading and plotting.
+- root cause (3 layers):
+  1. `raw_converter.py:extract_traces_to_raw()`: when `is_ac=True`, ALL Y data stored as complex128 regardless of actual dtype
+  2. `trace_manager.py:add_trace()` and `update_x_variable()`: x_data fetched via `raw_file.get_variable_data()` directly, bypassing the zero-imag fix in `ExprEvaluator.evaluate()`
+  3. `PlotCurveItem.setData()` rejects complex data outright
+- fix:
+  1. `raw_converter.py`: check if any trace actually has non-zero imaginary data; only output complex if truly needed, otherwise store as float
+  2. `expression.py`: `evaluate()` already had zero-imag check at line 209-210 (from prior session)
+  3. `trace_manager.py`: added `np.iscomplexobj(x_data) and np.all(x_data.imag == 0)` check in both `add_trace()` and `update_x_variable()`
+- files changed:
+  - `pqwave/models/raw_converter.py` — detect real-only data in AC extraction path
+  - `pqwave/ui/trace_manager.py` — zero-imag check for x_data in add_trace() and update_x_variable()
+  - `pqwave/models/expression.py` — zero-imag check in evaluate() (prior session)
+
+### ✅ 16. only Y vectors are extracted✅ **fixed** 
+- what is : when `--extract` from raw file, only Y vectors are extracted, making ploting a trace vs. un-default x impossible
+- how to reproduce : pqwave tests/cdg.raw (default x is "yes"), select "real(ac_data)" and press X button to set X to real(ac_data); add trace "-imag(ac_data)/2/pi/250000*1E12" to Y1; File - Save As to save to tests/cdg_extract.raw. Now pqwave tests/cdg_extract.raw and "real(ac_data)" is not in vectors combo so it's impossible to plot "-imag(ac_data)/2/pi/250000*1E12" vs. "real(ac_data)"
+- root cause: `extract_traces_to_raw()` had no way to specify a custom X variable separately from traces metadata; `_run_extract()` always used `variables[0]['name']`; `save_as_raw_data()` didn't pass `state.current_x_var`. Additionally, `RawFile.get_variable_data()` treated variable names like `real(ac_data)` as the `real()` function call on `ac_data` instead of a literal variable lookup.
+- fix:
+  - `raw_converter.py`: `extract_traces_to_raw()` — added optional `x_var_name` and `x_var_data` params. When provided, use them for X column instead of first trace's x_data.
+  - `main.py`: `_run_extract()` — added `-x <varname>` CLI flag parsing. When provided, evaluates custom X expression and passes it to `extract_traces_to_raw()`.
+  - `main_window.py`: `save_as_raw_data()` — reads `state.current_x_var` and its data, passes both to `extract_traces_to_raw()`.
+  - `rawfile.py`: `get_variable_data()` — exact variable name match before function-name interception (so `real(ac_data)` is found as a literal variable).
+
+### ✅ 17. too small Vector combo width ✅ **fixed**
+- what is : the width of Vector combo is too small so vectors with names in form of long expressions is unreadable.
+- fix: Increased `vector_combo` width constraints in `control_panel.py` — minimum 250px, maximum 500px (was 200px max), and added `AdjustToContents` size adjust policy for the dropdown popup.
+- files changed:
+  - `pqwave/ui/control_panel.py` — setMinimumWidth(250), setMaximumWidth(500), setSizeAdjustPolicy(AdjustToContents)
+
+### ✅ 18. `pqwave --help` doesn't show information of `--extract` and `--convert` option ✅ **fixed**
