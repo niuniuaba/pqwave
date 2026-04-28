@@ -21,7 +21,7 @@
 ## 📦 Installation 
 ```bash
 # Clone repository
-git clone https://github.com/yourname/pqwave.git
+git clone https://github.com/niuniuaba/pqwave.git
 
 # Create virtual environment
 cd pqwave

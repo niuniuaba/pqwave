@@ -69,10 +69,13 @@ class AxisConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'AxisConfig':
         """Create from dictionary."""
+        raw_range = data.get('range')
+        if raw_range is not None:
+            raw_range = (float(raw_range[0]), float(raw_range[1]))
         return cls(
             label=data.get('label', ''),
             log_mode=data.get('log_mode', False),
-            range=data.get('range'),
+            range=raw_range,
             visible=data.get('visible', True),
             grid=data.get('grid', True),
             auto_range=data.get('auto_range', True)

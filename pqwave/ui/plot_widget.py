@@ -74,6 +74,15 @@ class PlotWidget(pg.PlotWidget):
         }
         super().__init__(axisItems=axis_items, parent=parent)
 
+        # Disable pyqtgraph built-in context menus ("Plot Options" and
+        # "ViewBox options").  These expose generic transforms (FFT, dy/dx,
+        # subtract mean, log axes, etc.) that clash with pqwave's custom
+        # log-mode architecture and confuse EDA users expecting LTspice/QSPICE
+        # behaviour.  pqwave will provide its own EDA-appropriate analysis
+        # features later.
+        self.getPlotItem().setMenuEnabled(False)
+        self.getPlotItem().vb.setMenuEnabled(False)
+
         # Enable mouse tracking for the widget
         self.setMouseTracking(True)
 

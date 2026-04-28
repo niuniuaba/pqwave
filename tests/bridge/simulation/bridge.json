@@ -1,0 +1,90 @@
+{
+  "traces": [
+    {
+      "name": "v(r1)",
+      "expression": "v(r1)",
+      "y_axis": "Y1",
+      "color": [
+        255,
+        0,
+        0
+      ],
+      "line_width": 3,
+      "visible": true,
+      "dataset_idx": 0,
+      "metadata": {}
+    },
+    {
+      "name": "v(ac_p)",
+      "expression": "v(ac_p)",
+      "y_axis": "Y1",
+      "color": [
+        255,
+        0,
+        0
+      ],
+      "line_width": 1.0,
+      "visible": true,
+      "dataset_idx": 0,
+      "metadata": {}
+    },
+    {
+      "name": "-v(ac_n)",
+      "expression": "-v(ac_n)",
+      "y_axis": "Y1",
+      "color": [
+        0,
+        255,
+        0
+      ],
+      "line_width": 1.0,
+      "visible": true,
+      "dataset_idx": 0,
+      "metadata": {}
+    },
+    {
+      "name": "Vin(AC)",
+      "expression": "v(ac_p)-v(ac_n)",
+      "y_axis": "Y1",
+      "color": [
+        0,
+        0,
+        255
+      ],
+      "line_width": 3,
+      "visible": true,
+      "dataset_idx": 0,
+      "metadata": {}
+    }
+  ],
+  "current_x_var": "time",
+  "axis_configs": {
+    "X": {
+      "label": "time",
+      "log_mode": false,
+      "range": null,
+      "visible": true,
+      "grid": true,
+      "auto_range": true
+    },
+    "Y1": {
+      "label": "Y1",
+      "log_mode": false,
+      "range": null,
+      "visible": true,
+      "grid": true,
+      "auto_range": true
+    },
+    "Y2": {
+      "label": "Y2",
+      "log_mode": false,
+      "range": null,
+      "visible": true,
+      "grid": true,
+      "auto_range": true
+    }
+  },
+  "plot_title": "",
+  "grid_visible": true,
+  "legend_visible": true
+}

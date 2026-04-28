@@ -1,6 +1,6 @@
 set encoding utf8
 set termoption noenhanced
-set title "** sch_path: /home/wing/data/eda/xschem/bridge/bridge.sch"
+set title "** sch_path: /home/wing/apps/pqwave.git/tests/bridge/bridge.sch"
 set xlabel "s"
 set grid
 unset logscale x 

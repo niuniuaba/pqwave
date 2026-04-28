@@ -1,12 +1,12 @@
 ** sch_path: /home/wing/Apps/pqwave.git/tests/bridge/bridge.sch
 **.subckt bridge
-R1 net2 net1 1k
-R2 net1 0 1k
-D1 AC_p net2 D1N4148 area=1
-D2 AC_n net2 D1N4148 area=1
+R1 r1 r2 1k
+R2 r2 0 1k
+D1 AC_p r1 D1N4148 area=1
+D2 AC_n r1 D1N4148 area=1
 D3 0 AC_p D1N4148 area=1
 D4 0 AC_n D1N4148 area=1
-C1 net2 0 47uF
+C1 r1 0 47uF
 V1 AC_p AC_n SIN(0 100 100)
 **** begin user architecture code
 
