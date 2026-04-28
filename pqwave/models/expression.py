@@ -200,10 +200,29 @@ class ExprEvaluator:
     # ---- Public API ----
 
     def evaluate(self, expr):
-        tokens = self.tokenize(expr)
-        pos = 0
-        result, _ = self._eval_boolean_or(tokens, pos)
-        return result
+        # Try expression parsing first so that arithmetic like v(out)+v(in)
+        # always computes the sum, even when a variable with that exact name
+        # exists (e.g. from a previous extraction).
+        try:
+            tokens = self.tokenize(expr)
+            pos = 0
+            result, _ = self._eval_boolean_or(tokens, pos)
+            return result
+        except Exception:
+            pass
+
+        # Fall back to exact variable name lookup. This handles variable
+        # names that look like expressions but can't be parsed, such as
+        # 'v(ac_p)-v(ac_n)' from an extracted file, or names containing
+        # special characters like 'V(?1#inn)'.
+        if self.raw_file is not None:
+            var_data = self.raw_file.get_variable_data(expr, self.dataset_idx)
+            if var_data is not None:
+                if np.iscomplexobj(var_data) and np.all(var_data.imag == 0):
+                    return var_data.real
+                return var_data
+
+        raise ValueError(f"Could not evaluate expression: {expr}")
 
     # ---- Recursive Descent Parser ----
     # Precedence (lowest to highest):

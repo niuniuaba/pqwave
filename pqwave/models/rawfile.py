@@ -528,6 +528,17 @@ class RawFile:
         if data_matrix is None or data_matrix.size == 0:
             return None
 
+        # Check if var_name is an exact variable name in this dataset first.
+        # This prevents function-name interception (e.g. "real(ac_data)" being
+        # treated as real() on "ac_data" when it's actually a literal variable name).
+        for var in variables:
+            if var['name'] == var_name:
+                col = var['index']
+                if col < data_matrix.shape[1]:
+                    view = data_matrix[:, col]
+                    self._data_cache[(dataset_idx, var_name)] = view
+                    return view
+
         # Check if it's a derived variable for complex vector
         if var_name.startswith('mag(') and var_name.endswith(')'):
             base_var = var_name[4:-1]

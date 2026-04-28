@@ -19,6 +19,11 @@ from pqwave.ui.main_window import MainWindow
 from pqwave.logging_config import setup_logging
 from pqwave.communication import XschemServer, CommandHandler
 from pqwave.models.state import ApplicationState
+from pqwave.models.raw_converter import extract_traces_to_raw, write_raw_file, FORMAT_CONFIG
+from pqwave.models.rawfile import RawFile
+from pqwave.models.expression import ExprEvaluator
+from pqwave.models.trace import Trace
+import numpy as np
 
 
 def _send_command_to_server(port, command_text):
@@ -54,11 +59,217 @@ def _send_command_to_server(port, command_text):
         return False
 
 
+def _run_extract() -> int:
+    """Handle --extract CLI mode: extract traces from a raw file.
+
+    Usage: pqwave --extract <inputfile> <expr1[,expr2[,...]]> (-ltspice|-ngspice|-qspice) <outputfile>
+
+    Operates without QApplication — pure models-layer operation.
+    """
+    args = sys.argv[sys.argv.index('--extract') + 1:]
+    if len(args) < 3:
+        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <outputfile>", file=sys.stderr)
+        return 1
+
+    input_file = args[0]
+    expr_str = args[1]
+
+    # Parse format flag + output file from remaining args
+    target_format = None
+    output_file = None
+
+    i = 2
+    while i < len(args):
+        a = args[i]
+        if a in ('-ltspice', '-ngspice', '-qspice'):
+            target_format = a.lstrip('-')
+            if i + 1 < len(args):
+                output_file = args[i + 1]
+            break
+        i += 1
+
+    if not target_format or not output_file:
+        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <outputfile>", file=sys.stderr)
+        return 1
+
+    # Load raw file
+    try:
+        raw_file = RawFile(input_file)
+    except Exception as e:
+        print(f"Error loading {input_file}: {e}", file=sys.stderr)
+        return 1
+
+    if not raw_file.datasets:
+        print(f"Error: No datasets found in {input_file}", file=sys.stderr)
+        return 1
+
+    dataset = raw_file.datasets[0]
+
+    # Detect AC analysis
+    plotname = dataset.get('plotname', '').lower()
+    flags = dataset.get('flags', '').lower()
+    is_ac = 'ac' in plotname or 'complex' in flags
+
+    # Get first variable name as default X for trace metadata
+    variables = dataset.get('variables', [])
+    if not variables:
+        print(f"Error: No variables found in {input_file}", file=sys.stderr)
+        return 1
+
+    first_var_name = variables[0]['name']
+
+    # Split comma-separated expressions
+    expressions = [e.strip() for e in expr_str.split(',') if e.strip()]
+    if not expressions:
+        print("Error: No expressions specified", file=sys.stderr)
+        return 1
+
+    # Evaluate each expression and build Trace objects
+    traces = []
+    evaluator = ExprEvaluator(raw_file, dataset_idx=0)
+
+    for expr in expressions:
+        try:
+            y_data = evaluator.evaluate(expr)
+        except Exception as e:
+            print(f"Error evaluating expression '{expr}': {e}", file=sys.stderr)
+            return 1
+
+        # Get X data from the first variable
+        try:
+            x_data = evaluator.evaluate(first_var_name)
+        except Exception:
+            # Fallback: read first data column directly
+            data_matrix = dataset.get('data')
+            if data_matrix is not None and data_matrix.size > 0:
+                x_data = data_matrix[:, 0].copy()
+            else:
+                print(f"Error: Cannot read X axis data from {input_file}", file=sys.stderr)
+                return 1
+
+        # Trim to common length
+        n = min(len(x_data), len(y_data))
+        trace = Trace(
+            name=expr,
+            expression=expr,
+            x_data=x_data[:n].copy(),
+            y_data=y_data[:n].copy(),
+            dataset_idx=0,
+            metadata={'x_var_name': first_var_name},
+        )
+        traces.append(trace)
+
+    # Extract to raw file
+    try:
+        extract_traces_to_raw(output_file, traces, raw_file, target_format=target_format, output_is_ac=is_ac)
+    except Exception as e:
+        print(f"Error writing {output_file}: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Extracted {len(traces)} traces to {output_file} ({target_format})")
+    return 0
+
+
+def _run_convert() -> int:
+    """Handle --convert CLI mode: convert raw file between formats.
+
+    Usage: pqwave --convert <inputfile> (-ltspice|-ngspice|-qspice) <outputfile>
+
+    Operates without QApplication — pure models-layer operation.
+    """
+    args = sys.argv[sys.argv.index('--convert') + 1:]
+    if len(args) < 2:
+        print(
+            "Usage: pqwave --convert <inputfile> (-ltspice|-ngspice|-qspice) <outputfile>",
+            file=sys.stderr,
+        )
+        return 1
+
+    input_file = args[0]
+
+    # Parse format flag + output file from remaining args
+    target_format = None
+    output_file = None
+
+    i = 1
+    while i < len(args):
+        a = args[i]
+        if a in ('-ltspice', '-ngspice', '-qspice'):
+            target_format = a.lstrip('-')
+            if i + 1 < len(args):
+                output_file = args[i + 1]
+            break
+        i += 1
+
+    if not target_format or not output_file:
+        print(
+            "Usage: pqwave --convert <inputfile> (-ltspice|-ngspice|-qspice) <outputfile>",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Load raw file
+    try:
+        raw_file = RawFile(input_file)
+    except Exception as e:
+        print(f"Error loading {input_file}: {e}", file=sys.stderr)
+        return 1
+
+    if not raw_file.datasets:
+        print(f"Error: No datasets found in {input_file}", file=sys.stderr)
+        return 1
+
+    dataset = raw_file.datasets[0]
+    title = dataset.get('title', 'pqwave conversion')
+    date = dataset.get('date', '')
+    plotname = dataset.get('plotname', '')
+    flags = dataset.get('flags', '')
+    variables = dataset.get('variables', [])
+    data = dataset.get('data')
+    is_ac_or_complex = dataset.get('_is_ac_or_complex', False)
+
+    if data is None or data.size == 0:
+        print(f"Error: No data found in {input_file}", file=sys.stderr)
+        return 1
+
+    try:
+        write_raw_file(
+            output_path=output_file,
+            title=title,
+            date=date,
+            plotname=plotname,
+            flags=flags,
+            variables=variables,
+            data=data,
+            target_format=target_format,
+            is_ac_or_complex=is_ac_or_complex,
+        )
+    except Exception as e:
+        print(f"Error writing {output_file}: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Converted {input_file} to {output_file} ({target_format})")
+    return 0
+
+
 def main():
     """Main entry point for pqwave."""
+    # Handle --extract before argparse (uses non-standard flags like -ltspice)
+    if '--extract' in sys.argv:
+        return _run_extract()
+
+    # Handle --convert before argparse (uses non-standard flags like -ltspice)
+    if '--convert' in sys.argv:
+        return _run_convert()
+
     parser = argparse.ArgumentParser(
         description="pqwave - SPICE Waveform Viewer",
-        epilog="Example: pqwave simulation.raw"
+        usage=(
+            "pqwave [-h] [options] [raw_file]\n"
+            "       or: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <output>\n"
+            "       or: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     # Xschem integration arguments
     parser.add_argument(
@@ -88,6 +299,16 @@ def main():
         "raw_file",
         nargs="?",  # Optional positional argument
         help="SPICE raw file to open"
+    )
+    parser.add_argument(
+        "--extract",
+        action="store_true",
+        help="Extract traces: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <output>"
+    )
+    parser.add_argument(
+        "--convert",
+        action="store_true",
+        help="Convert raw format: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>"
     )
     parser.add_argument(
         "--version", "-v",

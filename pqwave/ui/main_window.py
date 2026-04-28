@@ -27,7 +27,7 @@ from PyQt6.QtGui import QColor, QFont
 
 from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme, FontConfig, AxisConfig
 from pqwave.models.rawfile import RawFile
-from pqwave.models.raw_converter import write_raw_file, FORMAT_CONFIG
+from pqwave.models.raw_converter import write_raw_file, FORMAT_CONFIG, extract_traces_to_raw
 from pqwave.models.dataset import Dataset
 from pqwave.models.trace import AxisAssignment
 from pqwave.ui.menu_manager import MenuManager
@@ -179,6 +179,7 @@ class MainWindow(QMainWindow):
             'open_file': self.open_file,
             'open_new_window': self.open_new_window,
             'save_current_state': self.save_current_state,
+            'save_as_raw_data': self.save_as_raw_data,
             'convert_raw_data': self.convert_raw_data,
             'edit_trace_properties': self.edit_trace_properties,
             'show_settings': self.show_settings,
@@ -1005,6 +1006,118 @@ class MainWindow(QMainWindow):
 
         dialog.exec()
 
+    def save_as_raw_data(self):
+        """Save currently displayed traces as a new SPICE raw file."""
+        if not self.raw_file or not self.raw_file.datasets:
+            QMessageBox.warning(
+                self, "No Data",
+                "No raw data loaded. Open a raw file first."
+            )
+            return
+
+        traces = self.state.traces
+        if not traces:
+            QMessageBox.warning(
+                self, "No Traces",
+                "No traces to save. Add traces to the plot first."
+            )
+            return
+
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, QPushButton
+
+        dataset = self.raw_file.datasets[0]
+        is_ac = dataset.get('_is_ac_or_complex', False)
+
+        # Detect source format
+        detected = self.raw_file.detected_format
+        if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
+            src_format = detected
+        else:
+            src_format = 'qspice' if self.raw_file.filename.lower().endswith('.qraw') else 'ltspice'
+
+        # Format selection dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Save Traces As Raw Data")
+        dialog.setMinimumWidth(350)
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(f"Extracting {len(traces)} trace(s) from {src_format.upper()}"))
+        layout.addWidget(QLabel("Target format:"))
+
+        format_group = []
+        for fmt_key in FORMAT_CONFIG:
+            label = f"{fmt_key.upper()} ({FORMAT_CONFIG[fmt_key]['extension']})"
+            rb = QRadioButton(label)
+            rb.setChecked(fmt_key == src_format)
+            format_group.append((fmt_key, rb))
+            layout.addWidget(rb)
+
+        button_layout = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        button_layout.addWidget(save_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        dialog.setLayout(layout)
+
+        def do_save():
+            target_fmt = None
+            for fmt_key, rb in format_group:
+                if rb.isChecked():
+                    target_fmt = fmt_key
+                    break
+            if target_fmt is None:
+                QMessageBox.warning(dialog, "Error", "Please select a target format.")
+                return
+
+            dialog.accept()
+
+            ext = FORMAT_CONFIG[target_fmt]['extension']
+            save_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Traces As",
+                "", f"Raw Files (*{ext});;All Files (*)"
+            )
+            if not save_path:
+                return
+
+            try:
+                # Pass custom X variable (if set) so it's preserved in the output
+                x_var = self.state.current_x_var
+                x_var_data = None
+                if x_var and self.raw_file:
+                    try:
+                        x_var_data = self.raw_file.get_variable_data(
+                            x_var, self.state.current_dataset_idx
+                        )
+                    except Exception:
+                        x_var = None  # fall back to default X
+
+                extract_traces_to_raw(
+                    output_path=save_path,
+                    traces=traces,
+                    raw_file=self.raw_file,
+                    target_format=target_fmt,
+                    output_is_ac=is_ac,
+                    x_var_name=x_var,
+                    x_var_data=x_var_data,
+                    dataset_idx=self.state.current_dataset_idx,
+                )
+                QMessageBox.information(
+                    self, "Save Successful",
+                    f"Saved {len(traces)} trace(s) as {target_fmt.upper()}:\n{save_path}"
+                )
+                logger.info(f"Traces saved to {save_path} ({target_fmt})")
+            except Exception as e:
+                logger.exception(f"Save traces failed: {e}")
+                QMessageBox.critical(
+                    self, "Save Failed",
+                    f"Failed to save traces:\n{e}"
+                )
+
+        save_btn.clicked.connect(do_save)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
     def edit_trace_properties(self):
         """Edit trace properties (alias, color, line width)"""
         logger.debug(f"edit_trace_properties called, traces count: {len(self.trace_manager.traces)}")
@@ -1612,11 +1725,20 @@ class MainWindow(QMainWindow):
             # Update X-axis label
             self.axis_manager.set_axis_label(AxisId.X, x_var)
 
-            # Auto-range X-axis based on new variable
+            # Update all existing traces with the new X variable data
             if self.raw_file and self.state.current_dataset_idx is not None:
                 x_data = self.raw_file.get_variable_data(x_var, self.state.current_dataset_idx)
                 if x_data is not None:
                     self.axis_manager.auto_range_x_from_data(x_data, x_var)
+                else:
+                    QMessageBox.warning(
+                        self, "Variable Not Found",
+                        f"Variable '{x_var}' not found in the current dataset."
+                    )
+                    return
+
+            # Redraw all existing traces against the new X variable
+            self.trace_manager.update_x_variable(x_var)
 
             # Clear expression after successful addition
             self.control_panel.trace_expr.clear()

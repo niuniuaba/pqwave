@@ -195,6 +195,8 @@ class TraceManager:
 
             x_data = self.raw_file.get_variable_data(x_var, self.current_dataset)
             if x_data is not None:
+                if np.iscomplexobj(x_data) and np.all(x_data.imag == 0):
+                    x_data = x_data.real
                 self.logger.debug(f"X data length: {len(x_data)}")
 
                 traces_added = []
@@ -493,6 +495,58 @@ class TraceManager:
             self.logger.debug(f"  Updated log mode for {var}: x={self.x_log}, y={y_log}")
 
         self.logger.debug(f"  Trace update complete")
+
+    def update_x_variable(self, x_var_name: str) -> None:
+        """Update all existing traces to use a new X variable.
+
+        Called when the user changes the X-axis variable after traces have already been added.
+        Replaces each trace's x_data with data from the new X variable and redraws plot items.
+        """
+        if self.raw_file is None:
+            self.logger.warning("Cannot update X variable: no raw file loaded")
+            return
+
+        new_x_data = self.raw_file.get_variable_data(x_var_name, self.current_dataset)
+        if new_x_data is None:
+            self.logger.error(f"No data for X variable: {x_var_name}")
+            return
+
+        if np.iscomplexobj(new_x_data) and np.all(new_x_data.imag == 0):
+            new_x_data = new_x_data.real
+
+        state_traces = self.state.traces
+        updated_count = 0
+        for i, (var, plot_item, y_axis) in enumerate(self.traces):
+            y_log = self.y1_log if y_axis == "Y1" else self.y2_log
+
+            # Update trace model's x_data in application state
+            if i < len(state_traces):
+                trace = state_traces[i]
+                if len(new_x_data) != len(trace.y_data):
+                    self.logger.warning(
+                        f"X data length ({len(new_x_data)}) doesn't match Y data length "
+                        f"({len(trace.y_data)}) for trace '{var}'. Skipping."
+                    )
+                    continue
+                trace.x_data = new_x_data.copy()
+            else:
+                self.logger.warning(f"No state trace found for index {i}, skipping")
+                continue
+
+            # Apply log10 transform if the axis is in log mode
+            x = np.log10(np.abs(new_x_data) + 1e-300) if self.x_log else new_x_data.copy()
+            y = np.log10(np.abs(trace.y_data) + 1e-300) if y_log else trace.y_data.copy()
+
+            # Downsample and update the plot item
+            x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
+            plot_item.setData(x_ds, y_ds)
+            updated_count += 1
+
+        if updated_count > 0:
+            # Auto-range X axis to fit the new data
+            self._auto_range_x()
+
+        self.logger.info(f"Updated {updated_count} traces to use X variable: {x_var_name}")
 
     def update_legend_cursor_values(self, xa_linear: Optional[float], xb_linear: Optional[float]) -> None:
         """Update legend labels with Y values at X cursor positions.

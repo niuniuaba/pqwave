@@ -90,6 +90,12 @@ class MenuManager:
         self._set_action_shortcut(save_current_state_action, 'save_current_state')
         file_menu.addAction(save_current_state_action)
 
+        save_as_action = QAction("Save As...", self.parent)
+        save_as_action.triggered.connect(self.callbacks.get('save_as_raw_data', lambda: None))
+        self._set_action_shortcut(save_as_action, 'save_as_raw_data')
+        file_menu.addAction(save_as_action)
+        file_menu.addSeparator()
+
         open_raw_action = QAction("Open Raw File", self.parent)
         open_raw_action.triggered.connect(self.callbacks.get('open_file', lambda: None))
         self._set_action_shortcut(open_raw_action, 'open_file')
@@ -265,6 +271,10 @@ class MenuManager:
         # Open New Window
         add_action('open_new_window', "Open New Window", "Open new window",
                    'window-new', SI.SP_ComputerIcon)
+
+        # Save As
+        add_action('save_as_raw_data', "Save As", "Save displayed traces to raw file",
+                   'document-save-as', SI.SP_DialogSaveButton)
 
         self.toolbar.addSeparator()
 
