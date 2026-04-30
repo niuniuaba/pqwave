@@ -81,6 +81,11 @@ class ColorManager:
         if color not in self.used_colors:
             self.used_colors.append(color)
 
+    def release_color(self, color: Tuple[int, int, int]) -> None:
+        """Release a color so it can be reused by another trace."""
+        if color in self.used_colors:
+            self.used_colors.remove(color)
+
     def is_color_used(self, color: Tuple[int, int, int]) -> bool:
         """Check if a color is already used."""
         return color in self.used_colors

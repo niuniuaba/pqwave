@@ -213,3 +213,39 @@
   - `pqwave/ui/control_panel.py` — setMinimumWidth(250), setMaximumWidth(500), setSizeAdjustPolicy(AdjustToContents)
 
 ### ✅ 18. `pqwave --help` doesn't show information of `--extract` and `--convert` option ✅ **fixed**
+
+### ✅ 19. cannot add plotted vectors to measurement expr✅ **fixed** 
+- what is : when a vector is plotted it cannot be added to measurement expr
+- how to reproduce : pqwave ./tests/bridge.raw; nothing happens when click v(r1) in vectors combo
+
+### ✅ 20. meas functions doesn't take expression of vectors as variable✅ **fixed** 
+- what is : functions doesn't take expression of vectors as variable
+- how to reproduce : pqwave ./tests/bridge.raw, add "avg(v(ac_p)-v(ac_n))" and press RUN, an error message says vector not found : 'v(ac_p)-v(ac_n)'
+- what expected : meas functions accept expressions. this is true in Func functions. for example mean(v(ac_p)-v(ac_n)) plot the trace correctly.
+
+### ✅ 21. tip message doesn't show up for last items in Func combo and Measure combo✅ **fixed** 
+- how to reproduce : scroll mouse to bottom of the list item in Func combo and Measure combo, there is no tip message showing up.
+
+### ✅ 22. cannot run user-written meas command✅ **fixed** 
+- how to reproduce : qpwave ./tests/bridge.raw; write ".meas tran when v(r1)=96" in measurement expr, press RUN button, an error message says "invalid measure expression : '.meas tran when v(r1)=96'"
+
+### ✅ 23. 'From Script' changes backgroud of measurement expr which makes text unreadable.✅ **fixed** 
+- how to reproduce : pqwave tests/bridge.raw, then press 'From Script' button, select tests/bridge.meas file, the measurement expr background changes to white and make text unreadable.
+
+### ✅ 24. measurement expr cannot be clear after running from a Script✅ **fixed** 
+- how to reproduce : pqwave tests/bridge.raw, then press 'From Script' button, select tests/bridge.meas file, press 'RUN' button, then the text in measurement expr cannot be clear (cannot be deleted)
+
+### ✅ 25. cannot add plotted vectors to Add Trace expr ✅ **fixed**
+- what is : when a vector is plotted it cannot be added to Add Trace expr
+- how to reproduce : pqwave ./tests/bridge.raw; add v(r1) to Y1, select mean(x) from Func combo, v(r1) cannot be put to Add Trace expr to coine mean(v(r1)). 
+- similiar to #19 but happens to Add Trace expr.
+
+###  ✅ 26. meas script runs into error when script file path is provided by key-in✅ **fixed** 
+- what is : when user key-in a meas script path and press 'RUN' button it leads to a invalid expression error.
+- how to reproduce : key-in '/home/wing/Apps/pqwave.git/tests/bridge.meas' in measurement expr then press 'RUN' button leads to error : Invalid expression : '/home/wing/Apps/pqwave.git/tests/bridge.meas'  
+- what expected: user can run a meas script by select it from a file selector, or by key-in its path. further more, user can edit the path freely before press 'RUN' no matter it is selected from file selector or by key-in. 
+
+###  ✅ 27. improve tooltip message for measurement expr✅ **fixed**  
+- what is : measurement tooltip message says 'Enter a measurement expression ...'
+- what expected : measurement tooltip message says 'Enter a measurement expression..., or a script path ....'
+

@@ -12,6 +12,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtCore
 from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QColorDialog
 from typing import Optional, List, Tuple
 
 from pqwave.models.state import ApplicationState
@@ -36,11 +37,16 @@ class SelectableItemSample(ItemSample):
     TraceManager selection handler controls all click behaviour.
     """
 
+    sigRightClicked = QtCore.pyqtSignal(object)
+
     def mouseClickEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             event.accept()
             self.update()
             self.sigClicked.emit(self.item)
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
+            event.accept()
+            self.sigRightClicked.emit(self.item)
 
 
 class _StaticCurveItem(pg.PlotCurveItem):
@@ -337,7 +343,13 @@ class TraceManager:
         self.legend.clear()
         for i, (var, plot_item, y_axis) in enumerate(self.traces):
             legend_name = f"{var} @ {y_axis}"
-            self.legend.addItem(plot_item, legend_name)
+            sample = self.legend.addItem(plot_item, legend_name)
+            if isinstance(sample, SelectableItemSample):
+                try:
+                    sample.sigRightClicked.disconnect()
+                except Exception:
+                    pass
+                sample.sigRightClicked.connect(self._on_legend_sample_right_clicked)
             # Apply bold styling to selected traces
             if i < len(self.state.traces) and self.state.traces[i].selected:
                 label = self.legend.getLabel(plot_item)
@@ -434,6 +446,25 @@ class TraceManager:
             self.deselect_all()
             trace.selected = True
 
+        self._refresh_legend()
+
+    def _on_legend_sample_right_clicked(self, plot_item) -> None:
+        """Handle right click on a legend item sample — change trace color."""
+        idx = self._find_trace_index(plot_item)
+        if idx is None or idx >= len(self.state.traces):
+            return
+
+        trace = self.state.traces[idx]
+        old_color = QColor(*trace.color)
+        new_color = QColorDialog.getColor(old_color)
+        if not new_color.isValid():
+            return
+
+        rgb = (new_color.red(), new_color.green(), new_color.blue())
+        self.color_manager.release_color(trace.color)
+        self.color_manager.mark_color_used(rgb)
+        trace.color = rgb
+        plot_item.setPen(pg.mkPen(color=rgb, width=1))
         self._refresh_legend()
 
     def select_trace(self, idx: int) -> None:

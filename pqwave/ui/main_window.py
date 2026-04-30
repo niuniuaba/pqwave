@@ -12,6 +12,7 @@ them with the ApplicationState singleton.
 import sys
 import time
 import os
+import re
 import traceback
 import json
 import socket
@@ -43,6 +44,10 @@ from pqwave.communication.window_registry import get_registry
 from pqwave.ui.keybinding_manager import KeyBindingManager
 from pqwave.ui.keybindings_dialog import KeyBindingsDialog
 from pqwave.ui.functions_help_dialog import FunctionsHelpDialog
+from pqwave.ui.measures_help_dialog import MeasuresHelpDialog
+from pqwave.ui.measure_results_widget import MeasureResultsWidget
+from pqwave.measure.measure_engine import evaluate_measure
+from pqwave.measure.measure_script_parser import parse_meas_script
 import uuid
 
 
@@ -96,6 +101,7 @@ class MainWindow(QMainWindow):
         # Cross-hair cursor state
         self.cross_hair_visible = False
         self.mark_panel = None
+        self._measure_results = None  # lazy-created MeasureResultsWidget
 
         # Xschem pending commands (when raw_file not yet loaded)
         self.pending_xschem_commands = []  # list of (command_type, args, client_addr, connection_state)
@@ -207,6 +213,7 @@ class MainWindow(QMainWindow):
             'toggle_y_cursor_B': self._toggle_y_cursor_B,
             'show_keybindings': self._show_keybindings,
             'show_functions_help': self._show_functions_help,
+            'show_measures_help': self._show_measures_help,
         }
 
     def _connect_signals(self):
@@ -217,6 +224,9 @@ class MainWindow(QMainWindow):
         self.control_panel.add_trace_to_axis.connect(self._on_add_trace_to_axis)
         self.control_panel.expression_changed.connect(self._on_expression_changed)
         self.control_panel.function_selected.connect(self._on_function_selected)
+        self.control_panel.measure_selected.connect(self._on_measure_selected)
+        self.control_panel.run_measure_requested.connect(self._on_run_measure)
+        self.control_panel.from_script_requested.connect(self._on_from_script)
 
         # Connect plot widget signals
         self.plot_widget.mouse_moved.connect(self._on_mouse_moved)
@@ -1650,26 +1660,29 @@ class MainWindow(QMainWindow):
         if not vector:
             return
 
-        # If this vector is already plotted as a trace, don't add to input box
-        for var, _, _ in self.trace_manager.traces:
-            if var == vector:
-                return
+        target = self.control_panel.last_focused_expr
+        current_text = target.text()
 
-        trace_expr = self.control_panel.trace_expr
-        current_text = trace_expr.text()
+        # Only skip already-plotted vectors when trace expression is empty
+        # (user wants to add as standalone trace). Allow insertion when there's
+        # existing text so expressions like mean(v(r1)) can be composed.
+        if target is self.control_panel.trace_expr and not current_text.strip():
+            for var, _, _ in self.trace_manager.traces:
+                if var == vector:
+                    return
         if current_text:
             # Split by whitespace to check if vector already present in text
             parts = current_text.split()
             if vector in parts:
                 return
             # If cursor is inside function parens, insert at cursor position
-            if self._cursor_in_parens(current_text, trace_expr.cursorPosition()):
-                trace_expr.insert(f" {vector} ")
+            if self._cursor_in_parens(current_text, target.cursorPosition()):
+                target.insert(f" {vector} ")
                 return
             new_text = f"{current_text} {vector}"
         else:
             new_text = vector
-        trace_expr.setText(new_text)
+        target.setText(new_text)
 
     @staticmethod
     def _cursor_in_parens(text: str, pos: int) -> bool:
@@ -1691,6 +1704,100 @@ class MainWindow(QMainWindow):
             # Function with arguments: insert name() and place cursor inside parens
             trace_expr.insert(f"{info.name}()")
             trace_expr.setCursorPosition(cursor + len(info.name) + 1)
+
+    @pyqtSlot(object)
+    def _on_measure_selected(self, info):
+        """Insert a measure function signature into the measurement expression."""
+        target = self.control_panel.measure_expr
+        cursor = target.cursorPosition()
+
+        if info.arg_count == 0:
+            target.insert(info.name)
+        else:
+            target.insert(f"{info.name}()")
+            target.setCursorPosition(cursor + len(info.name) + 1)
+
+    @pyqtSlot()
+    def _on_run_measure(self):
+        """Evaluate measurement expression or script and show results."""
+        expr = self.control_panel.get_measure_expression().strip()
+        if not expr:
+            QMessageBox.warning(self, "No Measurement",
+                                "Enter a measurement expression or load a script file first.")
+            return
+
+        # File path detection: treat as script file if path exists on disk
+        if os.path.isfile(expr):
+            self._run_measure_script(expr)
+        elif re.match(r'^\.?meas\s', expr, re.IGNORECASE):
+            self._run_measure_script_text(expr)
+        else:
+            self._run_single_measure(expr)
+
+    def _run_single_measure(self, expr: str):
+        """Evaluate a single measurement expression."""
+        self._ensure_measure_results()
+        try:
+            value = evaluate_measure(expr, self._measure_get_data)
+            self._measure_results.add_result(expr, expr, value, "")
+        except Exception as e:
+            self._measure_results.add_error(expr, expr, str(e))
+        self._measure_results.show()
+        self._measure_results.raise_()
+
+    def _run_measure_script(self, filepath: str):
+        """Parse and execute a .meas-style script file."""
+        self._ensure_measure_results()
+        try:
+            with open(filepath, 'r') as f:
+                script_text = f.read()
+        except OSError as e:
+            QMessageBox.warning(self, "File Error", f"Cannot read script file:\n{e}")
+            return
+
+        results = parse_meas_script(script_text)
+        for expr, label in results:
+            try:
+                value = evaluate_measure(expr, self._measure_get_data)
+                self._measure_results.add_result(label, expr, value, "")
+            except Exception as e:
+                self._measure_results.add_error(label, expr, str(e))
+        self._measure_results.show()
+        self._measure_results.raise_()
+
+    def _run_measure_script_text(self, text: str):
+        """Parse and execute .meas command(s) typed directly into the expr field."""
+        self._ensure_measure_results()
+        results = parse_meas_script(text)
+        for expr, label in results:
+            try:
+                value = evaluate_measure(expr, self._measure_get_data)
+                self._measure_results.add_result(label, expr, value, "")
+            except Exception as e:
+                self._measure_results.add_error(label, expr, str(e))
+        self._measure_results.show()
+        self._measure_results.raise_()
+
+    def _ensure_measure_results(self):
+        """Lazy-create the MeasureResultsWidget."""
+        if self._measure_results is None:
+            self._measure_results = MeasureResultsWidget(self)
+
+    @pyqtSlot()
+    def _on_from_script(self):
+        """Open a file dialog to select a .meas-style script file."""
+        if self.raw_file is None:
+            QMessageBox.warning(self, "No Data", "Please open a SPICE output file first.")
+            return
+
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Select Measurement Script", "",
+            "Text Files (*.txt *.meas *.spice *.sp *.cir);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        self.control_panel.set_script_mode(filepath)
 
     @pyqtSlot(str)
     def _on_add_trace_to_axis(self, axis):
@@ -2032,6 +2139,41 @@ class MainWindow(QMainWindow):
                 return var_names[0]
         return None
 
+    def _measure_get_data(self, name: str):
+        """Look up (x_data, y_data) for a vector name in the current dataset.
+
+        Falls back to expression evaluation when the name is not a simple
+        variable (e.g. 'v(ac_p)-v(ac_n)').
+
+        Returns (x_data, y_data) as numpy arrays, or None if not found.
+        """
+        if self.raw_file is None or self.state.current_dataset_idx is None:
+            return None
+
+        y_data = self.raw_file.get_variable_data(name, self.state.current_dataset_idx)
+        if y_data is None:
+            # Try evaluating as an expression (e.g., v(ac_p)-v(ac_n))
+            try:
+                from pqwave.models.expression import ExprEvaluator
+                evaluator = ExprEvaluator(self.raw_file, self.state.current_dataset_idx)
+                y_data = evaluator.evaluate(name)
+            except Exception:
+                return None
+
+        if y_data is None:
+            return None
+
+        x_var = self._get_current_x_var()
+        x_data = None
+        if x_var:
+            x_data = self.raw_file.get_variable_data(x_var, self.state.current_dataset_idx)
+        if x_data is None:
+            x_data = self.raw_file.get_variable_data("time", self.state.current_dataset_idx)
+        if x_data is None:
+            x_data = np.arange(len(y_data))
+
+        return (x_data, y_data)
+
     def _show_error(self, title, message):
         """Show error message dialog."""
         logger.error(f"{title}: {message}")
@@ -2316,6 +2458,11 @@ class MainWindow(QMainWindow):
     def _show_functions_help(self) -> None:
         """Open the Functions Reference help dialog."""
         dialog = FunctionsHelpDialog(self)
+        dialog.exec()
+
+    def _show_measures_help(self) -> None:
+        """Open the Measures Reference help dialog."""
+        dialog = MeasuresHelpDialog(self)
         dialog.exec()
 
 

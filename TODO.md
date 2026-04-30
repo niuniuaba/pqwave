@@ -1,17 +1,19 @@
 ## TODO.md
 ###   v0.2.5 enhance analysis capability
-- 18.1 run a .meas script
+- ✅ 18.1 measurement (.meas / .measure)✅ **已完成** 
+  - 在 vector combo, func combo那一行插入一个Measure comb，里面封装好spice中的.meas命令的函数（上升/下降时间、过冲、下冲、周期、频率、占空比、RMS、THD、SINAD、等），具体函数请参考./meas.md；Measure combo的行为类似Func combo的行为：按函数名alphabet排列，提供显示函数描述的tip messages，Ctrl+left click多选，Shit+left click连续选择，等。
+  - 在Add Trace那一行的下方插入一个 Measurement expr，行为类似Add Trace expr，当用户从Measure combo选择后把被选择函数填入Measurement expr，同时用户可以在其中进行表达式编辑。注意
   - run a .meas script
   - built-in meas functions (上升/下降时间、过冲/下冲、周期、频率、占空比、RMS、THD、SINAD 等)
-- 18.2 Compute the average or RMS of a trace (credit goes to LTspice)
+- 18.2 Compute the average or RMS of a trace.
   - integrate a trace to obtain the average and RMS value over the displayed region
   - First zoom the waveform to the region of interest, then move the mouse to the label of the trace, hold down the control key and left mouse click 
   - RMS average is reported only if the physical units of the integrated quantity is volts or amps to avoid confusing people that need the average when power is integrated.
 - 18.3 FFT
-- 数字波形（时序图风格）
 - 18.4 功率分析（瞬态、平均）
-- 18.5 multiple plot permanently
-- 18.6 power supply - specific analysis 
+- 18.5 power supply - specific analysis 
+- 18.6 multiple plot panel
+- 18.7 数字波形（时序图风格）
 
 ###   v0.2.4 feature add 
 17. add some features
@@ -44,10 +46,6 @@
   - when a function or binary operator is selected (or mouse approximat that item) show a tip of description (what it is)
   - Add a Help - Functions menu item to show function and operator description.
   - 如果添加的是一个需要变量的函数，当其被加到Add Trace expr之后，光标停留在该函数的()内，等待用户编辑，此时如果用户从Vectors combo内选择一个向量，则把该向量添加到前述函数的()内，因为以一个向量作为一个函数的变量是正常的操作逻辑。
-- 16.3 增加Calculation widget
-  - 增加一个类似Mark Data widget的Calculation widget，用以显示计算结果
-  - 当某个函数和/或表达式不是与X变量同维度时，无论用户把它加到Y1或者Y2都不要作为曲线绘制在plot widget上，因为没有意义，应该把计算结果记录在一个data widget上。比如，mean(v(r1))明显是求节点r1的电压的平均值，它的结果是一个scalar（长度为1的向量），不是一条曲线，不应该绘图。
-  - 实现与Mark Data widget相同的功能，即：（1）delete last; (2) copy data; (3) export to cvs
 
 ###  ✅ v0.2.3 keybindings ✅ **已完成**
 15.  keybindings ✅ **已完成**  

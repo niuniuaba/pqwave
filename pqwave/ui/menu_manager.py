@@ -237,6 +237,10 @@ class MenuManager:
         functions_help_action.triggered.connect(self.callbacks.get('show_functions_help', lambda: None))
         help_menu.addAction(functions_help_action)
 
+        measures_help_action = QAction("Measures", self.parent)
+        measures_help_action.triggered.connect(self.callbacks.get('show_measures_help', lambda: None))
+        help_menu.addAction(measures_help_action)
+
         self.menubar.addMenu(help_menu)
 
     @staticmethod

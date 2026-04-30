@@ -2,18 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-FunctionsCombo — QComboBox listing all expression functions and constants.
+MeasuresCombo — QComboBox listing all built-in measurement functions.
 """
 
 from PyQt6.QtWidgets import QComboBox, QCompleter, QToolTip
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QCursor
 
-from pqwave.ui.function_registry import FunctionInfo, get_all
+from pqwave.ui.function_registry import FunctionInfo
+from pqwave.ui.measure_registry import get_all_measure_functions
 
 
-class FunctionsCombo(QComboBox):
-    """Dropdown listing functions and constants alphabetically for expression building.
+class MeasuresCombo(QComboBox):
+    """Dropdown listing measure functions alphabetically for expression building.
 
     Each item shows a tooltip with its description on hover. Selecting an item
     emits function_selected(FunctionInfo).
@@ -24,13 +25,13 @@ class FunctionsCombo(QComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._info_by_index: dict[int, FunctionInfo] = {}
-        self.setToolTip("Select a function to insert into the expression")
+        self.setToolTip("Select a measure function to insert into the expression")
         self._populate()
         self.activated.connect(self._on_activated)
 
     def _populate(self):
-        """Fill the combo with all functions and constants sorted alphabetically."""
-        items = get_all()
+        """Fill the combo with all measure functions sorted alphabetically."""
+        items = get_all_measure_functions()
         items.sort(key=lambda info: info.name)
 
         for info in items:
