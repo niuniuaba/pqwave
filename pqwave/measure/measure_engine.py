@@ -74,7 +74,9 @@ def _parse_expr(expr: str) -> tuple[str, str, list[str], dict[str, str]]:
     elif depth == 1 and i < len(rest) and rest[i] == ',':
         # Hit top-level comma: e.g. "when_cross(v(r1), 96)"
         vector_name = rest[:i].strip()
-        remainder = rest[i + 1:].strip().rstrip(')')
+        remainder = rest[i + 1:].strip()
+        if remainder.endswith(')'):
+            remainder = remainder[:-1].strip()
     else:
         raise ValueError(f"Unmatched parentheses in: {expr!r}")
 
@@ -122,24 +124,161 @@ def _window_data(
     return x[mask], y[mask]
 
 
+def _apply_td(
+    x: np.ndarray, y: np.ndarray, kwargs: dict[str, str]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Discard data before TD=val delay time."""
+    if "td" in kwargs:
+        td_val = _parse_value(kwargs.pop("td"))
+        mask = x >= td_val
+        if not np.any(mask):
+            raise ValueError(f"No data points after TD={td_val}")
+        return x[mask], y[mask]
+    return x, y
+
+
 def _find_crossings(x: np.ndarray, y: np.ndarray, threshold: float,
-                    edge: str = "rise") -> list[float]:
+                    edge: str = "any") -> list[float]:
     """Find x-coordinates where y crosses threshold.
 
-    edge: 'rise' or 'fall'. Uses linear interpolation for sub-sample accuracy.
+    edge: 'rise', 'fall', or 'any'. Uses linear interpolation for sub-sample accuracy.
     """
     crossings: list[float] = []
     for i in range(len(y) - 1):
         y0, y1 = y[i], y[i + 1]
         if edge == "rise":
-            if y0 < threshold <= y1:
-                frac = (threshold - y0) / (y1 - y0) if y1 != y0 else 0.0
-                crossings.append(x[i] + frac * (x[i + 1] - x[i]))
+            cond = y0 <= threshold < y1
+        elif edge == "fall":
+            cond = y0 >= threshold > y1
         else:
-            if y0 > threshold >= y1:
-                frac = (y0 - threshold) / (y0 - y1) if y0 != y1 else 0.0
-                crossings.append(x[i] + frac * (x[i + 1] - x[i]))
+            cond = (y0 <= threshold < y1) or (y0 >= threshold > y1)
+        if cond:
+            frac = (threshold - y0) / (y1 - y0) if y1 != y0 else 0.0
+            crossings.append(x[i] + frac * (x[i + 1] - x[i]))
     return crossings
+
+
+def _find_crossing_index(
+    x: np.ndarray, y: np.ndarray, threshold: float,
+    kwargs: dict[str, str],
+) -> tuple[list[float], int]:
+    """Determine which crossing to use from rise=/fall=/cross= kwargs.
+
+    Returns (crossings_list, 0-based index).
+    """
+    total_rise = len(_find_crossings(x, y, threshold, "rise"))
+    total_fall = len(_find_crossings(x, y, threshold, "fall"))
+    total_any = len(_find_crossings(x, y, threshold, "any"))
+
+    specified = False
+    edge = "rise"
+    idx = 0
+
+    if "rise" in kwargs:
+        edge_n_str = kwargs.pop("rise")
+        if edge_n_str.lower() == "last":
+            if total_rise > 0:
+                idx = total_rise - 1
+                edge = "rise"
+                specified = True
+        else:
+            n = int(_parse_value(edge_n_str))
+            if n > 0:
+                idx = n - 1
+                edge = "rise"
+                specified = True
+    elif "fall" in kwargs:
+        edge_n_str = kwargs.pop("fall")
+        if edge_n_str.lower() == "last":
+            if total_fall > 0:
+                idx = total_fall - 1
+                edge = "fall"
+                specified = True
+        else:
+            n = int(_parse_value(edge_n_str))
+            if n > 0:
+                idx = n - 1
+                edge = "fall"
+                specified = True
+    elif "cross" in kwargs:
+        edge_n_str = kwargs.pop("cross")
+        if edge_n_str.lower() == "last":
+            if total_any > 0:
+                idx = total_any - 1
+                edge = "any"
+                specified = True
+        else:
+            n = int(_parse_value(edge_n_str))
+            if n > 0:
+                idx = n - 1
+                edge = "any"
+                specified = True
+
+    if not specified:
+        idx = 0 if total_rise > 0 else -1
+        edge = "rise"
+
+    crossings = _find_crossings(x, y, threshold, edge)
+    if idx < 0 or idx >= len(crossings):
+        raise ValueError(
+            f"Crossing {edge}={idx + 1} not found "
+            f"(have {len(crossings)} {edge} crossings at {threshold})"
+        )
+    return crossings, idx
+
+
+# ---- Trigger point resolution ----
+
+def _find_trigger_point(
+    kwargs: dict[str, str],
+    get_data: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
+    prefix: str = "trig_",
+) -> float:
+    """Parse trigger kwargs and find time/freq point.
+
+    Triggers can be of two forms:
+      - {prefix}at=<val> → return val directly
+      - {prefix}val=<val> with optional {prefix}rise/{prefix}fall/{prefix}cross/{prefix}td
+        and {prefix}var=<vector> → find crossing time
+
+    prefix is "trig_" for TRIG and "targ_" for TARG.
+    """
+    at_key = f"{prefix}at"
+    var_key = f"{prefix}var"
+    val_key = f"{prefix}val"
+
+    if at_key in kwargs:
+        return _parse_value(kwargs.pop(at_key))
+
+    var_name = kwargs.pop(var_key, None)
+    val_str = kwargs.pop(val_key, None)
+
+    if var_name is None or val_str is None:
+        raise ValueError(
+            f"{prefix.upper()}requires either {at_key}=<value> or "
+            f"{var_key}=<vector> {val_key}=<value>"
+        )
+
+    result = get_data(var_name)
+    if result is None:
+        raise ValueError(f"Vector not found: {var_name!r}")
+    x_data, y_data = result
+
+    threshold = _parse_value(val_str)
+
+    # Extract {prefix}rise/fall/cross/td kwargs and strip prefix
+    edge_kwargs: dict[str, str] = {}
+    plen = len(prefix)
+    edge_keys = frozenset({f"{prefix}{k}" for k in ("rise", "fall", "cross", "td")})
+    for k in list(kwargs.keys()):
+        if k in edge_keys:
+            edge_kwargs[k[plen:]] = kwargs.pop(k)
+
+    if "td" in edge_kwargs:
+        x_data, y_data = _apply_td(x_data, y_data, {"td": edge_kwargs.pop("td")})
+
+    crossings, idx = _find_crossing_index(x_data, y_data, threshold, edge_kwargs)
+    return float(crossings[idx])
 
 
 # ---- Individual measure functions ----
@@ -160,7 +299,7 @@ def _measure_pp(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(np.max(y) - np.min(y))
 
 def _measure_integ(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    return float(np.trapz(y, x))
+    return float(np.trapezoid(y, x))
 
 def _measure_min_at(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(x[np.argmin(y)])
@@ -204,7 +343,7 @@ def _measure_fall_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     idx = fall_n - 1
     if idx >= len(high_cross) or idx >= len(low_cross):
         raise ValueError(f"fall_time: edge {fall_n} not found")
-    return float(high_cross[idx] - low_cross[idx])
+    return float(low_cross[idx] - high_cross[idx])
 
 def _measure_period(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     threshold = _parse_value(kwargs.pop("threshold", "")) if "threshold" in kwargs else (np.min(y) + np.max(y)) / 2
@@ -275,14 +414,14 @@ def _measure_slew_rate(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
 def _measure_overshoot(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     final_val = y[-1]
     peak = np.max(y)
-    if final_val == 0:
+    if abs(final_val) < 1e-12:
         return 0.0
     return float((peak - final_val) / abs(final_val) * 100.0)
 
 def _measure_undershoot(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     final_val = y[-1]
     trough = np.min(y)
-    if final_val == 0:
+    if abs(final_val) < 1e-12:
         return 0.0
     return float((final_val - trough) / abs(final_val) * 100.0)
 
@@ -300,22 +439,37 @@ def _measure_when_cross(x: np.ndarray, y: np.ndarray, kwargs: dict,
         val = _parse_value(positional[0])
     else:
         val = _parse_value(kwargs.pop("val", "0"))
-    rise_n = int(_parse_value(kwargs.pop("rise", "0"))) if "rise" in kwargs else None
-    fall_n = int(_parse_value(kwargs.pop("fall", "0"))) if "fall" in kwargs else None
 
-    if rise_n is not None and rise_n > 0:
-        crossings = _find_crossings(x, y, val, "rise")
-        idx = rise_n - 1
-    elif fall_n is not None and fall_n > 0:
-        crossings = _find_crossings(x, y, val, "fall")
-        idx = fall_n - 1
-    else:
-        crossings = _find_crossings(x, y, val, "rise")
-        idx = 0
-
-    if idx >= len(crossings):
-        raise ValueError(f"when_cross: crossing not found (have {len(crossings)})")
+    crossings, idx = _find_crossing_index(x, y, val, kwargs)
     return float(crossings[idx])
+
+
+def _measure_when_eq(
+    var1: str,
+    positional: list[str],
+    kwargs: dict[str, str],
+    get_data: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
+    _evaluate_fn: Callable,
+) -> float:
+    """Evaluate WHEN var1=var2 → return time of first equal crossing."""
+    if len(positional) < 1:
+        raise ValueError("when_eq requires a second vector: when_eq(v1, v2)")
+
+    var2 = positional[0]
+    result1 = get_data(var1)
+    result2 = get_data(var2)
+    if result1 is None:
+        raise ValueError(f"Vector not found: {var1!r}")
+    if result2 is None:
+        raise ValueError(f"Vector not found: {var2!r}")
+
+    # Both vectors should share the same x-axis
+    x, y1 = result1
+    _, y2 = result2
+    diff = y1 - y2
+
+    return _measure_when_cross(x, diff, kwargs, ["0"])
+
 
 def _measure_deriv_at(x: np.ndarray, y: np.ndarray, kwargs: dict,
                       positional: list[str]) -> float:
@@ -382,26 +536,184 @@ def _measure_find_when(
     except Exception:
         threshold = _parse_value(threshold_str)
 
-    # Determine crossing edge
-    if "rise" in kwargs:
-        edge_n = int(_parse_value(kwargs.pop("rise")))
-        crossings = _find_crossings(cond_x, cond_y, threshold, "rise")
-        idx = edge_n - 1
-    elif "fall" in kwargs:
-        edge_n = int(_parse_value(kwargs.pop("fall")))
-        crossings = _find_crossings(cond_x, cond_y, threshold, "fall")
-        idx = edge_n - 1
-    else:
-        crossings = _find_crossings(cond_x, cond_y, threshold, "rise")
-        idx = 0
+    # Apply TD, FROM/TO windowing before finding crossing
+    if "td" in kwargs:
+        cond_x, cond_y = _apply_td(cond_x, cond_y, {"td": kwargs.pop("td")})
+    if "from" in kwargs or "to" in kwargs:
+        cond_x, cond_y = _window_data(cond_x, cond_y, kwargs)
 
-    if idx >= len(crossings):
-        raise ValueError(
-            f"find_when: crossing not found at threshold {threshold} "
-            f"(have {len(crossings)} crossings)"
-        )
+    crossings, idx = _find_crossing_index(cond_x, cond_y, threshold, kwargs)
     return float(np.interp(crossings[idx], find_x, find_y))
 
+
+def _measure_find_when_eq(
+    find_vector: str,
+    positional: list[str],
+    kwargs: dict[str, str],
+    get_data: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
+    _evaluate_fn: Callable,
+) -> float:
+    """Evaluate FIND v(out) WHEN v(1)=v(2) → value of v(out) when vectors cross."""
+    if len(positional) < 2:
+        raise ValueError("find_when_eq requires var1 and var2")
+
+    var1 = positional[0]
+    var2 = positional[1]
+
+    result = get_data(find_vector)
+    if result is None:
+        raise ValueError(f"Vector not found: {find_vector!r}")
+    find_x, find_y = result
+
+    result1 = get_data(var1)
+    result2 = get_data(var2)
+    if result1 is None:
+        raise ValueError(f"Vector not found: {var1!r}")
+    if result2 is None:
+        raise ValueError(f"Vector not found: {var2!r}")
+
+    cond_x, y1 = result1
+    _, y2 = result2
+    diff = y1 - y2
+
+    # Apply TD, FROM/TO
+    if "td" in kwargs:
+        cond_x, diff = _apply_td(cond_x, diff, {"td": kwargs.pop("td")})
+    if "from" in kwargs or "to" in kwargs:
+        cond_x, diff = _window_data(cond_x, diff, kwargs)
+
+    crossings, idx = _find_crossing_index(cond_x, diff, 0.0, kwargs)
+    return float(np.interp(crossings[idx], find_x, find_y))
+
+
+def _measure_deriv_when(
+    deriv_vector: str,
+    positional: list[str],
+    kwargs: dict[str, str],
+    get_data: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
+    evaluate_fn: Callable,
+) -> float:
+    """Evaluate DERIV v(out) WHEN v(1)=val [rise=1 ...] → derivative at crossing."""
+    if len(positional) < 2:
+        raise ValueError("deriv_when requires condition_vector and threshold")
+
+    cond_vector = positional[0]
+    threshold_str = positional[1]
+
+    result = get_data(deriv_vector)
+    if result is None:
+        raise ValueError(f"Vector not found: {deriv_vector!r}")
+    deriv_x, deriv_y = result
+
+    result = get_data(cond_vector)
+    if result is None:
+        raise ValueError(f"Vector not found: {cond_vector!r}")
+    cond_x, cond_y = result
+
+    try:
+        threshold = evaluate_fn(threshold_str, get_data)
+    except Exception:
+        threshold = _parse_value(threshold_str)
+
+    if "td" in kwargs:
+        cond_x, cond_y = _apply_td(cond_x, cond_y, {"td": kwargs.pop("td")})
+    if "from" in kwargs or "to" in kwargs:
+        cond_x, cond_y = _window_data(cond_x, cond_y, kwargs)
+
+    crossings, idx = _find_crossing_index(cond_x, cond_y, threshold, kwargs)
+    t = crossings[idx]
+
+    # Numeric derivative at time t
+    di = np.searchsorted(deriv_x, t)
+    di = max(1, min(di, len(deriv_x) - 2))
+    return float((deriv_y[di + 1] - deriv_y[di - 1]) / (deriv_x[di + 1] - deriv_x[di - 1]))
+
+
+def _measure_deriv_when_eq(
+    deriv_vector: str,
+    positional: list[str],
+    kwargs: dict[str, str],
+    get_data: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
+    _evaluate_fn: Callable,
+) -> float:
+    """Evaluate DERIV v(out) WHEN v(1)=v(2) → derivative at vector crossing."""
+    if len(positional) < 2:
+        raise ValueError("deriv_when_eq requires var1 and var2")
+
+    var1 = positional[0]
+    var2 = positional[1]
+
+    result = get_data(deriv_vector)
+    if result is None:
+        raise ValueError(f"Vector not found: {deriv_vector!r}")
+    deriv_x, deriv_y = result
+
+    result1 = get_data(var1)
+    result2 = get_data(var2)
+    if result1 is None:
+        raise ValueError(f"Vector not found: {var1!r}")
+    if result2 is None:
+        raise ValueError(f"Vector not found: {var2!r}")
+
+    cond_x, y1 = result1
+    _, y2 = result2
+    diff = y1 - y2
+
+    if "td" in kwargs:
+        cond_x, diff = _apply_td(cond_x, diff, {"td": kwargs.pop("td")})
+    if "from" in kwargs or "to" in kwargs:
+        cond_x, diff = _window_data(cond_x, diff, kwargs)
+
+    crossings, idx = _find_crossing_index(cond_x, diff, 0.0, kwargs)
+    t = crossings[idx]
+
+    di = np.searchsorted(deriv_x, t)
+    di = max(1, min(di, len(deriv_x) - 2))
+    return float((deriv_y[di + 1] - deriv_y[di - 1]) / (deriv_x[di + 1] - deriv_x[di - 1]))
+
+
+def _measure_trig_targ(
+    vector_name: str,
+    positional: list[str],
+    kwargs: dict[str, str],
+    get_data: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
+    _evaluate_fn: Callable,
+) -> float:
+    """Evaluate TRIG ... TARG ... → distance along abscissa between two trigger points.
+
+    If a function keyword is present (avg/min/max/pp/rms/integ), evaluate it
+    over the [t_trig, t_targ] interval instead.
+
+    vector_name is unused for plain TRIG/TARG (distance); populated for
+    function+TRIG/TARG variants.
+    """
+    t_trig = _find_trigger_point(kwargs, get_data, prefix="trig_")
+    t_targ = _find_trigger_point(kwargs, get_data, prefix="targ_")
+
+    # Check if function keyword was preserved
+    func_name = kwargs.pop("_func", None)
+    if func_name:
+        result = get_data(vector_name)
+        if result is None:
+            raise ValueError(f"Vector not found: {vector_name!r}")
+        x_data, y_data = result
+        t_lo, t_hi = min(t_trig, t_targ), max(t_trig, t_targ)
+        mask = (x_data >= t_lo) & (x_data <= t_hi)
+        if not np.any(mask):
+            raise ValueError(f"No data points in range [{t_lo}, {t_hi}]")
+        x_win, y_win = x_data[mask], y_data[mask]
+        impl = _IMPLS.get(func_name)
+        if impl is None:
+            raise ValueError(f"Unknown function: {func_name!r}")
+        return impl(x_win, y_win, kwargs)
+    else:
+        return float(t_targ - t_trig)
+
+
+_SPECIAL: frozenset[str] = frozenset({
+    "find_when", "find_when_eq", "when_eq",
+    "deriv_when", "deriv_when_eq", "trig_targ",
+})
 
 _IMPLS: dict[str, Callable] = {
     "min": _measure_min,
@@ -424,8 +736,13 @@ _IMPLS: dict[str, Callable] = {
     "undershoot": _measure_undershoot,
     "find_at": _measure_find_at,
     "find_when": _measure_find_when,
+    "find_when_eq": _measure_find_when_eq,
     "when_cross": _measure_when_cross,
+    "when_eq": _measure_when_eq,
     "deriv_at": _measure_deriv_at,
+    "deriv_when": _measure_deriv_when,
+    "deriv_when_eq": _measure_deriv_when_eq,
+    "trig_targ": _measure_trig_targ,
     "thd": _measure_thd,
     "sinad": _measure_sinad,
     "snr": _measure_snr,
@@ -452,14 +769,17 @@ def evaluate_measure(
     if impl is None:
         raise ValueError(f"Unknown measure function: {func_name!r}")
 
-    # find_when has its own data-lookup calling convention
-    if func_name == "find_when":
+    if func_name in _SPECIAL:
         return impl(vector_name, positional, kwargs, get_data, evaluate_measure)
 
     result = get_data(vector_name)
     if result is None:
         raise ValueError(f"Vector not found: {vector_name!r}")
     x_data, y_data = result
+
+    # Apply TD delay
+    if "td" in kwargs:
+        x_data, y_data = _apply_td(x_data, y_data, kwargs)
 
     if "from" in kwargs or "to" in kwargs:
         x_data, y_data = _window_data(x_data, y_data, kwargs)

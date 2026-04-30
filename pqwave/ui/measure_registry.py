@@ -41,6 +41,12 @@ _MEASURE_FUNCTIONS: list[FunctionInfo] = [
     FunctionInfo("find_at", "find_at(x, x_pos)", "Value of x at a specific x-axis coordinate", "SPICE Primitives", 2),
     FunctionInfo("when_cross", "when_cross(x, val)", "X-axis value where x crosses val", "SPICE Primitives", 2),
     FunctionInfo("deriv_at", "deriv_at(x, x_pos)", "Derivative at a specific x-axis coordinate", "SPICE Primitives", 2),
+    FunctionInfo("find_when", "find_when(expr, cond, val)", "Value of expr when cond crosses val", "SPICE Primitives", 3),
+    FunctionInfo("find_when_eq", "find_when_eq(expr, var1, var2)", "Value of expr when var1 equals var2", "SPICE Primitives", 3),
+    FunctionInfo("when_eq", "when_eq(var1, var2)", "X-axis point where var1 equals var2", "SPICE Primitives", 2),
+    FunctionInfo("deriv_when", "deriv_when(expr, var, val)", "Derivative when signal crosses threshold", "SPICE Primitives", 3),
+    FunctionInfo("deriv_when_eq", "deriv_when_eq(expr, var1, var2)", "Derivative when two vectors are equal", "SPICE Primitives", 3),
+    FunctionInfo("trig_targ", "trig_targ(vector, _func=..., trig_..., targ_...)", "Distance or function between trigger and target points", "SPICE Primitives", 0),
 
     # ---- Spectrum (deferred, requires FFT) ----
     FunctionInfo("thd", "thd(x)", "Total harmonic distortion (%) — requires FFT", "Spectrum", 1),
