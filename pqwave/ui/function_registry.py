@@ -111,6 +111,9 @@ _FUNCTIONS: list[FunctionInfo] = [
     FunctionInfo("gamma", "gamma(x)", "Gamma function (needs scipy)", "Special", 1),
     FunctionInfo("lgamma", "lgamma(x)", "Log-gamma function (needs scipy)", "Special", 1),
 
+    # FFT
+    FunctionInfo("fft", "fft(x)", "Fast Fourier Transform: frequency-domain analysis. Auto-creates a new panel.", "FFT", 1),
+
     # Conditional
     FunctionInfo("buf", "buf(x)", "Buffer: 1 if x > 0.5, else 0", "Conditional", 1),
     FunctionInfo("inv", "inv(x)", "Inverter: 0 if x > 0.5, else 1", "Conditional", 1),

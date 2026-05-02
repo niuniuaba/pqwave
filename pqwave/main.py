@@ -10,6 +10,7 @@ package entry point defined in pyproject.toml.
 """
 
 import sys
+import os
 import argparse
 import socket
 import json
@@ -405,7 +406,14 @@ def main():
             return 1
 
     # Normal GUI startup
+    # Prevent Qt from loading GTK theme plugin which triggers portal permission
+    # checks for theme settings. When the portal denies access, Qt's window
+    # decorations break (white title bar, no min/max/close buttons). This env
+    # var forces Qt to use the default platform theme, avoiding the portal
+    # check entirely. Fusion style provides consistent widget rendering.
+    os.environ.setdefault('QT_QPA_PLATFORMTHEME', '')
     app = QApplication(sys.argv)
+    app.setStyle('Fusion')
 
     # Create window with optional initial file
     if args.raw_file:

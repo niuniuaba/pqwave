@@ -1,6 +1,6 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 
-![Version](https://img.shields.io/badge/version-0.2.3-blue)
+![Version](https://img.shields.io/badge/version-0.2.5-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 

@@ -12,7 +12,7 @@ This widget provides controls for:
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox,
     QGroupBox, QGridLayout, QPushButton, QDoubleSpinBox, QComboBox,
-    QFontComboBox, QSpinBox, QColorDialog
+    QFontComboBox, QSpinBox, QColorDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
@@ -149,6 +149,83 @@ class SettingsWidget(QWidget):
 
         axes_group.setLayout(axes_layout)
         layout.addWidget(axes_group)
+
+        # FFT settings
+        fft_group = QGroupBox("FFT Settings")
+        fft_layout = QGridLayout()
+
+        # Window type
+        fft_layout.addWidget(QLabel("Window:"), 0, 0)
+        self.fft_window_combo = QComboBox()
+        self._fft_window_names = [
+            "bartlett-hann", "blackman", "blackman-harris", "bohman",
+            "cosine", "dolph-chebyshev", "flattop", "gaussian",
+            "general-gaussian", "hamming", "hann", "kaiser",
+            "lanczos", "none", "nuttall", "parzen", "poisson",
+            "triangular", "tukey", "welch",
+        ]
+        self.fft_window_combo.addItems(self._fft_window_names)
+        self.fft_window_combo.currentTextChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_window_combo, 0, 1)
+
+        # FFT size
+        fft_layout.addWidget(QLabel("FFT Size:"), 0, 2)
+        self.fft_size_combo = QComboBox()
+        self.fft_size_combo.setEditable(True)
+        self.fft_size_combo.addItem("Auto", 0)
+        for n in [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]:
+            self.fft_size_combo.addItem(str(n), n)
+        self.fft_size_combo.currentIndexChanged.connect(self._on_fft_changed)
+        self.fft_size_combo.editTextChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_size_combo, 0, 3)
+
+        # X range mode
+        fft_layout.addWidget(QLabel("X Range:"), 1, 0)
+        self.fft_xrange_combo = QComboBox()
+        self.fft_xrange_combo.addItems(["full", "current zoom", "manual"])
+        self.fft_xrange_combo.currentTextChanged.connect(self._on_fft_xrange_changed)
+        fft_layout.addWidget(self.fft_xrange_combo, 1, 1)
+
+        self.fft_xrange_start = QDoubleSpinBox()
+        self.fft_xrange_start.setRange(-1e9, 1e9)
+        self.fft_xrange_start.setDecimals(6)
+        self.fft_xrange_start.setSuffix(" s")
+        self.fft_xrange_start.setVisible(False)
+        self.fft_xrange_start.valueChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_xrange_start, 1, 2)
+
+        self.fft_xrange_end = QDoubleSpinBox()
+        self.fft_xrange_end.setRange(-1e9, 1e9)
+        self.fft_xrange_end.setDecimals(6)
+        self.fft_xrange_end.setSuffix(" s")
+        self.fft_xrange_end.setValue(0.001)
+        self.fft_xrange_end.setVisible(False)
+        self.fft_xrange_end.valueChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_xrange_end, 1, 3)
+
+        # Binomial smooth
+        fft_layout.addWidget(QLabel("Binomial Smooth:"), 2, 0)
+        self.fft_binomial_spin = QSpinBox()
+        self.fft_binomial_spin.setRange(0, 100)
+        self.fft_binomial_spin.setSuffix(" passes")
+        self.fft_binomial_spin.setToolTip("Number of binomial smoothing passes before FFT (0 = off)")
+        self.fft_binomial_spin.valueChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_binomial_spin, 2, 1)
+
+        # DC removal
+        self.fft_dc_checkbox = QCheckBox("DC Removal")
+        self.fft_dc_checkbox.stateChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_dc_checkbox, 2, 2, 1, 2)
+
+        # Representation
+        fft_layout.addWidget(QLabel("Representation:"), 3, 2)
+        self.fft_repr_combo = QComboBox()
+        self.fft_repr_combo.addItems(["db", "linear"])
+        self.fft_repr_combo.currentTextChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_repr_combo, 3, 3)
+
+        fft_group.setLayout(fft_layout)
+        layout.addWidget(fft_group)
 
         # Close button
         button_layout = QHBoxLayout()
@@ -299,6 +376,64 @@ class SettingsWidget(QWidget):
             spin.blockSignals(False)
             self._update_color_button(key)
 
+        # Load FFT settings
+        fft = self.state.fft_config
+        idx = self.fft_window_combo.findText(fft.window)
+        if idx >= 0:
+            self.fft_window_combo.setCurrentIndex(idx)
+        # fft_size: try findData first, then try parse from text
+        idx = self.fft_size_combo.findData(fft.fft_size)
+        if idx >= 0:
+            self.fft_size_combo.setCurrentIndex(idx)
+        elif fft.fft_size > 0:
+            self.fft_size_combo.setCurrentText(str(fft.fft_size))
+        self.fft_dc_checkbox.setChecked(fft.dc_removal)
+        idx = self.fft_repr_combo.findText(fft.representation)
+        if idx >= 0:
+            self.fft_repr_combo.setCurrentIndex(idx)
+        idx = self.fft_xrange_combo.findText(fft.x_range_mode)
+        if idx >= 0:
+            self.fft_xrange_combo.setCurrentIndex(idx)
+        self.fft_xrange_start.setValue(fft.x_range_start)
+        self.fft_xrange_end.setValue(fft.x_range_end)
+        self.fft_binomial_spin.setValue(fft.binomial_smooth)
+        self._update_fft_xrange_visibility()
+
+    def _on_fft_changed(self) -> None:
+        """Handle FFT settings changes — write to ApplicationState."""
+        cfg = self.state.fft_config
+        cfg.window = self.fft_window_combo.currentText()
+        cfg.fft_size = self._read_fft_size()
+        cfg.dc_removal = self.fft_dc_checkbox.isChecked()
+        cfg.representation = self.fft_repr_combo.currentText()
+        cfg.x_range_mode = self.fft_xrange_combo.currentText()
+        cfg.x_range_start = self.fft_xrange_start.value()
+        cfg.x_range_end = self.fft_xrange_end.value()
+        cfg.binomial_smooth = self.fft_binomial_spin.value()
+
+    def _on_fft_xrange_changed(self, text: str) -> None:
+        """Show/hide manual range spin boxes when mode changes."""
+        self._update_fft_xrange_visibility()
+        self._on_fft_changed()
+
+    def _update_fft_xrange_visibility(self) -> None:
+        visible = self.fft_xrange_combo.currentText() == "manual"
+        self.fft_xrange_start.setVisible(visible)
+        self.fft_xrange_end.setVisible(visible)
+
+    def _read_fft_size(self) -> int:
+        """Read FFT size from editable combo, accepting user-typed values."""
+        data = self.fft_size_combo.currentData()
+        if data is not None:
+            return int(data)
+        text = self.fft_size_combo.currentText().strip()
+        if text.lower() == "auto":
+            return 0
+        try:
+            return int(text)
+        except ValueError:
+            return 0
+
     def _on_theme_changed(self, index: int) -> None:
         """Handle viewbox theme selection changes."""
         theme = self.theme_combo.itemData(index)
@@ -309,6 +444,23 @@ class SettingsWidget(QWidget):
     def _on_log_mode_changed(self, axis_id: AxisId, state: int):
         """Handle log mode checkbox changes."""
         log_mode = (state == Qt.CheckState.Checked.value)
+
+        # Block enabling Y log mode when FFT traces are on that axis
+        if log_mode and axis_id in (AxisId.Y1, AxisId.Y2):
+            axis_str = axis_id.value
+            if any(
+                t.expression.lower().startswith('fft(')
+                and t.y_axis.value == axis_str
+                for t in self.state.traces
+            ):
+                QMessageBox.information(
+                    self, "Log Y Not Available",
+                    "FFT traces are already in dB (log scale). "
+                    "Log Y mode is not applicable."
+                )
+                self.log_checkboxes[axis_id].setChecked(False)
+                return
+
         self.axis_manager.set_axis_log_mode(axis_id, log_mode)
 
     def _on_label_changed(self, axis_id: AxisId, text: str):

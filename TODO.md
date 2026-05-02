@@ -9,12 +9,19 @@
   - integrate a trace to obtain the average and RMS value over the displayed region
   - First zoom the waveform to the region of interest, then move the mouse to the label of the trace, hold down the control key and left mouse click 
   - RMS average is reported only if the physical units of the integrated quantity is volts or amps to avoid confusing people that need the average when power is integrated.
-- 18.3 FFT
-  - THD, SINAD, SNR, SFDR (.meas functions) depend on FFT — currently stubs in measure_engine.py
-  - register functions to measure combo.
+-  18.3 FFT  
+  - ✅ how does user access it?✅ **已完成**   
+  - ✅ THD, SINAD, SNR, SFDR (.meas functions) depend on FFT — currently stubs in measure_engine.py✅ **已完成**    
+  - ✅ register functions to measure combo.✅ **已完成**  
+- 18.3.1 improve fft funcionalities
+  - set default window function to 'none' (now is set to 'hann') 
+  - add more window functions : triangular, parzen, welch, sine, bohman, nuttall, blackman-nuttall, blackman-harris, flattop, gaussion, general-normal, tukey, dolph-chebyshev poisson bartlett-hann, lanczos
+  - extend data point option to 1000000 order. (now largest is 16384)
+  - add x axis range option. user can choose to do fft in full range in origin raw data, current zoom range, or manual setting.
+  - add binomial smooth before fft and windowing option. user can set number of points 
 - 18.4 功率分析（瞬态、平均）
 - 18.5 power supply - specific analysis 
-- 18.6 multiple plot panel
+- ✅ 18.6 multiple plot panel✅ **已完成**   
 - 18.7 数字波形（时序图风格）
 
 ###   v0.2.4 feature add 

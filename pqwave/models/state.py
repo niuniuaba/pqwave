@@ -83,6 +83,94 @@ class AxisConfig:
 
 
 @dataclass
+class PanelState:
+    """Per-panel state: traces, axis configs, domain, and X variable."""
+    panel_id: str
+    traces: List[Trace] = field(default_factory=list)
+    axis_configs: Dict[AxisId, AxisConfig] = field(default_factory=dict)
+    domain: str = "time"
+    current_x_var: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'panel_id': self.panel_id,
+            'traces': [t.to_dict() for t in self.traces],
+            'axis_configs': {ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()},
+            'domain': self.domain,
+            'current_x_var': self.current_x_var,
+        }
+
+    def to_per_file_dict(self) -> Dict[str, Any]:
+        return {
+            'panel_id': self.panel_id,
+            'traces': [t.to_per_file_dict() for t in self.traces],
+            'axis_configs': {ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()},
+            'domain': self.domain,
+            'current_x_var': self.current_x_var,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'PanelState':
+        axis_configs = {}
+        for key, ax_data in data.get('axis_configs', {}).items():
+            try:
+                axis_id = AxisId(key)
+                axis_configs[axis_id] = AxisConfig.from_dict(ax_data)
+            except ValueError:
+                continue
+        for axis_id in AxisId:
+            if axis_id not in axis_configs:
+                axis_configs[axis_id] = AxisConfig(label=axis_id.value)
+
+        traces = [Trace.from_dict(t) for t in data.get('traces', [])]
+        return cls(
+            panel_id=data.get('panel_id', ''),
+            traces=traces,
+            axis_configs=axis_configs,
+            domain=data.get('domain', 'time'),
+            current_x_var=data.get('current_x_var'),
+        )
+
+
+@dataclass
+class FftConfig:
+    """Global FFT configuration."""
+    window: str = "none"          # window function name
+    fft_size: int = 0             # 0 = auto nextpow2
+    dc_removal: bool = True
+    representation: str = "db"    # db, linear
+    x_range_mode: str = "full"    # "full", "current zoom", "manual"
+    x_range_start: float = 0.0    # manual range start (seconds)
+    x_range_end: float = 0.0      # manual range end (seconds)
+    binomial_smooth: int = 0      # 0 = off, N = number of passes
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'window': self.window,
+            'fft_size': self.fft_size,
+            'dc_removal': self.dc_removal,
+            'representation': self.representation,
+            'x_range_mode': self.x_range_mode,
+            'x_range_start': self.x_range_start,
+            'x_range_end': self.x_range_end,
+            'binomial_smooth': self.binomial_smooth,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'FftConfig':
+        return cls(
+            window=str(data.get('window', 'none')),
+            fft_size=int(data.get('fft_size', 0)),
+            dc_removal=bool(data.get('dc_removal', True)),
+            representation=str(data.get('representation', 'db')),
+            x_range_mode=str(data.get('x_range_mode', 'full')),
+            x_range_start=float(data.get('x_range_start', 0.0)),
+            x_range_end=float(data.get('x_range_end', 0.0)),
+            binomial_smooth=int(data.get('binomial_smooth', 0)),
+        )
+
+
+@dataclass
 class FontConfig:
     """Font configuration for a UI element group."""
     family: str = ''    # empty = system default
@@ -120,15 +208,11 @@ class ApplicationState:
         """Initialize default state."""
         self.datasets: List[Dataset] = []
         self.current_dataset_idx: int = 0
-        self.current_x_var: Optional[str] = None
-        self.traces: List[Trace] = []
 
-        # Axis configurations
-        self.axis_configs: Dict[AxisId, AxisConfig] = {
-            AxisId.X: AxisConfig(label='X'),
-            AxisId.Y1: AxisConfig(label='Y1'),
-            AxisId.Y2: AxisConfig(label='Y2')
-        }
+        # Per-panel state (replaces flat traces / axis_configs / current_x_var)
+        self.panels: Dict[str, PanelState] = {}
+        self.panel_order: List[str] = []
+        self.active_panel_id: Optional[str] = None
 
         # UI settings
         self.grid_visible: bool = True
@@ -144,8 +228,76 @@ class ApplicationState:
         self.tick_font: FontConfig = FontConfig()
         self.ui_font: FontConfig = FontConfig()
 
+        self.fft_config: FftConfig = FftConfig()
+
         self.window_registry: WindowRegistry = get_registry()
         self.command_handler: Optional[CommandHandler] = None
+
+    # --- Backward-compat properties (route through active panel) ---
+
+    @property
+    def traces(self) -> List[Trace]:
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            return self.panels[self.active_panel_id].traces
+        return []
+
+    @traces.setter
+    def traces(self, value: List[Trace]) -> None:
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            self.panels[self.active_panel_id].traces = value
+
+    @property
+    def current_x_var(self) -> Optional[str]:
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            return self.panels[self.active_panel_id].current_x_var
+        return None
+
+    @current_x_var.setter
+    def current_x_var(self, value: Optional[str]) -> None:
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            self.panels[self.active_panel_id].current_x_var = value
+
+    @property
+    def axis_configs(self) -> Dict[AxisId, AxisConfig]:
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            return self.panels[self.active_panel_id].axis_configs
+        return {}
+
+    @axis_configs.setter
+    def axis_configs(self, value: Dict[AxisId, AxisConfig]) -> None:
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            self.panels[self.active_panel_id].axis_configs = value
+
+    # --- Panel lifecycle ---
+
+    def register_panel(self, panel_id: str, copy_from: Optional[str] = None) -> None:
+        """Register a new panel, optionally copying state from an existing panel."""
+        if copy_from and copy_from in self.panels:
+            import copy
+            panel_state = copy.deepcopy(self.panels[copy_from])
+            panel_state.panel_id = panel_id
+        else:
+            panel_state = PanelState(panel_id=panel_id)
+            panel_state.axis_configs = {
+                AxisId.X: AxisConfig(label='X'),
+                AxisId.Y1: AxisConfig(label='Y1'),
+                AxisId.Y2: AxisConfig(label='Y2'),
+            }
+        self.panels[panel_id] = panel_state
+        self.panel_order.append(panel_id)
+        if self.active_panel_id is None:
+            self.active_panel_id = panel_id
+
+    def unregister_panel(self, panel_id: str) -> bool:
+        """Remove a panel from state. Returns False if panel not found."""
+        if panel_id not in self.panels:
+            return False
+        del self.panels[panel_id]
+        if panel_id in self.panel_order:
+            self.panel_order.remove(panel_id)
+        if self.active_panel_id == panel_id:
+            self.active_panel_id = self.panel_order[0] if self.panel_order else None
+        return True
 
     # Dataset management
 
@@ -162,17 +314,14 @@ class ApplicationState:
         return len(self.datasets) - 1
 
     def remove_dataset(self, dataset_idx: int) -> bool:
-        """Remove a dataset by index."""
+        """Remove a dataset by index from all panels."""
         if 0 <= dataset_idx < len(self.datasets):
-            # Remove traces associated with this dataset
-            self.traces = [t for t in self.traces if t.dataset_idx != dataset_idx]
-            # Adjust dataset indices for traces with higher indices
-            for trace in self.traces:
-                if trace.dataset_idx > dataset_idx:
-                    trace.dataset_idx -= 1
-            # Remove the dataset
+            for panel_state in self.panels.values():
+                panel_state.traces = [t for t in panel_state.traces if t.dataset_idx != dataset_idx]
+                for trace in panel_state.traces:
+                    if trace.dataset_idx > dataset_idx:
+                        trace.dataset_idx -= 1
             self.datasets.pop(dataset_idx)
-            # Adjust current_dataset_idx if needed
             if self.current_dataset_idx >= len(self.datasets):
                 self.current_dataset_idx = max(0, len(self.datasets) - 1)
             return True
@@ -186,9 +335,10 @@ class ApplicationState:
         return False
 
     def clear_datasets(self) -> None:
-        """Clear all datasets and associated traces."""
+        """Clear all datasets and associated traces from all panels."""
         self.datasets.clear()
-        self.traces.clear()
+        for panel_state in self.panels.values():
+            panel_state.traces.clear()
         self.current_dataset_idx = 0
 
     # Trace management
@@ -216,7 +366,10 @@ class ApplicationState:
 
     def get_axis_config(self, axis_id: AxisId) -> AxisConfig:
         """Get configuration for an axis."""
-        return self.axis_configs[axis_id]
+        configs = self.axis_configs
+        if axis_id in configs:
+            return configs[axis_id]
+        return AxisConfig(label=axis_id.value)
 
     def set_axis_config(self, axis_id: AxisId, config: AxisConfig) -> None:
         """Set configuration for an axis."""
@@ -244,7 +397,7 @@ class ApplicationState:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert entire state to serializable dictionary."""
-        return {
+        result = {
             'datasets': [
                 {
                     'title': ds.title,
@@ -255,8 +408,6 @@ class ApplicationState:
                 for ds in self.datasets
             ],
             'current_dataset_idx': self.current_dataset_idx,
-            'traces': [trace.to_dict() for trace in self.traces],
-            'axis_configs': {axis.value: config.to_dict() for axis, config in self.axis_configs.items()},
             'grid_visible': self.grid_visible,
             'legend_visible': self.legend_visible,
             'status_bar_visible': self.status_bar_visible,
@@ -267,18 +418,47 @@ class ApplicationState:
             'label_font': self.label_font.to_dict(),
             'tick_font': self.tick_font.to_dict(),
             'ui_font': self.ui_font.to_dict(),
+            'fft_config': self.fft_config.to_dict(),
+            # Per-panel state (new format)
+            'panels': {pid: ps.to_dict() for pid, ps in self.panels.items()},
+            'panel_order': list(self.panel_order),
+            'active_panel_id': self.active_panel_id,
         }
+        # Backward compat: include flat keys for the active panel
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            ps = self.panels[self.active_panel_id]
+            result['traces'] = [t.to_dict() for t in ps.traces]
+            result['axis_configs'] = {ax.value: cfg.to_dict() for ax, cfg in ps.axis_configs.items()}
+            result['current_x_var'] = ps.current_x_var
+        else:
+            result['traces'] = []
+            result['axis_configs'] = {}
+            result['current_x_var'] = None
+        return result
 
     def to_per_file_dict(self) -> Dict[str, Any]:
         """Convert to dict for per-file state (excludes data arrays)."""
-        return {
-            'traces': [trace.to_per_file_dict() for trace in self.traces],
-            'current_x_var': self.current_x_var,
-            'axis_configs': {axis.value: config.to_dict() for axis, config in self.axis_configs.items()},
+        result = {
             'plot_title': self.plot_title,
             'grid_visible': self.grid_visible,
             'legend_visible': self.legend_visible,
+            'panels': {pid: ps.to_per_file_dict() for pid, ps in self.panels.items()},
+            'panel_order': list(self.panel_order),
+            'active_panel_id': self.active_panel_id,
+            'fft_config': self.fft_config.to_dict(),
         }
+        # Backward compat: include flat keys for the active panel
+        if self.active_panel_id and self.active_panel_id in self.panels:
+            ps = self.panels[self.active_panel_id]
+            result['traces'] = [t.to_per_file_dict() for t in ps.traces]
+            result['current_x_var'] = ps.current_x_var
+            result['axis_configs'] = {ax.value: cfg.to_dict() for ax, cfg in ps.axis_configs.items()}
+        else:
+            result['traces'] = []
+            result['current_x_var'] = None
+            result['axis_configs'] = {}
+        return result
 
     def __repr__(self) -> str:
-        return f"ApplicationState(datasets={len(self.datasets)}, traces={len(self.traces)}, current={self.current_dataset_idx})"
+        total_traces = sum(len(ps.traces) for ps in self.panels.values())
+        return f"ApplicationState(datasets={len(self.datasets)}, panels={len(self.panels)}, traces={total_traces}, current={self.current_dataset_idx})"

@@ -37,6 +37,7 @@ _FUNC_NAMES = {
     'j0', 'j1', 'jn', 'y0', 'y1', 'yn',
     'erf', 'erfc', 'gamma', 'lgamma',
     'table', 'tbl', 'taugrp', 'tg',
+    'fft',
 }
 
 _CONSTANT_MAP = {
@@ -504,6 +505,8 @@ class ExprEvaluator:
             return np.isnan(x).astype(float)
         elif name in ('taugrp', 'tg'):
             return -np.gradient(np.unwrap(np.angle(x)))
+        elif name == 'fft':
+            return x   # pass-through — actual FFT computed in TraceManager
 
         raise ValueError(f"Unknown function: {name}")
 

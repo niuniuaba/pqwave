@@ -900,17 +900,17 @@ class TestEngineErrorHandling:
         with pytest.raises(ValueError, match="Invalid measure expression"):
             evaluate_measure("123invalid", gd)
 
-    def test_unsupported_thd(self):
+    def test_thd_implemented(self):
         t, y = _sine_data()
         gd = _make_get_data({"v(out)": (t, y)})
-        with pytest.raises(NotImplementedError, match="thd"):
-            evaluate_measure("thd(v(out))", gd)
+        result = evaluate_measure("thd(v(out))", gd)
+        assert isinstance(result, (int, float))
 
-    def test_unsupported_snr(self):
+    def test_snr_implemented(self):
         t, y = _sine_data()
         gd = _make_get_data({"v(out)": (t, y)})
-        with pytest.raises(NotImplementedError, match="snr"):
-            evaluate_measure("snr(v(out))", gd)
+        result = evaluate_measure("snr(v(out))", gd)
+        assert isinstance(result, (int, float))
 
 
 class TestEngineMetricSuffix:

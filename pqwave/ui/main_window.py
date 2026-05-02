@@ -37,6 +37,7 @@ from pqwave.ui.plot_widget import PlotWidget
 from pqwave.ui.trace_manager import TraceManager, SelectableItemSample
 from pqwave.ui.settings_widget import SettingsWidget
 from pqwave.ui.axis_manager import AxisManager
+from pqwave.ui.panel_grid import PanelGrid
 from pqwave.ui.mark_panel import MarkPanel
 from pqwave.utils.colors import ColorManager
 from pqwave.logging_config import get_logger
@@ -86,11 +87,13 @@ class MainWindow(QMainWindow):
 
         # Component references (will be initialized in _setup_ui)
         self.menu_manager = None
-        self.plot_widget = None
+        self.panel_grid = None
         self.control_panel = None
-        self.trace_manager = None
-        self.axis_manager = None
         self.color_manager = None
+        self._bound_plot_widget: Optional[PlotWidget] = None
+        self._bound_axis_manager: Optional[AxisManager] = None
+        self._cursor_sync_in_progress = False
+        self._restoring_state = False
 
         # Raw file reference
         self.raw_file = None
@@ -128,33 +131,16 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Create and arrange UI components."""
-        # Create central widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
-        # Create color manager
         self.color_manager = ColorManager()
 
-        # Create plot widget (with cursor support)
-        self.plot_widget = PlotWidget()
-
-        # Create legend (attached to plot widget)
-        legend = self.plot_widget.addLegend(sampleType=SelectableItemSample)
-        self.legend = legend
-
-        # Create axis manager
-        self.axis_manager = AxisManager(self.plot_widget, self.state)
-
-        # Create trace manager
-        self.trace_manager = TraceManager(
-            plot_widget=self.plot_widget,
-            legend=legend,
-            application_state=self.state,
-            color_manager=self.color_manager
-        )
+        # Create panel grid (starts with one default panel)
+        self.panel_grid = PanelGrid(self.state, self.color_manager)
 
         # Create control panel
         self.control_panel = ControlPanel()
@@ -164,19 +150,13 @@ class MainWindow(QMainWindow):
         callbacks = self._create_menu_callbacks()
         self.menu_manager = MenuManager(self, callbacks, keybinding_manager=self.keybinding_manager)
 
-        # Add plot widget to layout (with stretch factor)
-        main_layout.addWidget(self.plot_widget, 1)
-
-        # Add control panel to layout
+        main_layout.addWidget(self.panel_grid, 1)
         main_layout.addWidget(self.control_panel)
 
-        # Set layout
         central_widget.setLayout(main_layout)
 
-        # Initialize log mode flags in trace manager
         self._update_trace_manager_log_modes()
 
-        # Install keyboard shortcuts that fire only in the plot area
         self._install_keyboard_shortcuts()
 
     def _create_menu_callbacks(self):
@@ -214,7 +194,32 @@ class MainWindow(QMainWindow):
             'show_keybindings': self._show_keybindings,
             'show_functions_help': self._show_functions_help,
             'show_measures_help': self._show_measures_help,
+            'split_horizontal': self._split_panel_horizontal,
+            'split_vertical': self._split_panel_vertical,
+            'close_panel': self._close_active_panel,
         }
+
+    # --- Delegate properties (route to active panel) ---
+
+    @property
+    def plot_widget(self):
+        panel = self.panel_grid.get_active_panel()
+        return panel.plot_widget if panel else None
+
+    @property
+    def trace_manager(self):
+        panel = self.panel_grid.get_active_panel()
+        return panel.trace_manager if panel else None
+
+    @property
+    def axis_manager(self):
+        panel = self.panel_grid.get_active_panel()
+        return panel.axis_manager if panel else None
+
+    @property
+    def legend(self):
+        panel = self.panel_grid.get_active_panel()
+        return panel.legend if panel else None
 
     def _connect_signals(self):
         """Connect signals between components."""
@@ -228,21 +233,13 @@ class MainWindow(QMainWindow):
         self.control_panel.run_measure_requested.connect(self._on_run_measure)
         self.control_panel.from_script_requested.connect(self._on_from_script)
 
-        # Connect plot widget signals
-        self.plot_widget.mouse_moved.connect(self._on_mouse_moved)
-        self.plot_widget.mouse_left.connect(self._on_mouse_left)
-        self.plot_widget.cursor_xa_changed.connect(self._on_cursor_xa_changed)
-        self.plot_widget.cursor_xb_changed.connect(self._on_cursor_xb_changed)
-        self.plot_widget.cursor_yA_changed.connect(self._on_cursor_yA_changed)
-        self.plot_widget.cursor_yB_changed.connect(self._on_cursor_yB_changed)
-        self.plot_widget.cursor_y2_changed.connect(self._on_cursor_y2_changed)
-        self.plot_widget.axis_log_mode_changed.connect(self._on_axis_log_mode_changed)
-        self.plot_widget.mark_clicked.connect(self._on_mark_clicked)
-        self.plot_widget.title_changed.connect(self._on_plot_title_changed)
-        # Connect axis manager signals
-        self.axis_manager.axis_log_mode_changed.connect(self._on_axis_log_mode_changed_from_manager)
-        self.axis_manager.axis_range_changed.connect(self._on_axis_range_changed)
-        self.axis_manager.axis_label_changed.connect(self._on_axis_label_changed)
+        # Connect panel grid signals
+        self.panel_grid.panel_activated.connect(self._on_panel_activated)
+
+        # Bind initial panel's plot and axis signals
+        initial_panel = self.panel_grid.get_active_panel()
+        if initial_panel:
+            self._rebind_panel_signals(initial_panel)
 
         # Connect xschem integration signals
         self._connect_xschem_signals()
@@ -260,6 +257,82 @@ class MainWindow(QMainWindow):
         self._xschem_ba_timer.setInterval(250)  # 250ms debounce
         self._xschem_ba_timer.timeout.connect(self._xschem_ba_debounced)
         self._xschem_ba_x = None  # XB cursor value to send when timer fires
+
+    def _rebind_panel_signals(self, panel):
+        """Disconnect old panel signals and connect new panel's signals."""
+        # Disconnect old plot widget signals
+        if self._bound_plot_widget is not None:
+            try:
+                self._bound_plot_widget.mouse_moved.disconnect(self._on_mouse_moved)
+                self._bound_plot_widget.mouse_left.disconnect(self._on_mouse_left)
+                self._bound_plot_widget.cursor_xa_changed.disconnect(self._on_cursor_xa_changed)
+                self._bound_plot_widget.cursor_xb_changed.disconnect(self._on_cursor_xb_changed)
+                self._bound_plot_widget.cursor_yA_changed.disconnect(self._on_cursor_yA_changed)
+                self._bound_plot_widget.cursor_yB_changed.disconnect(self._on_cursor_yB_changed)
+                self._bound_plot_widget.cursor_y2_changed.disconnect(self._on_cursor_y2_changed)
+                self._bound_plot_widget.axis_log_mode_changed.disconnect(self._on_axis_log_mode_changed)
+                self._bound_plot_widget.mark_clicked.disconnect(self._on_mark_clicked)
+                self._bound_plot_widget.title_changed.disconnect(self._on_plot_title_changed)
+            except (TypeError, RuntimeError):
+                pass
+
+        # Disconnect old axis manager signals
+        if self._bound_axis_manager is not None:
+            try:
+                self._bound_axis_manager.axis_log_mode_changed.disconnect(
+                    self._on_axis_log_mode_changed_from_manager
+                )
+                self._bound_axis_manager.axis_range_changed.disconnect(self._on_axis_range_changed)
+                self._bound_axis_manager.axis_label_changed.disconnect(self._on_axis_label_changed)
+            except (TypeError, RuntimeError):
+                pass
+
+        # Connect new plot widget signals
+        panel.plot_widget.mouse_moved.connect(self._on_mouse_moved)
+        panel.plot_widget.mouse_left.connect(self._on_mouse_left)
+        panel.plot_widget.cursor_xa_changed.connect(self._on_cursor_xa_changed)
+        panel.plot_widget.cursor_xb_changed.connect(self._on_cursor_xb_changed)
+        panel.plot_widget.cursor_yA_changed.connect(self._on_cursor_yA_changed)
+        panel.plot_widget.cursor_yB_changed.connect(self._on_cursor_yB_changed)
+        panel.plot_widget.cursor_y2_changed.connect(self._on_cursor_y2_changed)
+        panel.plot_widget.axis_log_mode_changed.connect(self._on_axis_log_mode_changed)
+        panel.plot_widget.mark_clicked.connect(self._on_mark_clicked)
+        panel.plot_widget.title_changed.connect(self._on_plot_title_changed)
+
+        # Connect new axis manager signals
+        panel.axis_manager.axis_log_mode_changed.connect(
+            self._on_axis_log_mode_changed_from_manager
+        )
+        panel.axis_manager.axis_range_changed.connect(self._on_axis_range_changed)
+        panel.axis_manager.axis_label_changed.connect(self._on_axis_label_changed)
+
+        self._bound_plot_widget = panel.plot_widget
+        self._bound_axis_manager = panel.axis_manager
+
+    def _on_panel_activated(self, panel_id):
+        """Handle active panel change: initialize new panel and rebind signals."""
+        if self._restoring_state:
+            return
+        panel = self.panel_grid.get_panel(panel_id)
+        if panel is None:
+            return
+        self.state.active_panel_id = panel_id
+        panel.plot_widget.enable_y2_axis()
+        panel.plot_widget.apply_fonts(self.state)
+        panel.axis_manager._initialize_axes()
+        self._rebind_panel_signals(panel)
+
+    def _split_panel_horizontal(self) -> None:
+        """Split active panel horizontally (side-by-side)."""
+        self.panel_grid.split_panel(self.panel_grid.active_panel_id, orientation="horizontal")
+
+    def _split_panel_vertical(self) -> None:
+        """Split active panel vertically (stacked)."""
+        self.panel_grid.split_panel(self.panel_grid.active_panel_id, orientation="vertical")
+
+    def _close_active_panel(self) -> None:
+        """Close the active panel."""
+        self.panel_grid.close_panel(self.panel_grid.active_panel_id)
 
     def _connect_xschem_signals(self):
         """Connect xschem command handler signals."""
@@ -1094,7 +1167,12 @@ class MainWindow(QMainWindow):
                 # Pass custom X variable (if set) so it's preserved in the output
                 x_var = self.state.current_x_var
                 x_var_data = None
-                if x_var and self.raw_file:
+
+                # FFT traces carry frequency bins as x_data — use those
+                # instead of the original file's sweep variable (time)
+                if any(t.expression.lower().startswith('fft(') for t in traces):
+                    x_var = "frequency"
+                elif x_var and self.raw_file:
                     try:
                         x_var_data = self.raw_file.get_variable_data(
                             x_var, self.state.current_dataset_idx
@@ -1855,10 +1933,40 @@ class MainWindow(QMainWindow):
             else:  # Y2
                 y_axis = AxisAssignment.Y2
 
+            # FFT detection: auto-create frequency-domain panel if needed
+            target_trace_manager = self.trace_manager
+            if TraceManager._is_fft_expression(expression):
+                active_panel = self.panel_grid.get_active_panel()
+                if active_panel and active_panel.domain != "frequency":
+                    new_panel = self.panel_grid.split_panel(
+                        self.panel_grid.active_panel_id, orientation="vertical"
+                    )
+                    if new_panel:
+                        new_panel.domain = "frequency"
+                        new_panel.axis_manager.set_axis_label(AxisId.X, "Frequency [Hz]")
+                        target_trace_manager = new_panel.trace_manager
+                        logger.info(
+                            f"Created FFT panel {new_panel.panel_id} for: {expression}"
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self, "Cannot Create FFT Panel",
+                            "Maximum panel limit reached. Close a panel before adding FFT traces."
+                        )
+                        return
+
             # Add trace
-            trace = self.trace_manager.add_trace(expression, x_var, y_axis)
+            trace = target_trace_manager.add_trace(expression, x_var, y_axis)
             if trace:
                 logger.info(f"Added trace: {trace.name} to {y_axis.value}")
+                # Update Y-axis label for FFT traces based on representation
+                if TraceManager._is_fft_expression(expression):
+                    active_panel = self.panel_grid.get_active_panel()
+                    if active_panel:
+                        cfg = self.state.fft_config
+                        y_label = "dB" if cfg.representation == "db" else ""
+                        axis_id = AxisId(y_axis.value)
+                        active_panel.axis_manager.set_axis_label(axis_id, y_label)
                 # Clear expression after successful addition
                 self.control_panel.trace_expr.clear()
             else:
@@ -1904,6 +2012,7 @@ class MainWindow(QMainWindow):
         self._xschem_ba_timer.start()
 
         self._update_cursor_status()
+        self._sync_x_cursor_to_same_domain_panels('XA', value)
 
     @pyqtSlot(float)
     def _on_cursor_xb_changed(self, value):
@@ -1919,6 +2028,8 @@ class MainWindow(QMainWindow):
         self._xschem_ba_x = x_linear
         self._xschem_ba_timer.start()
 
+        self._sync_x_cursor_to_same_domain_panels('XB', value)
+
     @pyqtSlot(float)
     def _on_cursor_yA_changed(self, value):
         """Handle YA cursor position change."""
@@ -1933,6 +2044,33 @@ class MainWindow(QMainWindow):
     def _on_cursor_y2_changed(self, value):
         """Handle Y2 cursor position change (Y2-axis-specific cursor)."""
         pass
+
+    def _sync_x_cursor_to_same_domain_panels(self, cursor_type: str, value: float) -> None:
+        """Sync XA/XB cursor position to all same-domain panels.
+
+        Uses silent setters (blockSignals) to avoid infinite signal loops.
+        Only syncs X cursors; Y cursors are per-panel.
+        """
+        if self._cursor_sync_in_progress:
+            return
+        active_panel = self.panel_grid.get_active_panel()
+        if active_panel is None:
+            return
+        active_domain = active_panel.domain
+
+        self._cursor_sync_in_progress = True
+        try:
+            for panel_id, panel in self.panel_grid.panels.items():
+                if panel_id == self.panel_grid.active_panel_id:
+                    continue
+                if panel.domain != active_domain:
+                    continue
+                if cursor_type == 'XA':
+                    panel.plot_widget.set_xa_cursor_position(value)
+                elif cursor_type == 'XB':
+                    panel.plot_widget.set_xb_cursor_position(value)
+        finally:
+            self._cursor_sync_in_progress = False
 
     def _update_cursor_status(self) -> None:
         """Read cursor positions and deltas, update status bar and legend."""
@@ -2103,6 +2241,14 @@ class MainWindow(QMainWindow):
         # Update traces for new log mode
         self.trace_manager.update_traces_for_log_mode()
 
+        # Auto-range the affected axis so the view adjusts to the
+        # log10-transformed data range (otherwise the ViewBox keeps
+        # its previous linear range, clustering all data at x=0).
+        axis_map = {'bottom': AxisId.X, 'left': AxisId.Y1, 'right': AxisId.Y2}
+        axis_id = axis_map.get(orientation)
+        if axis_id is not None:
+            self.axis_manager.auto_range_axis(axis_id)
+
     @pyqtSlot(str, bool)
     def _on_axis_log_mode_changed_from_manager(self, axis_id, log_mode):
         """Handle axis log mode change from axis manager."""
@@ -2111,6 +2257,10 @@ class MainWindow(QMainWindow):
 
         # Update traces for new log mode
         self.trace_manager.update_traces_for_log_mode()
+
+        # Auto-range the affected axis so the view adjusts to the
+        # log10-transformed data range.
+        self.axis_manager.auto_range_axis(AxisId(axis_id))
 
     @pyqtSlot(str, float, float)
     def _on_axis_range_changed(self, axis_id, min_val, max_val):
@@ -2290,6 +2440,168 @@ class MainWindow(QMainWindow):
 
         logger.info(f"Loading per-file state from {filepath}")
 
+        # Restore per-panel state from new format (panels key) if present
+        if 'panels' in data:
+            self._restore_panels_from_dict(data)
+        elif 'axis_configs' in data:
+            self._restore_flat_state_from_dict(data)
+
+    def _restore_panels_from_dict(self, data: dict) -> None:
+        """Restore state from new per-panel format.
+
+        Maps saved panels to existing panels by position in panel_order,
+        since runtime UUIDs differ from saved UUIDs across sessions.
+        """
+        self._restoring_state = True
+        saved_panels = data.get('panels', {})
+        saved_order = data.get('panel_order', [])
+        saved_active = data.get('active_panel_id', '')
+
+        if not saved_order:
+            self._restoring_state = False
+            return
+
+        # Build position-based mapping: saved index → current panel_id
+        current_order = list(self.state.panel_order)
+        saved_to_current: dict[int, str] = {}
+
+        # Ensure panel count matches: create extras if needed
+        while len(current_order) < len(saved_order):
+            last_pid = current_order[-1] if current_order else None
+            if last_pid is None:
+                break
+            new_panel = self.panel_grid.split_panel(last_pid, orientation="vertical")
+            if new_panel is None:
+                break
+            current_order = list(self.state.panel_order)
+
+        # Close extra panels if saved state has fewer than current
+        while len(current_order) > len(saved_order) and len(current_order) > 1:
+            extra_pid = current_order[-1]
+            if not self.panel_grid.close_panel(extra_pid):
+                break
+            current_order = list(self.state.panel_order)
+
+        # Map saved panel data to current panels by position
+        for i, saved_pid in enumerate(saved_order):
+            if i < len(current_order):
+                saved_to_current[i] = current_order[i]
+                pdata = saved_panels.get(saved_pid, {})
+                ps = self.state.panels.get(current_order[i])
+                if ps and pdata:
+                    if 'axis_configs' in pdata:
+                        for key, ax_data in pdata['axis_configs'].items():
+                            try:
+                                axis_id = AxisId(key)
+                                ps.axis_configs[axis_id] = AxisConfig.from_dict(ax_data)
+                            except ValueError:
+                                continue
+                    if 'current_x_var' in pdata:
+                        ps.current_x_var = pdata['current_x_var']
+                    if 'domain' in pdata:
+                        ps.domain = pdata['domain']
+
+        # Restore active panel by position
+        if saved_active and saved_active in saved_order:
+            saved_idx = saved_order.index(saved_active)
+            if saved_idx in saved_to_current:
+                new_active_id = saved_to_current[saved_idx]
+                self.state.active_panel_id = new_active_id
+                # Bypass panel_activated signal during restoration
+                self.panel_grid.set_active_panel_id(new_active_id)
+                panel = self.panel_grid.get_panel(new_active_id)
+                if panel is not None:
+                    panel.set_active(True)
+
+        if not self.state.active_panel_id or self.state.active_panel_id not in self.state.panels:
+            self.state.active_panel_id = self.panel_grid.active_panel_id
+
+        # Apply axis configs, log modes, and traces to every panel
+        _prev_active_id = self.state.active_panel_id
+
+        for i, saved_pid in enumerate(saved_order):
+            if i not in saved_to_current:
+                continue
+            pid = saved_to_current[i]
+            panel = self.panel_grid.get_panel(pid)
+            if panel is None:
+                continue
+            pdata = saved_panels.get(saved_pid, {})
+            if not pdata:
+                continue
+
+            self.state.active_panel_id = pid
+            self.panel_grid.set_active_panel_id(pid)
+
+            panel.axis_manager._initialize_axes()
+            self._update_trace_manager_log_modes()
+
+            x_var = pdata.get('current_x_var', 'time')
+            self.state.current_x_var = x_var
+            self._restore_traces_from_data(pdata.get('traces', []), x_var)
+
+        # Restore the active panel for subsequent title/grid/legend setup
+        if _prev_active_id and _prev_active_id in self.state.panels:
+            self.state.active_panel_id = _prev_active_id
+            self.panel_grid.set_active_panel_id(_prev_active_id)
+
+        # Restore plot title and toggles
+        title = data.get('plot_title', '')
+        if title:
+            self.state.plot_title = title
+            self.plot_widget.set_plot_title(title)
+        self.state.grid_visible = data.get('grid_visible', True)
+        self.state.legend_visible = data.get('legend_visible', True)
+        self.axis_manager.set_grid_visible(self.state.grid_visible)
+        self.menu_manager.set_grids_visible(self.state.grid_visible)
+        self.set_legend_visible(self.state.legend_visible)
+
+        self._restoring_state = False
+
+    def _restore_traces_from_data(self, saved_traces: list, x_var: str) -> None:
+        """Re-create traces from saved data and restore visual properties."""
+        for t_data in saved_traces:
+            expression = t_data.get('expression', '')
+            if not expression:
+                continue
+
+            y_axis_str = t_data.get('y_axis', 'Y1')
+            y_axis = AxisAssignment.Y1 if y_axis_str == 'Y1' else AxisAssignment.Y2
+            color = tuple(t_data.get('color', (0, 0, 255)))
+
+            self.trace_manager.add_trace(
+                expression=expression,
+                x_var_name=x_var,
+                y_axis=y_axis,
+                custom_color=color,
+            )
+
+        # Apply saved visual properties (name alias, line width, visibility)
+        for saved_t in saved_traces:
+            expr = saved_t.get('expression', '')
+            if not expr:
+                continue
+            for st in self.state.traces:
+                if st.expression == expr:
+                    st.name = saved_t.get('name', expr)
+                    st.line_width = saved_t.get('line_width', 1.0)
+                    st.visible = saved_t.get('visible', True)
+                    st.selected = saved_t.get('selected', False)
+                    break
+
+        # Update plot-item pens and names to match state traces
+        for i, (_, plot_item, _y_axis) in enumerate(self.trace_manager.traces):
+            if i < len(self.state.traces):
+                st = self.state.traces[i]
+                pen = pg.mkPen(color=st.color, width=st.line_width)
+                plot_item.setPen(pen)
+                plot_item.opts['name'] = st.name
+
+        # Refresh legend with updated names
+        self.trace_manager._refresh_legend()
+
+    def _restore_flat_state_from_dict(self, data: dict) -> None:
+        """Restore state from old flat format (backward compat)."""
         # Apply axis configs before adding traces (log mode must be correct)
         if 'axis_configs' in data:
             for key, ax_data in data['axis_configs'].items():
@@ -2321,47 +2633,7 @@ class MainWindow(QMainWindow):
 
         # Re-create traces from saved expressions
         x_var = self.state.current_x_var
-        saved_traces = data.get('traces', [])
-        for t_data in saved_traces:
-            expression = t_data.get('expression', '')
-            if not expression:
-                continue
-
-            y_axis_str = t_data.get('y_axis', 'Y1')
-            y_axis = AxisAssignment.Y1 if y_axis_str == 'Y1' else AxisAssignment.Y2
-            color = tuple(t_data.get('color', (0, 0, 255)))
-
-            self.trace_manager.add_trace(
-                expression=expression,
-                x_var_name=x_var,
-                y_axis=y_axis,
-                custom_color=color,
-            )
-
-        # Apply saved visual properties (name alias, line width, visibility)
-        # Match saved traces to state traces by expression
-        for saved_t in saved_traces:
-            expr = saved_t.get('expression', '')
-            if not expr:
-                continue
-            for st in self.state.traces:
-                if st.expression == expr:
-                    st.name = saved_t.get('name', expr)
-                    st.line_width = saved_t.get('line_width', 1.0)
-                    st.visible = saved_t.get('visible', True)
-                    st.selected = saved_t.get('selected', False)
-                    break
-
-        # Update plot-item pens and names to match state traces
-        for i, (_, plot_item, y_axis) in enumerate(self.trace_manager.traces):
-            if i < len(self.state.traces):
-                st = self.state.traces[i]
-                pen = pg.mkPen(color=st.color, width=st.line_width)
-                plot_item.setPen(pen)
-                plot_item.opts['name'] = st.name
-
-        # Refresh legend with updated names
-        self.trace_manager._refresh_legend()
+        self._restore_traces_from_data(data.get('traces', []), x_var)
 
     def save_current_state(self) -> None:
         """Save current state to per-file JSON (File > Save Current State)."""
@@ -2446,6 +2718,23 @@ class MainWindow(QMainWindow):
     def _toggle_log_axis(self, axis_id: AxisId) -> None:
         """Toggle log/linear mode for an axis."""
         config = self.state.get_axis_config(axis_id)
+
+        # Block enabling Y log mode when FFT traces are on that axis
+        # (FFT Y data is already in dB, so log mode would double-log it)
+        if axis_id in (AxisId.Y1, AxisId.Y2) and not config.log_mode:
+            axis_str = axis_id.value
+            if any(
+                t.expression.lower().startswith('fft(')
+                and t.y_axis.value == axis_str
+                for t in self.state.traces
+            ):
+                QMessageBox.information(
+                    self, "Log Y Not Available",
+                    "FFT traces are already in dB (log scale). "
+                    "Log Y mode is not applicable."
+                )
+                return
+
         self.axis_manager.set_axis_log_mode(axis_id, not config.log_mode)
 
     def _show_keybindings(self) -> None:

@@ -371,6 +371,20 @@ class PlotWidget(pg.PlotWidget):
             'y2': _val(self.cursor_y2_line, self.cursor_y2_visible),
         }
 
+    def set_xa_cursor_position(self, value: float) -> None:
+        """Set XA cursor line position without emitting signals (for cross-panel sync)."""
+        if self.cursor_xa_line is not None:
+            self.cursor_xa_line.blockSignals(True)
+            self.cursor_xa_line.setValue(value)
+            self.cursor_xa_line.blockSignals(False)
+
+    def set_xb_cursor_position(self, value: float) -> None:
+        """Set XB cursor line position without emitting signals (for cross-panel sync)."""
+        if self.cursor_xb_line is not None:
+            self.cursor_xb_line.blockSignals(True)
+            self.cursor_xb_line.setValue(value)
+            self.cursor_xb_line.blockSignals(False)
+
     def get_cursor_deltas(self) -> dict:
         """Compute delta values between paired cursors.
 
@@ -570,6 +584,7 @@ class PlotWidget(pg.PlotWidget):
                      if not isinstance(it, pg.InfiniteLine)]
             if not items:
                 return
+            vb.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
             vb.enableAutoRange(x=True, y=False)
             vb.autoRange(padding=0.05, items=items)
             vb.enableAutoRange(x=False)
@@ -578,6 +593,7 @@ class PlotWidget(pg.PlotWidget):
                      if not isinstance(it, pg.InfiniteLine)]
             if not items:
                 return
+            vb.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
             vb.enableAutoRange(x=False, y=True)
             vb.autoRange(padding=0.05, items=items)
         elif axis == 'Y2' and self.y2_viewbox:
@@ -586,6 +602,7 @@ class PlotWidget(pg.PlotWidget):
                      if not isinstance(it, pg.InfiniteLine)]
             if not items:
                 return
+            y2vb.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
             y2vb.enableAutoRange(y=True)
             y2vb.autoRange(padding=0.05, items=items)
 

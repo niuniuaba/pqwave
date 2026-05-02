@@ -34,7 +34,8 @@ class MenuManager:
                       'zoom_box_toolbar', 'toggle_grids_toolbar', 'toggle_cross_hair',
                       'toggle_x_cursor_a', 'toggle_x_cursor_b',
                       'toggle_y_cursor_A', 'toggle_y_cursor_B',
-                      'show_keybindings', 'show_functions_help'
+                      'show_keybindings', 'show_functions_help',
+                      'split_horizontal', 'split_vertical', 'close_panel'
             keybinding_manager: Optional KeyBindingManager instance.
         """
         self.parent = parent
@@ -223,6 +224,27 @@ class MenuManager:
         self.zoom_box_action.triggered.connect(self.callbacks.get('enable_zoom_box', lambda: None))
         view_menu.addAction(self.zoom_box_action)
         self.actions['zoom_box'] = self.zoom_box_action
+
+        view_menu.addSeparator()
+
+        # Panel management
+        split_h_action = QAction("Split Horizontally", self.parent)
+        self._set_action_shortcut(split_h_action, 'split_horizontal')
+        split_h_action.triggered.connect(self.callbacks.get('split_horizontal', lambda: None))
+        view_menu.addAction(split_h_action)
+        self.actions['split_horizontal'] = split_h_action
+
+        split_v_action = QAction("Split Vertically", self.parent)
+        self._set_action_shortcut(split_v_action, 'split_vertical')
+        split_v_action.triggered.connect(self.callbacks.get('split_vertical', lambda: None))
+        view_menu.addAction(split_v_action)
+        self.actions['split_vertical'] = split_v_action
+
+        close_panel_action = QAction("Close Active Panel", self.parent)
+        self._set_action_shortcut(close_panel_action, 'close_panel')
+        close_panel_action.triggered.connect(self.callbacks.get('close_panel', lambda: None))
+        view_menu.addAction(close_panel_action)
+        self.actions['close_panel'] = close_panel_action
 
         self.menubar.addMenu(view_menu)
 

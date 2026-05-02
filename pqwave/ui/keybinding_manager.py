@@ -64,6 +64,11 @@ class KeyBindingManager:
         'move_x_cursor_right':     ('Right',        'Move X cursor right'),
         'move_y_cursor_up':        ('Up',           'Move Y cursor up'),
         'move_y_cursor_down':      ('Down',         'Move Y cursor down'),
+
+        # === Panel management ===
+        'split_horizontal':        ('Ctrl+Shift+O', 'Split Panel Horizontally'),
+        'split_vertical':          ('Ctrl+Shift+E', 'Split Panel Vertically'),
+        'close_panel':             ('Ctrl+Shift+W', 'Close Active Panel'),
     }
 
     def __init__(self):

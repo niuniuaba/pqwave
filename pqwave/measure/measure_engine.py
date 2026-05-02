@@ -18,6 +18,18 @@ import numpy as np
 
 from pqwave.ui.measure_registry import lookup_measure
 
+try:
+    from pqwave.ui.fft_engine import (
+        compute_fft as _fft_compute,
+        compute_thd_from_spectrum as _fft_thd,
+        compute_sinad_from_spectrum as _fft_sinad,
+        compute_snr_from_spectrum as _fft_snr,
+        compute_sfdr_from_spectrum as _fft_sfdr,
+    )
+    _HAS_FFT_ENGINE = True
+except ImportError:
+    _HAS_FFT_ENGINE = False
+
 _METRIC_SUFFIXES: dict[str, float] = {
     "f": 1e-15, "p": 1e-12, "n": 1e-9, "u": 1e-6,
     "m": 1e-3, "k": 1e3, "meg": 1e6, "g": 1e9, "t": 1e12,
@@ -482,19 +494,80 @@ def _measure_deriv_at(x: np.ndarray, y: np.ndarray, kwargs: dict,
     return float((y[idx + 1] - y[idx - 1]) / (x[idx + 1] - x[idx - 1]))
 
 
-# ---- Spectrum (deferred) ----
+# ---- Spectrum ----
+
+def _get_fft_config():
+    """Return the global FFT configuration from ApplicationState."""
+    from pqwave.models.state import ApplicationState
+    return ApplicationState().fft_config
+
+
+def _compute_spectrum(x: np.ndarray, y: np.ndarray, kwargs: dict
+                      ) -> tuple[np.ndarray, np.ndarray]:
+    """Run FFT on time-domain data, respecting global config and per-call overrides."""
+    cfg = _get_fft_config()
+    window = kwargs.pop("window", cfg.window)
+    fft_size = int(kwargs.pop("fft_size", str(cfg.fft_size)) if "fft_size" in kwargs else cfg.fft_size)
+    dc_removal_str = kwargs.pop("dc_removal", None)
+    if dc_removal_str is not None:
+        dc_removal = dc_removal_str.lower() in ("yes", "true", "1")
+    else:
+        dc_removal = cfg.dc_removal
+    # spectral analysis functions assume dB magnitude; ignore config preference
+    kwargs.pop("representation", None)
+    return _fft_compute(x, y, window=window, fft_size=fft_size,
+                        dc_removal=dc_removal, representation="db")
+
 
 def _measure_thd(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    raise NotImplementedError("thd requires FFT support (not yet implemented)")
+    """Compute THD (Total Harmonic Distortion) as a ratio (0-1).
+
+    Kwargs: fundamental (Hz), max_harmonics, window, fft_size, dc_removal.
+    """
+    fundamental = kwargs.pop("fundamental", None)
+    if fundamental is not None:
+        fundamental = float(fundamental)
+    max_harmonics = int(kwargs.pop("max_harmonics", "10"))
+    freq, mag = _compute_spectrum(x, y, kwargs)
+    return _fft_thd(freq, mag, fundamental, max_harmonics)
+
 
 def _measure_sinad(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    raise NotImplementedError("sinad requires FFT support (not yet implemented)")
+    """Compute SINAD in dBc (positive = better).
+
+    Kwargs: fundamental (Hz), max_harmonics, window, fft_size, dc_removal.
+    """
+    fundamental = kwargs.pop("fundamental", None)
+    if fundamental is not None:
+        fundamental = float(fundamental)
+    max_harmonics = int(kwargs.pop("max_harmonics", "10"))
+    freq, mag = _compute_spectrum(x, y, kwargs)
+    return _fft_sinad(freq, mag, fundamental, max_harmonics)
+
 
 def _measure_snr(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    raise NotImplementedError("snr requires FFT support (not yet implemented)")
+    """Compute SNR in dBc (positive = better).
+
+    Kwargs: fundamental (Hz), max_harmonics, window, fft_size, dc_removal.
+    """
+    fundamental = kwargs.pop("fundamental", None)
+    if fundamental is not None:
+        fundamental = float(fundamental)
+    max_harmonics = int(kwargs.pop("max_harmonics", "10"))
+    freq, mag = _compute_spectrum(x, y, kwargs)
+    return _fft_snr(freq, mag, fundamental, max_harmonics)
+
 
 def _measure_sfdr(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    raise NotImplementedError("sfdr requires FFT support (not yet implemented)")
+    """Compute SFDR in dBc (positive = better).
+
+    Kwargs: fundamental (Hz), window, fft_size, dc_removal.
+    """
+    fundamental = kwargs.pop("fundamental", None)
+    if fundamental is not None:
+        fundamental = float(fundamental)
+    freq, mag = _compute_spectrum(x, y, kwargs)
+    return _fft_sfdr(freq, mag, fundamental)
 
 
 def _measure_find_when(

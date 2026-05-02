@@ -95,6 +95,10 @@ class TraceManager:
 
     logger = get_logger(__name__)
 
+    @staticmethod
+    def _is_fft_expression(expr: str) -> bool:
+        return expr.lower().startswith('fft(')
+
     def __init__(self,
                  plot_widget: pg.PlotWidget,
                  legend: pg.LegendItem,
@@ -127,6 +131,10 @@ class TraceManager:
         self.x_log = False
         self.y1_log = False
         self.y2_log = False
+
+        # Re-entrancy guard for update_traces_for_log_mode
+        self._updating_log_mode = False
+
 
         # Connect legend click signal for trace selection
         self.legend.sigSampleClicked.connect(self._on_legend_sample_clicked)
@@ -235,10 +243,47 @@ class TraceManager:
                     y_data = evaluator.evaluate(var)
                     self.logger.debug(f"Evaluated expression {var}, result length: {len(y_data)}")
 
+                    trace_x_data = x_data
+                    is_fft = self._is_fft_expression(var)
+                    if is_fft:
+                        from pqwave.ui.fft_engine import compute_fft
+                        cfg = self.state.fft_config
+
+                        if cfg.x_range_mode == "current zoom":
+                            vb = self.plot_widget.plotItem.vb
+                            xmin, xmax = vb.viewRange()[0]
+                            # If the view range is still uninitialized (default
+                            # [0,1]), fall back to full range to avoid silently
+                            # clipping all data.
+                            if xmin == 0.0 and xmax == 1.0 and not self.traces:
+                                pass  # fall through to "full" behavior
+                            else:
+                                if self.x_log:
+                                    xmin, xmax = 10.0 ** xmin, 10.0 ** xmax
+                                mask = (x_data >= xmin) & (x_data <= xmax)
+                                if mask.any():
+                                    x_data = x_data[mask]
+                                    y_data = y_data[mask]
+
+                        trace_x_data, y_data = compute_fft(
+                            x_data, y_data,
+                            window=cfg.window,
+                            fft_size=cfg.fft_size,
+                            dc_removal=cfg.dc_removal,
+                            representation=cfg.representation,
+                            x_range_mode=cfg.x_range_mode,
+                            x_range_start=cfg.x_range_start,
+                            x_range_end=cfg.x_range_end,
+                            binomial_smooth=cfg.binomial_smooth,
+                        )
+                        self.logger.debug(
+                            f"FFT: {var} → {len(trace_x_data)} frequency bins"
+                        )
+
                     # Check if X and Y data have the same length
-                    if len(x_data) != len(y_data):
+                    if len(trace_x_data) != len(y_data):
                         self.logger.error(f"X and Y data length mismatch!")
-                        self.logger.error(f"    X data length: {len(x_data)}")
+                        self.logger.error(f"    X data length: {len(trace_x_data)}")
                         self.logger.error(f"    Y data length: {len(y_data)}")
                         self.logger.warning(f"    Skipping trace for {var}")
                         continue
@@ -255,7 +300,7 @@ class TraceManager:
                     trace = Trace(
                         name=var,
                         expression=var,
-                        x_data=x_data,
+                        x_data=trace_x_data,
                         y_data=y_data,
                         y_axis=y_axis,
                         color=color,
@@ -578,41 +623,68 @@ class TraceManager:
         Always transforms from the ORIGINAL linear-space trace data, so
         toggling log mode on/off produces correct values.
         """
-        self.logger.debug(f"\n=== update_traces_for_log_mode ===")
-        self.logger.debug(f"  Current log modes: x_log={self.x_log}, y1_log={self.y1_log}, y2_log={self.y2_log}")
-
-        if not self.traces:
-            self.logger.debug(f"  No traces to update")
+        if self._updating_log_mode:
             return
+        self._updating_log_mode = True
+        try:
+            if not self.traces:
+                return
 
-        self.logger.debug(f"  Found {len(self.traces)} traces to update")
+            state_traces = self.state.traces
+            for i, (var, plot_item, y_axis) in enumerate(self.traces):
+                y_log = self.y1_log if y_axis == "Y1" else self.y2_log
 
-        state_traces = self.state.traces
-        for i, (var, plot_item, y_axis) in enumerate(self.traces):
-            y_log = self.y1_log if y_axis == "Y1" else self.y2_log
+                # Find matching trace by expression — self.state.traces is a
+                # global list shared across all panels, so indexed lookup
+                # (state_traces[i]) is WRONG when multiple panels exist.
+                # Match by expression instead.
+                trace = next((t for t in state_traces if t.expression == var), None)
+                if trace is not None:
+                    x_orig = trace.x_data
+                    y_orig = trace.y_data
+                else:
+                    # Fallback: use whatever is in the curve item
+                    x_orig, y_orig = plot_item.getData()
+                    if x_orig is None or y_orig is None:
+                        continue
 
-            # Get the ORIGINAL linear-space data from the Trace model
-            if i < len(state_traces):
-                trace = state_traces[i]
-                x_orig = trace.x_data
-                y_orig = trace.y_data
-            else:
-                # Fallback: use whatever is in the curve item
-                x_orig, y_orig = plot_item.getData()
-                if x_orig is None or y_orig is None:
-                    continue
+                # Apply log10 transform to original data, filtering non-positive
+                # values that can't be represented on a log scale.
+                if self.x_log:
+                    x_mask = x_orig > 0
+                    if x_mask.any():
+                        x = np.log10(x_orig[x_mask])
+                        y_orig = y_orig[x_mask]
+                    else:
+                        x = np.array([0.0])
+                        y_orig = np.array([0.0])
+                else:
+                    x = x_orig.copy()
+                # FFT traces in dB representation are already logarithmic;
+                # applying log10 would double-transform and filter out all
+                # negative dB values.
+                is_fft = self._is_fft_expression(trace.expression)
+                if y_log and not is_fft:
+                    y_mask = y_orig > 0
+                    if y_mask.any():
+                        y = np.log10(y_orig[y_mask])
+                        if self.x_log:
+                            x = x[y_mask]
+                    else:
+                        y = np.array([0.0])
+                        if self.x_log:
+                            x = np.array([0.0])
+                else:
+                    y = y_orig.copy()
 
-            # Apply log10 transform to original data
-            x = np.log10(np.abs(x_orig) + 1e-300) if self.x_log else x_orig.copy()
-            y = np.log10(np.abs(y_orig) + 1e-300) if y_log else y_orig.copy()
+                # Re-downsample the transformed data
+                x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
 
-            # Re-downsample the transformed data
-            x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
+                plot_item.setData(x_ds, y_ds)
+                plot_item.prepareGeometryChange()
 
-            plot_item.setData(x_ds, y_ds)
-            self.logger.debug(f"  Updated log mode for {var}: x={self.x_log}, y={y_log}")
-
-        self.logger.debug(f"  Trace update complete")
+        finally:
+            self._updating_log_mode = False
 
     def update_x_variable(self, x_var_name: str) -> None:
         """Update all existing traces to use a new X variable.
@@ -634,26 +706,53 @@ class TraceManager:
 
         state_traces = self.state.traces
         updated_count = 0
-        for i, (var, plot_item, y_axis) in enumerate(self.traces):
+        for var, plot_item, y_axis in self.traces:
             y_log = self.y1_log if y_axis == "Y1" else self.y2_log
 
-            # Update trace model's x_data in application state
-            if i < len(state_traces):
-                trace = state_traces[i]
-                if len(new_x_data) != len(trace.y_data):
-                    self.logger.warning(
-                        f"X data length ({len(new_x_data)}) doesn't match Y data length "
-                        f"({len(trace.y_data)}) for trace '{var}'. Skipping."
-                    )
-                    continue
-                trace.x_data = new_x_data.copy()
-            else:
-                self.logger.warning(f"No state trace found for index {i}, skipping")
+            # Find matching trace by expression (not by index, since
+            # state_traces is a global list shared across panels).
+            trace = next((t for t in state_traces if t.expression == var), None)
+            if trace is None:
+                self.logger.warning(f"No state trace found for '{var}', skipping")
                 continue
+            # FFT traces carry frequency bins as x_data — never replace
+            # them with time-domain X variable data.
+            if self._is_fft_expression(trace.expression):
+                continue
+            if len(new_x_data) != len(trace.y_data):
+                self.logger.warning(
+                    f"X data length ({len(new_x_data)}) doesn't match Y data length "
+                    f"({len(trace.y_data)}) for trace '{var}'. Skipping."
+                )
+                continue
+            trace.x_data = new_x_data.copy()
 
-            # Apply log10 transform if the axis is in log mode
-            x = np.log10(np.abs(new_x_data) + 1e-300) if self.x_log else new_x_data.copy()
-            y = np.log10(np.abs(trace.y_data) + 1e-300) if y_log else trace.y_data.copy()
+            # Apply log10 transform if the axis is in log mode, filtering
+            # non-positive values that can't be represented on a log scale.
+            if self.x_log:
+                x_mask = new_x_data > 0
+                if x_mask.any():
+                    x = np.log10(new_x_data[x_mask])
+                    y_data = trace.y_data[x_mask]
+                else:
+                    x = np.array([0.0])
+                    y_data = np.array([0.0])
+            else:
+                x = new_x_data.copy()
+                y_data = trace.y_data.copy()
+            is_fft = self._is_fft_expression(trace.expression)
+            if y_log and not is_fft:
+                y_mask = y_data > 0
+                if y_mask.any():
+                    y = np.log10(y_data[y_mask])
+                    if self.x_log:
+                        x = x[y_mask]
+                else:
+                    y = np.array([0.0])
+                    if self.x_log:
+                        x = np.array([0.0])
+            else:
+                y = y_data
 
             # Downsample and update the plot item
             x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
@@ -767,10 +866,34 @@ class TraceManager:
         x_data = trace.x_data
         y_data = trace.y_data
 
-        # Apply log10 transform if the corresponding axis is in log mode
-        x = np.log10(np.abs(x_data) + 1e-300) if self.x_log else x_data
+        # Apply log10 transform if the corresponding axis is in log mode.
+        # Filter non-positive values (e.g. DC bin at 0 Hz in FFT, t=0 in
+        # transient) that can't be represented on a log scale. The 1e-300
+        # fallback used previously corrupted auto-range when x_data[0] == 0.
+        if self.x_log:
+            x_mask = x_data > 0
+            if x_mask.any():
+                x = np.log10(x_data[x_mask])
+                y_data = y_data[x_mask]
+            else:
+                x = np.array([0.0])
+                y_data = np.array([0.0])
+        else:
+            x = x_data
         y_log = self.y1_log if trace.y_axis == AxisAssignment.Y1 else self.y2_log
-        y = np.log10(np.abs(y_data) + 1e-300) if y_log else y_data
+        is_fft = self._is_fft_expression(trace.expression)
+        if y_log and not is_fft:
+            y_mask = y_data > 0
+            if y_mask.any():
+                y = np.log10(y_data[y_mask])
+                if self.x_log:
+                    x = x[y_mask]
+            else:
+                y = np.array([0.0])
+                if self.x_log:
+                    x = np.array([0.0])
+        else:
+            y = y_data
 
         # Pre-downsample to fixed resolution
         x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)

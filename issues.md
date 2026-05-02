@@ -249,3 +249,48 @@
 - what is : measurement tooltip message says 'Enter a measurement expression ...'
 - what expected : measurement tooltip message says 'Enter a measurement expression..., or a script path ....'
 
+###  ✅ 28. fft() failed to add trace for expression ✅ **fixed**  
+- how to reproduce : pqwave tests/bridge.raw; click fft(x) from func combo; click v(ac_p) from vectors combo to coine fft(v(ac_p)); press Y1, an error pop up says Failed to add trace for expression: fft(v(ac_p))
+- log file in ./tests/bridge.log
+
+### ✅  29. unexpected panel resize behavior in second split ✅ **fixed**    
+- in second split, no matter horizon or vertical, the as-split panels are compressed to near single line and the left unsplit panel claims all the space. 
+- how to reproduce : ctrl+shift+e to split to 2x1 layout, click the upper one to set it activated, ctrl+shift+o to split it, now the upper two panels are compressed to near a single line height and the left-unsplit lower panel resizes to almost all the space- what expected: expect a 1x2 + 1x1 stack, with equal height.
+
+### ✅   30. runtime error when split panel after a panel was closed ✅ **fixed**     
+- close a panel following by a split panel action leads to runtime error. 
+- how to reproduce : ctrl+shift+e to split to 2 panels, ctrl+shift+w to close one panel, ctrl+shift+e or ctrl+shift+o to split panel agaain leads to a RuntimeError: wrapped C/C++ object of type PlotWidget has been deleted.
+- refer to log file : ./tests/bridge.log
+
+### 31. Y tick number doesn't indicate 'db' in db presentation     
+- what is : in db presentation, Y tick number doesn't have a 'db' sufix which make it hard to distinct which presentation (linear or db) is in used. 
+
+### ✅32. tick number is wrong when X axis is in log mode in a fft() plot ✅ **fixed**     
+- what is : in a fft() plot when set X asis (frequency) to log mode the tick number is wrong (not transfered correctly)
+- how to reproduce : pqwave tests/bridge.raw; plot fft(v(ac_p)) and the X axis (in linear mode) shows a range of around 0~4000000Hz; set X axis to log mode and now the tick range shows 10^0 ~ 10^4000000 which suggests the exponents are taken directly from the linear numbers. Now autorange X axis and the range turns to about 10^-6 to 10^-1. 
+
+### ✅33. pqwave stop response when set X axis to log mode in a fft() plot ✅ **fixed**     
+    
+- what is : setting X asis (frequency) to log mode in a fft() plot causes pqwave stoping response 
+- how to reproduce : pqwave tests/bridge.raw; select fft(x) from func combo, select v(ac_p) from vectors combo to coine fft(v(ac_p)) and press 'Y1' button; ctrl+shift+x to set x axis to log mode, then a message widget pop up says 'python not response, you can wait or force quit'. in the meanwhile btop shows pqwave uses 4G memory and 100% cpu. 
+### ✅34. overflow warning when open some raw file✅ **DON'T need a fix**   
+- what is : pqwave tests/bridge.raw invokes overflow warning but pqwave tests/cdg.raw doesn't.
+- log in ./tests/bridge.log
+
+### 35. pqwave doesn't take system theme from time to time 
+- what is : sometimes when launch pqwave it doesn't take system theme.
+- how to re-produce : rm tests/bridge.json && pqwave tests/bridgge.raw, the window title bar background is white, and there are no minimize, maximize and close buttons.
+
+### ✅36. frequency data is not saved when save fft plot to a raw file. ✅ **fixed**
+- what is : in a fft plot when save trace data from File - Save As menu, the x variable (frequency) is not included in result raw file.
+- how to reproduce : pqwave tests/bridge.raw, plot fft(v(ac_p)) to Y1, File - Save As to bridge_fft.raw. check bridge_fft.raw in ngspice the raw file include fft(v(ac_p)) and time but not frequency.
+- fix : In `save_as_raw_data()`, detect FFT traces and set x_var to "frequency" with no x_var_data, so `extract_traces_to_raw` uses the trace's frequency bins as the X variable instead of the original file's time vector.
+
+### ✅37. set log Y in fft plot should do nothing. ✅ **fixed**
+- what is : set Y axis to log mode (e.g. by ctrl+shift+y) leads to Y axis tick number change. the tick numbers cluster together make them unreadable.
+- what expected : do nothing when user set Y to log mode in fft plot. pop up a message would be metter. (in fft plot Y is already in log (dB)).
+- fix : In `_toggle_log_axis()`, detect FFT traces on the target Y axis and prevent enabling log mode, showing an informational message that FFT is already in dB.
+
+### 38. tick numbers clusters in fft plot when set x axis to log mode 
+- what is : when set X axies to log mode in a fft plot the tick number cluster and make them unreadable.
+- how to re-produce : rm tests/bridge.json && pqwave tests/bridgge.raw, plot fft(v(ac_p)), ctrl+shit+x to set x axis to log mode. the x tick numbers cluster at near x=0. 

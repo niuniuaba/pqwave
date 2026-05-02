@@ -43,6 +43,13 @@ class LogAxisItem(AxisItem):
             tickSpecs = new_specs
         return (axisSpec, tickSpecs, textSpecs)
 
+    def _safe_enable_auto_si_prefix(self, enable: bool) -> None:
+        """Wrap enableAutoSIPrefix to avoid crash when label C++ object is deleted."""
+        try:
+            self.enableAutoSIPrefix(enable)
+        except RuntimeError:
+            pass
+
     def setLogMode(self, x=None, y=None):
         """Set log mode for this axis"""
         old_log_mode = self.log_mode
@@ -55,14 +62,23 @@ class LogAxisItem(AxisItem):
         new_mode = y if self.orientation in ['left', 'right'] else x
         if new_mode is not None:
             if new_mode:
-                self.enableAutoSIPrefix(False)
+                self._safe_enable_auto_si_prefix(False)
             else:
-                self.enableAutoSIPrefix(True)
+                self._safe_enable_auto_si_prefix(True)
 
+        # Prevent super().setLogMode() from setting the linked ViewBox to
+        # log mode. Data is pre-transformed to log10 space by TraceManager,
+        # so the ViewBox must stay in linear mode — otherwise the ViewBox
+        # applies its own log transform on top, causing double-log corruption
+        # and range oscillation.
+        linked_view_backup = self._linkedView
+        self._linkedView = None
         try:
             super().setLogMode(x=x, y=y)
         except Exception:
             pass
+        finally:
+            self._linkedView = linked_view_backup
 
         if new_mode is not None and new_mode != old_log_mode:
             if self.log_mode_changed_callback:
@@ -70,6 +86,42 @@ class LogAxisItem(AxisItem):
                     self.log_mode_changed_callback(self.orientation, new_mode)
                 except Exception:
                     pass
+
+    # Reasonable bounds for log10-exponent ticks. In pqwave, the ViewBox
+    # coordinate space holds log10-transformed values (e.g. 3.0 for 1000).
+    # Real-world SPICE data rarely exceeds 10^-20 to 10^+20.  Clamping
+    # prevents unbounded tick generation when linear-range data (0 to
+    # millions) temporarily reaches this method before log10 transform.
+    _MIN_EXPONENT = -20
+    _MAX_EXPONENT = 20
+
+    def logTickValues(self, minVal, maxVal, size, stdTicks):
+        """Return decade ticks at integer exponent positions.
+
+        Skips decades when the range is very wide or the axis is too narrow
+        to fit all labels without overlap.  Targets roughly 60 px minimum
+        between adjacent labels.
+        """
+        from math import floor, ceil, isfinite
+        v1 = int(floor(minVal)) if isfinite(minVal) else self._MIN_EXPONENT
+        v2 = int(ceil(maxVal)) if isfinite(maxVal) else self._MAX_EXPONENT
+        v1 = max(v1, self._MIN_EXPONENT)
+        v2 = min(v2, self._MAX_EXPONENT)
+        v1 = min(v1, v2)
+        n_decades = v2 - v1
+        # Keep at most ~12 labeled decades to avoid clustering
+        step = max(1, (n_decades + 11) // 12) if n_decades > 0 else 1
+        # Pixel-aware: increase step if axis is too narrow for all labels.
+        # Target at least 60 px between adjacent decade labels.
+        if n_decades > 1 and size > 0:
+            px_per_label = float(size) / float(n_decades)
+            while px_per_label * step < 60.0 and step * 2 <= n_decades:
+                step += 1
+        major = [float(v) for v in range(v1, v2 + 1, step)]
+        # Ensure the last decade is always present when step skips it
+        if major and float(v2) not in major:
+            major.append(float(v2))
+        return [(float(step), major)]
 
     def tickStrings(self, values, scale, spacing):
         """Convert tick values to strings"""
