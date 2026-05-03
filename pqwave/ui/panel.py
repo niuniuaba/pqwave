@@ -12,7 +12,7 @@ import uuid
 from typing import Optional
 
 import pyqtgraph as pg
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFrame
 from PyQt6.QtCore import pyqtSignal
 
 from pqwave.models.state import ApplicationState
@@ -45,6 +45,16 @@ class Panel(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
+
+        # Active indicator bar — a thin colored strip at the top,
+        # visible only when this panel is the active (last-clicked) panel.
+        self._active_bar = QFrame()
+        self._active_bar.setFixedHeight(3)
+        self._active_bar.setVisible(False)
+        self._active_bar.setStyleSheet(
+            "background-color: palette(highlight); border: none;"
+        )
+        self._layout.addWidget(self._active_bar)
 
         # Plot widget
         self.plot_widget = PlotWidget()
@@ -95,14 +105,9 @@ class Panel(QWidget):
         return self._active
 
     def set_active(self, active: bool) -> None:
-        """Update the panel's active visual state."""
+        """Update the panel's active visual state with a colored indicator bar."""
         self._active = active
-        if active:
-            self.setStyleSheet(
-                "Panel { border: 1px solid #4A90D9; }"
-            )
-        else:
-            self.setStyleSheet("")
+        self._active_bar.setVisible(active)
 
     # --- Component accessors ---
 

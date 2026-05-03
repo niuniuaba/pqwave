@@ -21,10 +21,19 @@ class LogAxisItem(AxisItem):
     def __init__(self, orientation='left', log_mode_changed_callback=None, **kwargs):
         super().__init__(orientation, **kwargs)
         self.log_mode = False
+        self._db_mode = False
         self.log_mode_changed_callback = log_mode_changed_callback
         # Initially enable auto SI prefix (for linear mode)
         # It will be disabled when log mode is enabled
         self.enableAutoSIPrefix(True)
+
+    def setDbMode(self, enabled: bool) -> None:
+        """Enable/disable dB suffix on tick labels."""
+        self._db_mode = enabled
+
+    def isDbMode(self) -> bool:
+        """Return whether dB suffix is enabled."""
+        return self._db_mode
 
     def generateDrawSpecs(self, p):
         """Override to render grid lines with dash-line style."""
@@ -133,6 +142,8 @@ class LogAxisItem(AxisItem):
             else:
                 default_str = super().tickStrings([v], scale, spacing)[0]
                 strings.append(default_str)
+        if self._db_mode:
+            strings = [s + " dB" for s in strings]
         return strings
 
     def _format_exponent_with_superscript(self, exponent):

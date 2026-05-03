@@ -47,6 +47,7 @@ from pqwave.ui.keybindings_dialog import KeyBindingsDialog
 from pqwave.ui.functions_help_dialog import FunctionsHelpDialog
 from pqwave.ui.measures_help_dialog import MeasuresHelpDialog
 from pqwave.ui.measure_results_widget import MeasureResultsWidget
+from pqwave.ui.power_analysis_dialog import PowerAnalysisDialog
 from pqwave.measure.measure_engine import evaluate_measure
 from pqwave.measure.measure_script_parser import parse_meas_script
 import uuid
@@ -197,6 +198,8 @@ class MainWindow(QMainWindow):
             'split_horizontal': self._split_panel_horizontal,
             'split_vertical': self._split_panel_vertical,
             'close_panel': self._close_active_panel,
+            'compute_trace_stats': self._compute_trace_stats,
+            'compute_power_analysis': self._compute_power_analysis,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -1959,14 +1962,6 @@ class MainWindow(QMainWindow):
             trace = target_trace_manager.add_trace(expression, x_var, y_axis)
             if trace:
                 logger.info(f"Added trace: {trace.name} to {y_axis.value}")
-                # Update Y-axis label for FFT traces based on representation
-                if TraceManager._is_fft_expression(expression):
-                    active_panel = self.panel_grid.get_active_panel()
-                    if active_panel:
-                        cfg = self.state.fft_config
-                        y_label = "dB" if cfg.representation == "db" else ""
-                        axis_id = AxisId(y_axis.value)
-                        active_panel.axis_manager.set_axis_label(axis_id, y_label)
                 # Clear expression after successful addition
                 self.control_panel.trace_expr.clear()
             else:
@@ -2753,6 +2748,48 @@ class MainWindow(QMainWindow):
         """Open the Measures Reference help dialog."""
         dialog = MeasuresHelpDialog(self)
         dialog.exec()
+
+    def _compute_trace_stats(self) -> None:
+        """Compute statistics for selected traces over the visible X range."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        tm = panel.trace_manager
+        selected = tm.get_selected_traces()
+        if not selected:
+            if not tm.traces:
+                QMessageBox.information(self, "No Traces",
+                                        "No traces plotted.")
+                return
+            selected = [(i, t) for i, t in enumerate(tm.state.traces)]
+        tm._show_stats_for_traces(selected)
+
+    def _compute_power_analysis(self) -> None:
+        """Compute power analysis for V and I traces over the visible range."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        tm = panel.trace_manager
+        selected = tm.get_selected_traces()
+        if len(selected) != 2:
+            QMessageBox.warning(
+                self, "Select Two Traces",
+                "Select one voltage and one current trace "
+                "via Ctrl+click in the legend, then try again."
+            )
+            return
+        v_trace = selected[0][1]
+        i_trace = selected[1][1]
+        xmin, xmax = panel.plot_widget.plotItem.vb.viewRange()[0]
+        if tm.x_log:
+            xmin, xmax = 10.0 ** xmin, 10.0 ** xmax
+        dlg = PowerAnalysisDialog(self)
+        dlg.set_data(
+            v_trace.name, i_trace.name,
+            v_trace.y_data, i_trace.y_data, v_trace.x_data,
+            xmin, xmax,
+        )
+        dlg.show()
 
 
 if __name__ == "__main__":

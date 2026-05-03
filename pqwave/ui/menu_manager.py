@@ -9,9 +9,7 @@ menu bar, menus, toolbars, and status bar, centralizing UI element creation
 and action management.
 """
 
-from PyQt6.QtWidgets import (
-    QMenuBar, QMenu, QToolBar, QStatusBar, QLabel, QStyle
-)
+from PyQt6.QtWidgets import QMenuBar, QMenu, QToolBar, QStatusBar, QLabel, QStyle
 from PyQt6.QtGui import QAction, QKeySequence, QIcon
 from PyQt6.QtCore import Qt
 
@@ -74,8 +72,19 @@ class MenuManager:
                 return
             # Skip bare letter keys and arrow keys — they are installed
             # as WidgetWithChildrenShortcut on the plot area instead.
-            if seq in ('A', 'B', 'Z', 'F', '+', 'Left', 'Right', 'Up', 'Down',
-                       'Shift+A', 'Shift+B'):
+            if seq in (
+                "A",
+                "B",
+                "Z",
+                "F",
+                "+",
+                "Left",
+                "Right",
+                "Up",
+                "Down",
+                "Shift+A",
+                "Shift+B",
+            ):
                 return
             if len(seq) == 1 and seq.isalpha():
                 return
@@ -87,28 +96,36 @@ class MenuManager:
         file_menu = QMenu("File", self.parent)
 
         save_current_state_action = QAction("Save Current State", self.parent)
-        save_current_state_action.triggered.connect(self.callbacks.get('save_current_state', lambda: None))
-        self._set_action_shortcut(save_current_state_action, 'save_current_state')
+        save_current_state_action.triggered.connect(
+            self.callbacks.get("save_current_state", lambda: None)
+        )
+        self._set_action_shortcut(save_current_state_action, "save_current_state")
         file_menu.addAction(save_current_state_action)
 
         save_as_action = QAction("Save As...", self.parent)
-        save_as_action.triggered.connect(self.callbacks.get('save_as_raw_data', lambda: None))
-        self._set_action_shortcut(save_as_action, 'save_as_raw_data')
+        save_as_action.triggered.connect(
+            self.callbacks.get("save_as_raw_data", lambda: None)
+        )
+        self._set_action_shortcut(save_as_action, "save_as_raw_data")
         file_menu.addAction(save_as_action)
         file_menu.addSeparator()
 
         open_raw_action = QAction("Open Raw File", self.parent)
-        open_raw_action.triggered.connect(self.callbacks.get('open_file', lambda: None))
-        self._set_action_shortcut(open_raw_action, 'open_file')
+        open_raw_action.triggered.connect(self.callbacks.get("open_file", lambda: None))
+        self._set_action_shortcut(open_raw_action, "open_file")
         file_menu.addAction(open_raw_action)
 
         open_new_window_action = QAction("Open New Window", self.parent)
-        open_new_window_action.triggered.connect(self.callbacks.get('open_new_window', lambda: None))
-        self._set_action_shortcut(open_new_window_action, 'open_new_window')
+        open_new_window_action.triggered.connect(
+            self.callbacks.get("open_new_window", lambda: None)
+        )
+        self._set_action_shortcut(open_new_window_action, "open_new_window")
         file_menu.addAction(open_new_window_action)
 
         convert_raw_action = QAction("Convert Raw Data...", self.parent)
-        convert_raw_action.triggered.connect(self.callbacks.get('convert_raw_data', lambda: None))
+        convert_raw_action.triggered.connect(
+            self.callbacks.get("convert_raw_data", lambda: None)
+        )
         file_menu.addAction(convert_raw_action)
 
         self.menubar.addMenu(file_menu)
@@ -117,13 +134,17 @@ class MenuManager:
         edit_menu = QMenu("Edit", self.parent)
 
         edit_properties_action = QAction("Edit Trace Properties", self.parent)
-        edit_properties_action.triggered.connect(self.callbacks.get('edit_trace_properties', lambda: None))
-        self._set_action_shortcut(edit_properties_action, 'edit_trace_properties')
+        edit_properties_action.triggered.connect(
+            self.callbacks.get("edit_trace_properties", lambda: None)
+        )
+        self._set_action_shortcut(edit_properties_action, "edit_trace_properties")
         edit_menu.addAction(edit_properties_action)
 
         settings_action = QAction("Settings", self.parent)
-        settings_action.triggered.connect(self.callbacks.get('show_settings', lambda: None))
-        self._set_action_shortcut(settings_action, 'show_settings')
+        settings_action.triggered.connect(
+            self.callbacks.get("show_settings", lambda: None)
+        )
+        self._set_action_shortcut(settings_action, "show_settings")
         edit_menu.addAction(settings_action)
 
         self.menubar.addMenu(edit_menu)
@@ -132,135 +153,208 @@ class MenuManager:
         view_menu = QMenu("View", self.parent)
 
         # Toggle actions (checkable)
-        self.toggle_toolbar_action = QAction("Toggle Toolbar", self.parent, checkable=True)
+        self.toggle_toolbar_action = QAction(
+            "Toggle Toolbar", self.parent, checkable=True
+        )
         self.toggle_toolbar_action.setChecked(True)
-        self.toggle_toolbar_action.triggered.connect(self.callbacks.get('toggle_toolbar', lambda: None))
+        self.toggle_toolbar_action.triggered.connect(
+            self.callbacks.get("toggle_toolbar", lambda: None)
+        )
         view_menu.addAction(self.toggle_toolbar_action)
-        self.actions['toggle_toolbar'] = self.toggle_toolbar_action
+        self.actions["toggle_toolbar"] = self.toggle_toolbar_action
 
-        self.toggle_statusbar_action = QAction("Toggle Status Bar", self.parent, checkable=True)
+        self.toggle_statusbar_action = QAction(
+            "Toggle Status Bar", self.parent, checkable=True
+        )
         self.toggle_statusbar_action.setChecked(True)
-        self.toggle_statusbar_action.triggered.connect(self.callbacks.get('toggle_statusbar', lambda: None))
+        self.toggle_statusbar_action.triggered.connect(
+            self.callbacks.get("toggle_statusbar", lambda: None)
+        )
         view_menu.addAction(self.toggle_statusbar_action)
-        self.actions['toggle_statusbar'] = self.toggle_statusbar_action
+        self.actions["toggle_statusbar"] = self.toggle_statusbar_action
 
         self.toggle_grids_action = QAction("Toggle Grids", self.parent, checkable=True)
         self.toggle_grids_action.setChecked(True)
-        self._set_action_shortcut(self.toggle_grids_action, 'toggle_grids')
-        self.toggle_grids_action.triggered.connect(self.callbacks.get('toggle_grids', lambda: None))
+        self._set_action_shortcut(self.toggle_grids_action, "toggle_grids")
+        self.toggle_grids_action.triggered.connect(
+            self.callbacks.get("toggle_grids", lambda: None)
+        )
         view_menu.addAction(self.toggle_grids_action)
-        self.actions['toggle_grids'] = self.toggle_grids_action
+        self.actions["toggle_grids"] = self.toggle_grids_action
 
-        self.toggle_cross_hair_action = QAction("Toggle Cross-hair", self.parent, checkable=True)
+        self.toggle_cross_hair_action = QAction(
+            "Toggle Cross-hair", self.parent, checkable=True
+        )
         self.toggle_cross_hair_action.setChecked(False)
-        self._set_action_shortcut(self.toggle_cross_hair_action, 'toggle_cross_hair')
-        self.toggle_cross_hair_action.triggered.connect(self.callbacks.get('toggle_cross_hair', lambda: None))
+        self._set_action_shortcut(self.toggle_cross_hair_action, "toggle_cross_hair")
+        self.toggle_cross_hair_action.triggered.connect(
+            self.callbacks.get("toggle_cross_hair", lambda: None)
+        )
         view_menu.addAction(self.toggle_cross_hair_action)
-        self.actions['toggle_cross_hair'] = self.toggle_cross_hair_action
+        self.actions["toggle_cross_hair"] = self.toggle_cross_hair_action
 
         view_menu.addSeparator()
 
         # Individual X/Y cursor toggles (independent checkable items)
-        self.toggle_x_cursor_a_action = QAction("X Cursor a", self.parent, checkable=True)
-        self._set_action_shortcut(self.toggle_x_cursor_a_action, 'toggle_xa_cursor')
-        self.toggle_x_cursor_a_action.triggered.connect(self.callbacks.get('toggle_x_cursor_a', lambda: None))
+        self.toggle_x_cursor_a_action = QAction(
+            "X Cursor a", self.parent, checkable=True
+        )
+        self._set_action_shortcut(self.toggle_x_cursor_a_action, "toggle_xa_cursor")
+        self.toggle_x_cursor_a_action.triggered.connect(
+            self.callbacks.get("toggle_x_cursor_a", lambda: None)
+        )
         view_menu.addAction(self.toggle_x_cursor_a_action)
-        self.actions['x_cursor_a'] = self.toggle_x_cursor_a_action
+        self.actions["x_cursor_a"] = self.toggle_x_cursor_a_action
 
-        self.toggle_x_cursor_b_action = QAction("X Cursor b", self.parent, checkable=True)
-        self._set_action_shortcut(self.toggle_x_cursor_b_action, 'toggle_xb_cursor')
-        self.toggle_x_cursor_b_action.triggered.connect(self.callbacks.get('toggle_x_cursor_b', lambda: None))
+        self.toggle_x_cursor_b_action = QAction(
+            "X Cursor b", self.parent, checkable=True
+        )
+        self._set_action_shortcut(self.toggle_x_cursor_b_action, "toggle_xb_cursor")
+        self.toggle_x_cursor_b_action.triggered.connect(
+            self.callbacks.get("toggle_x_cursor_b", lambda: None)
+        )
         view_menu.addAction(self.toggle_x_cursor_b_action)
-        self.actions['x_cursor_b'] = self.toggle_x_cursor_b_action
+        self.actions["x_cursor_b"] = self.toggle_x_cursor_b_action
 
-        self.toggle_y_cursor_A_action = QAction("Y Cursor A", self.parent, checkable=True)
-        self._set_action_shortcut(self.toggle_y_cursor_A_action, 'toggle_ya_cursor')
-        self.toggle_y_cursor_A_action.triggered.connect(self.callbacks.get('toggle_y_cursor_A', lambda: None))
+        self.toggle_y_cursor_A_action = QAction(
+            "Y Cursor A", self.parent, checkable=True
+        )
+        self._set_action_shortcut(self.toggle_y_cursor_A_action, "toggle_ya_cursor")
+        self.toggle_y_cursor_A_action.triggered.connect(
+            self.callbacks.get("toggle_y_cursor_A", lambda: None)
+        )
         view_menu.addAction(self.toggle_y_cursor_A_action)
-        self.actions['y_cursor_A'] = self.toggle_y_cursor_A_action
+        self.actions["y_cursor_A"] = self.toggle_y_cursor_A_action
 
-        self.toggle_y_cursor_B_action = QAction("Y Cursor B", self.parent, checkable=True)
-        self._set_action_shortcut(self.toggle_y_cursor_B_action, 'toggle_yb_cursor')
-        self.toggle_y_cursor_B_action.triggered.connect(self.callbacks.get('toggle_y_cursor_B', lambda: None))
+        self.toggle_y_cursor_B_action = QAction(
+            "Y Cursor B", self.parent, checkable=True
+        )
+        self._set_action_shortcut(self.toggle_y_cursor_B_action, "toggle_yb_cursor")
+        self.toggle_y_cursor_B_action.triggered.connect(
+            self.callbacks.get("toggle_y_cursor_B", lambda: None)
+        )
         view_menu.addAction(self.toggle_y_cursor_B_action)
-        self.actions['y_cursor_B'] = self.toggle_y_cursor_B_action
+        self.actions["y_cursor_B"] = self.toggle_y_cursor_B_action
 
         view_menu.addSeparator()
 
         # Zoom actions
         self.zoom_in_action = QAction("Zoom In", self.parent)
-        self._set_action_shortcut(self.zoom_in_action, 'zoom_in')
-        self.zoom_in_action.triggered.connect(self.callbacks.get('zoom_in', lambda: None))
+        self._set_action_shortcut(self.zoom_in_action, "zoom_in")
+        self.zoom_in_action.triggered.connect(
+            self.callbacks.get("zoom_in", lambda: None)
+        )
         view_menu.addAction(self.zoom_in_action)
-        self.actions['zoom_in'] = self.zoom_in_action
+        self.actions["zoom_in"] = self.zoom_in_action
 
         self.zoom_out_action = QAction("Zoom Out", self.parent)
-        self._set_action_shortcut(self.zoom_out_action, 'zoom_out')
-        self.zoom_out_action.triggered.connect(self.callbacks.get('zoom_out', lambda: None))
+        self._set_action_shortcut(self.zoom_out_action, "zoom_out")
+        self.zoom_out_action.triggered.connect(
+            self.callbacks.get("zoom_out", lambda: None)
+        )
         view_menu.addAction(self.zoom_out_action)
-        self.actions['zoom_out'] = self.zoom_out_action
+        self.actions["zoom_out"] = self.zoom_out_action
 
         self.zoom_to_fit_action = QAction("Zoom to Fit", self.parent)
-        self._set_action_shortcut(self.zoom_to_fit_action, 'zoom_to_fit')
-        self.zoom_to_fit_action.triggered.connect(self.callbacks.get('zoom_to_fit', lambda: None))
+        self._set_action_shortcut(self.zoom_to_fit_action, "zoom_to_fit")
+        self.zoom_to_fit_action.triggered.connect(
+            self.callbacks.get("zoom_to_fit", lambda: None)
+        )
         view_menu.addAction(self.zoom_to_fit_action)
-        self.actions['zoom_to_fit'] = self.zoom_to_fit_action
+        self.actions["zoom_to_fit"] = self.zoom_to_fit_action
 
         self.auto_range_x_action = QAction("Auto-range X-axis", self.parent)
-        self._set_action_shortcut(self.auto_range_x_action, 'auto_range_x')
-        self.auto_range_x_action.triggered.connect(self.callbacks.get('auto_range_x', lambda: None))
+        self._set_action_shortcut(self.auto_range_x_action, "auto_range_x")
+        self.auto_range_x_action.triggered.connect(
+            self.callbacks.get("auto_range_x", lambda: None)
+        )
         view_menu.addAction(self.auto_range_x_action)
-        self.actions['auto_range_x'] = self.auto_range_x_action
+        self.actions["auto_range_x"] = self.auto_range_x_action
 
         self.auto_range_y_action = QAction("Auto-range Y1 & Y2 axes", self.parent)
-        self._set_action_shortcut(self.auto_range_y_action, 'auto_range_y')
-        self.auto_range_y_action.triggered.connect(self.callbacks.get('auto_range_y', lambda: None))
+        self._set_action_shortcut(self.auto_range_y_action, "auto_range_y")
+        self.auto_range_y_action.triggered.connect(
+            self.callbacks.get("auto_range_y", lambda: None)
+        )
         view_menu.addAction(self.auto_range_y_action)
-        self.actions['auto_range_y'] = self.auto_range_y_action
+        self.actions["auto_range_y"] = self.auto_range_y_action
 
         self.zoom_box_action = QAction("Zoom Box", self.parent, checkable=True)
         self.zoom_box_action.setChecked(False)
-        self._set_action_shortcut(self.zoom_box_action, 'toggle_zoom_box')
-        self.zoom_box_action.triggered.connect(self.callbacks.get('enable_zoom_box', lambda: None))
+        self._set_action_shortcut(self.zoom_box_action, "toggle_zoom_box")
+        self.zoom_box_action.triggered.connect(
+            self.callbacks.get("enable_zoom_box", lambda: None)
+        )
         view_menu.addAction(self.zoom_box_action)
-        self.actions['zoom_box'] = self.zoom_box_action
+        self.actions["zoom_box"] = self.zoom_box_action
 
         view_menu.addSeparator()
 
         # Panel management
         split_h_action = QAction("Split Horizontally", self.parent)
-        self._set_action_shortcut(split_h_action, 'split_horizontal')
-        split_h_action.triggered.connect(self.callbacks.get('split_horizontal', lambda: None))
+        self._set_action_shortcut(split_h_action, "split_horizontal")
+        split_h_action.triggered.connect(
+            self.callbacks.get("split_horizontal", lambda: None)
+        )
         view_menu.addAction(split_h_action)
-        self.actions['split_horizontal'] = split_h_action
+        self.actions["split_horizontal"] = split_h_action
 
         split_v_action = QAction("Split Vertically", self.parent)
-        self._set_action_shortcut(split_v_action, 'split_vertical')
-        split_v_action.triggered.connect(self.callbacks.get('split_vertical', lambda: None))
+        self._set_action_shortcut(split_v_action, "split_vertical")
+        split_v_action.triggered.connect(
+            self.callbacks.get("split_vertical", lambda: None)
+        )
         view_menu.addAction(split_v_action)
-        self.actions['split_vertical'] = split_v_action
+        self.actions["split_vertical"] = split_v_action
 
         close_panel_action = QAction("Close Active Panel", self.parent)
-        self._set_action_shortcut(close_panel_action, 'close_panel')
-        close_panel_action.triggered.connect(self.callbacks.get('close_panel', lambda: None))
+        self._set_action_shortcut(close_panel_action, "close_panel")
+        close_panel_action.triggered.connect(
+            self.callbacks.get("close_panel", lambda: None)
+        )
         view_menu.addAction(close_panel_action)
-        self.actions['close_panel'] = close_panel_action
+        self.actions["close_panel"] = close_panel_action
 
         self.menubar.addMenu(view_menu)
+
+        # Analyze menu
+        analyze_menu = QMenu("Analyze", self.parent)
+
+        trace_stats_action = QAction("Trace Statistics", self.parent)
+        trace_stats_action.triggered.connect(
+            self.callbacks.get("compute_trace_stats", lambda: None)
+        )
+        analyze_menu.addAction(trace_stats_action)
+        self.actions["compute_trace_stats"] = trace_stats_action
+
+        power_action = QAction("Power Analysis", self.parent)
+        power_action.triggered.connect(
+            self.callbacks.get("compute_power_analysis", lambda: None)
+        )
+        analyze_menu.addAction(power_action)
+        self.actions["compute_power_analysis"] = power_action
+
+        self.menubar.addMenu(analyze_menu)
 
         # Help menu
         help_menu = QMenu("Help", self.parent)
 
         keybindings_action = QAction("Keybindings", self.parent)
-        keybindings_action.triggered.connect(self.callbacks.get('show_keybindings', lambda: None))
+        keybindings_action.triggered.connect(
+            self.callbacks.get("show_keybindings", lambda: None)
+        )
         help_menu.addAction(keybindings_action)
 
         functions_help_action = QAction("Functions", self.parent)
-        functions_help_action.triggered.connect(self.callbacks.get('show_functions_help', lambda: None))
+        functions_help_action.triggered.connect(
+            self.callbacks.get("show_functions_help", lambda: None)
+        )
         help_menu.addAction(functions_help_action)
 
         measures_help_action = QAction("Measures", self.parent)
-        measures_help_action.triggered.connect(self.callbacks.get('show_measures_help', lambda: None))
+        measures_help_action.triggered.connect(
+            self.callbacks.get("show_measures_help", lambda: None)
+        )
         help_menu.addAction(measures_help_action)
 
         self.menubar.addMenu(help_menu)
@@ -277,9 +371,15 @@ class MenuManager:
         style = self.parent.style()
         SI = QStyle.StandardPixmap  # shorthand
 
-        def add_action(key: str, text: str, tooltip: str, theme: str,
-                       fallback: QStyle.StandardPixmap, checkable: bool = False,
-                       checked: bool = False):
+        def add_action(
+            key: str,
+            text: str,
+            tooltip: str,
+            theme: str,
+            fallback: QStyle.StandardPixmap,
+            checkable: bool = False,
+            checked: bool = False,
+        ):
             icon = self._make_icon(theme, fallback, style)
             action = QAction(icon, text, self.parent)
             action.setToolTip(tooltip)
@@ -291,74 +391,141 @@ class MenuManager:
             return action
 
         # Open File
-        add_action('open_file', "Open File", "Open RAW file",
-                   'document-open', SI.SP_DialogOpenButton)
+        add_action(
+            "open_file",
+            "Open File",
+            "Open RAW file",
+            "document-open",
+            SI.SP_DialogOpenButton,
+        )
 
         # Open New Window
-        add_action('open_new_window', "Open New Window", "Open new window",
-                   'window-new', SI.SP_ComputerIcon)
+        add_action(
+            "open_new_window",
+            "Open New Window",
+            "Open new window",
+            "window-new",
+            SI.SP_ComputerIcon,
+        )
 
         # Save As
-        add_action('save_as_raw_data', "Save As", "Save displayed traces to raw file",
-                   'document-save-as', SI.SP_DialogSaveButton)
+        add_action(
+            "save_as_raw_data",
+            "Save As",
+            "Save displayed traces to raw file",
+            "document-save-as",
+            SI.SP_DialogSaveButton,
+        )
 
         self.toolbar.addSeparator()
 
         # Zoom In
         self.zoom_in_action_toolbar = add_action(
-            'zoom_in_toolbar', "Zoom In", "Zoom in (Ctrl+=)",
-            'zoom-in', SI.SP_ArrowUp)
+            "zoom_in_toolbar", "Zoom In", "Zoom in (Ctrl+=)", "zoom-in", SI.SP_ArrowUp
+        )
 
         # Zoom Out
         self.zoom_out_action_toolbar = add_action(
-            'zoom_out_toolbar', "Zoom Out", "Zoom out (Ctrl+-)",
-            'zoom-out', SI.SP_ArrowDown)
+            "zoom_out_toolbar",
+            "Zoom Out",
+            "Zoom out (Ctrl+-)",
+            "zoom-out",
+            SI.SP_ArrowDown,
+        )
 
         # Zoom to Fit
         self.zoom_to_fit_action_toolbar = add_action(
-            'zoom_to_fit_toolbar', "Zoom to Fit", "Auto-range all axes (Ctrl+0)",
-            'zoom-fit-best', SI.SP_BrowserReload)
+            "zoom_to_fit_toolbar",
+            "Zoom to Fit",
+            "Auto-range all axes (Ctrl+0)",
+            "zoom-fit-best",
+            SI.SP_BrowserReload,
+        )
 
         # Auto-range X-axis
         self.auto_range_x_action_toolbar = add_action(
-            'auto_range_x_toolbar', "Auto-range X-axis", "Auto-range X-axis",
-            'zoom-fit-width', SI.SP_ArrowRight)
+            "auto_range_x_toolbar",
+            "Auto-range X-axis",
+            "Auto-range X-axis",
+            "zoom-fit-width",
+            SI.SP_ArrowRight,
+        )
 
         # Auto-range Y axes
         self.auto_range_y_action_toolbar = add_action(
-            'auto_range_y_toolbar', "Auto-range Y-axis", "Auto-range Y1 & Y2 axes",
-            'zoom-fit-height', SI.SP_ArrowDown)
+            "auto_range_y_toolbar",
+            "Auto-range Y-axis",
+            "Auto-range Y1 & Y2 axes",
+            "zoom-fit-height",
+            SI.SP_ArrowDown,
+        )
 
         # Zoom Box (checkable)
         self.zoom_box_action_toolbar = add_action(
-            'zoom_box_toolbar', "Zoom Box", "Rectangle zoom mode (toggle)",
-            'select-rectangular', SI.SP_FileDialogContentsView, checkable=True)
+            "zoom_box_toolbar",
+            "Zoom Box",
+            "Rectangle zoom mode (toggle)",
+            "select-rectangular",
+            SI.SP_FileDialogContentsView,
+            checkable=True,
+        )
 
         # Toggle Grids (checkable)
         self.toggle_grids_action_toolbar = add_action(
-            'toggle_grids_toolbar', "Toggle Grids", "Toggle grid visibility (Ctrl+G)",
-            'view-grid', SI.SP_FileDialogDetailedView, checkable=True, checked=True)
+            "toggle_grids_toolbar",
+            "Toggle Grids",
+            "Toggle grid visibility (Ctrl+G)",
+            "view-grid",
+            SI.SP_FileDialogDetailedView,
+            checkable=True,
+            checked=True,
+        )
 
         # Toggle Cross-hair (checkable)
         self.toggle_cross_hair_action_toolbar = add_action(
-            'toggle_cross_hair_toolbar', "Toggle Cross-hair", "Toggle cross-hair cursor (click to place marks)",
-            'cursor-cross', SI.SP_DialogHelpButton, checkable=True)
+            "toggle_cross_hair_toolbar",
+            "Toggle Cross-hair",
+            "Toggle cross-hair cursor (click to place marks)",
+            "cursor-cross",
+            SI.SP_DialogHelpButton,
+            checkable=True,
+        )
 
         self.toolbar.addSeparator()
 
         # Individual X/Y cursor toggle buttons in toolbar
         self.toggle_x_cursor_a_toolbar = add_action(
-            'toggle_x_cursor_a', "Xa", "Toggle X cursor A",
-            'go-first', SI.SP_MediaSeekBackward, checkable=True)
+            "toggle_x_cursor_a",
+            "Xa",
+            "Toggle X cursor A",
+            "go-first",
+            SI.SP_MediaSeekBackward,
+            checkable=True,
+        )
         self.toggle_x_cursor_b_toolbar = add_action(
-            'toggle_x_cursor_b', "Xb", "Toggle X cursor B",
-            'go-last', SI.SP_MediaSeekForward, checkable=True)
+            "toggle_x_cursor_b",
+            "Xb",
+            "Toggle X cursor B",
+            "go-last",
+            SI.SP_MediaSeekForward,
+            checkable=True,
+        )
         self.toggle_y_cursor_A_toolbar = add_action(
-            'toggle_y_cursor_A', "YA", "Toggle Y cursor A",
-            'go-top', SI.SP_ArrowUp, checkable=True)
+            "toggle_y_cursor_A",
+            "YA",
+            "Toggle Y cursor A",
+            "go-top",
+            SI.SP_ArrowUp,
+            checkable=True,
+        )
         self.toggle_y_cursor_B_toolbar = add_action(
-            'toggle_y_cursor_B', "YB", "Toggle Y cursor B",
-            'go-bottom', SI.SP_ArrowDown, checkable=True)
+            "toggle_y_cursor_B",
+            "YB",
+            "Toggle Y cursor B",
+            "go-bottom",
+            SI.SP_ArrowDown,
+            checkable=True,
+        )
 
     def _create_status_bar(self):
         """Create status bar with labels."""
@@ -455,9 +622,9 @@ class MenuManager:
 
         # X cursor section
         x_parts = []
-        x1_s = fmt(positions.get('xa'))
-        x2_s = fmt(positions.get('xb'))
-        dx_s = fmt(deltas.get('dx'))
+        x1_s = fmt(positions.get("xa"))
+        x2_s = fmt(positions.get("xb"))
+        dx_s = fmt(deltas.get("dx"))
         if x1_s is not None:
             x_parts.append(f"Xa:{x1_s}")
         if x2_s is not None:
@@ -469,10 +636,10 @@ class MenuManager:
 
         # Y cursor section
         y_parts = []
-        ya_s = fmt(positions.get('yA'))
-        yb_s = fmt(positions.get('yB'))
-        dy1_s = fmt(deltas.get('dy1'))
-        dy2_s = fmt(deltas.get('dy2'))
+        ya_s = fmt(positions.get("yA"))
+        yb_s = fmt(positions.get("yB"))
+        dy1_s = fmt(deltas.get("dy1"))
+        dy2_s = fmt(deltas.get("dy2"))
         if ya_s is not None:
             y_parts.append(f"YA:{ya_s}")
         if yb_s is not None:

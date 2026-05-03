@@ -64,6 +64,8 @@ class SettingsWidget(QWidget):
 
         self._create_ui()
         self._load_current_settings()
+        # Sync checkboxes when log mode is toggled externally (e.g. via keybinding)
+        self.axis_manager.axis_log_mode_changed.connect(self._sync_log_checkbox)
 
     def _create_ui(self):
         """Create the user interface."""
@@ -192,7 +194,7 @@ class SettingsWidget(QWidget):
         self.fft_xrange_start.setSuffix(" s")
         self.fft_xrange_start.setVisible(False)
         self.fft_xrange_start.valueChanged.connect(self._on_fft_changed)
-        fft_layout.addWidget(self.fft_xrange_start, 1, 2)
+        fft_layout.addWidget(self.fft_xrange_start, 3, 0, 1, 2)
 
         self.fft_xrange_end = QDoubleSpinBox()
         self.fft_xrange_end.setRange(-1e9, 1e9)
@@ -201,7 +203,14 @@ class SettingsWidget(QWidget):
         self.fft_xrange_end.setValue(0.001)
         self.fft_xrange_end.setVisible(False)
         self.fft_xrange_end.valueChanged.connect(self._on_fft_changed)
-        fft_layout.addWidget(self.fft_xrange_end, 1, 3)
+        fft_layout.addWidget(self.fft_xrange_end, 3, 2, 1, 2)
+
+        # Representation
+        fft_layout.addWidget(QLabel("Representation:"), 1, 2)
+        self.fft_repr_combo = QComboBox()
+        self.fft_repr_combo.addItems(["db", "linear"])
+        self.fft_repr_combo.currentTextChanged.connect(self._on_fft_changed)
+        fft_layout.addWidget(self.fft_repr_combo, 1, 3)
 
         # Binomial smooth
         fft_layout.addWidget(QLabel("Binomial Smooth:"), 2, 0)
@@ -214,18 +223,24 @@ class SettingsWidget(QWidget):
 
         # DC removal
         self.fft_dc_checkbox = QCheckBox("DC Removal")
+        self.fft_dc_checkbox.setChecked(True)
         self.fft_dc_checkbox.stateChanged.connect(self._on_fft_changed)
-        fft_layout.addWidget(self.fft_dc_checkbox, 2, 2, 1, 2)
+        fft_layout.addWidget(self.fft_dc_checkbox, 2, 2)
 
-        # Representation
-        fft_layout.addWidget(QLabel("Representation:"), 3, 2)
-        self.fft_repr_combo = QComboBox()
-        self.fft_repr_combo.addItems(["db", "linear"])
-        self.fft_repr_combo.currentTextChanged.connect(self._on_fft_changed)
-        fft_layout.addWidget(self.fft_repr_combo, 3, 3)
+        # Reset
+        self.fft_reset_btn = QPushButton("Reset")
+        self.fft_reset_btn.clicked.connect(self._reset_fft)
+        fft_layout.addWidget(self.fft_reset_btn, 2, 3)
 
         fft_group.setLayout(fft_layout)
         layout.addWidget(fft_group)
+
+        # Store FFT widgets for bulk operations (reset, etc.)
+        self._fft_widgets = [
+            self.fft_window_combo, self.fft_size_combo, self.fft_dc_checkbox,
+            self.fft_repr_combo, self.fft_xrange_combo,
+            self.fft_xrange_start, self.fft_xrange_end, self.fft_binomial_spin,
+        ]
 
         # Close button
         button_layout = QHBoxLayout()
@@ -421,6 +436,44 @@ class SettingsWidget(QWidget):
         self.fft_xrange_start.setVisible(visible)
         self.fft_xrange_end.setVisible(visible)
 
+    def _reset_fft(self) -> None:
+        """Reset all FFT settings to their default values.
+
+        Block signals during UI updates so that _on_fft_changed is called
+        only once at the end, preventing cascading partial-state writes.
+        """
+        from pqwave.models.state import FftConfig
+        self.state.fft_config = FftConfig()
+        fft = self.state.fft_config
+
+        for w in self._fft_widgets:
+            w.blockSignals(True)
+
+        idx = self.fft_window_combo.findText(fft.window)
+        if idx >= 0:
+            self.fft_window_combo.setCurrentIndex(idx)
+        idx = self.fft_size_combo.findData(fft.fft_size)
+        if idx >= 0:
+            self.fft_size_combo.setCurrentIndex(idx)
+        else:
+            self.fft_size_combo.setCurrentText("Auto")
+        self.fft_dc_checkbox.setChecked(fft.dc_removal)
+        idx = self.fft_repr_combo.findText(fft.representation)
+        if idx >= 0:
+            self.fft_repr_combo.setCurrentIndex(idx)
+        idx = self.fft_xrange_combo.findText(fft.x_range_mode)
+        if idx >= 0:
+            self.fft_xrange_combo.setCurrentIndex(idx)
+        self.fft_xrange_start.setValue(fft.x_range_start)
+        self.fft_xrange_end.setValue(fft.x_range_end)
+        self.fft_binomial_spin.setValue(fft.binomial_smooth)
+        self._update_fft_xrange_visibility()
+
+        for w in self._fft_widgets:
+            w.blockSignals(False)
+
+        self._on_fft_changed()
+
     def _read_fft_size(self) -> int:
         """Read FFT size from editable combo, accepting user-typed values."""
         data = self.fft_size_combo.currentData()
@@ -462,6 +515,14 @@ class SettingsWidget(QWidget):
                 return
 
         self.axis_manager.set_axis_log_mode(axis_id, log_mode)
+
+    def _sync_log_checkbox(self, axis_id: str, log_mode: bool) -> None:
+        """Sync checkbox state when log mode is changed externally (e.g. via keybinding)."""
+        cb = self.log_checkboxes.get(AxisId(axis_id))
+        if cb is not None and cb.isChecked() != log_mode:
+            cb.blockSignals(True)
+            cb.setChecked(log_mode)
+            cb.blockSignals(False)
 
     def _on_label_changed(self, axis_id: AxisId, text: str):
         """Handle axis label changes."""

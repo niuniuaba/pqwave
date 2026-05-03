@@ -67,11 +67,12 @@ class KeyBindingsDialog(QDialog):
 
         # Customisation hint
         hint = QLabel(
-            f"To customise, edit the file:\n"
-            f"  <code>{self._config_path}</code>\n\n"
-            "Format: &#123; \"action_name\": \"key_sequence\", … &#125;\n"
+            f"To customise, edit the file:<br>"
+            f"  <code>{self._config_path}</code><br><br>"
+            "Format: &#123; \"action_name\": \"key_sequence\", … &#125;<br>"
             "Restart pqwave after saving changes for them to take effect."
         )
+        hint.setTextFormat(Qt.TextFormat.RichText)
         hint.setStyleSheet("color: #666; font-size: 11px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)

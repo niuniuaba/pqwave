@@ -1175,13 +1175,17 @@ class PlotWidget(pg.PlotWidget):
 
     def _flush_vb_updates(self):
         """Apply the accumulated view transform."""
-        self._vb_update_pending = False
-
-        # Apply accumulated translation
+        # Process the queued value BEFORE resetting the pending flag, so that
+        # any nested translateBy call triggered by the ViewBox's handler
+        # (e.g. via sigRangeChangedManually) won't find pending=False, clobber
+        # the value, and leave the next caller with pending=True but None data.
         if self._vb_queued_translate is not None:
             dx, dy = self._vb_queued_translate
             self._vb_queued_translate = None
+            self._vb_update_pending = False
             self._orig_vb_translateBy(x=dx, y=dy)
+        else:
+            self._vb_update_pending = False
 
         # Apply queued scaleBy (if that was the last operation)
         if self._vb_queued_call is not None:

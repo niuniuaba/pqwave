@@ -73,6 +73,7 @@ class KeyBindingManager:
 
     def __init__(self):
         self._user_overrides: dict = {}
+        self._ensure_default_config()
         self._load_user_overrides()
 
     # ------------------------------------------------------------------
@@ -99,7 +100,9 @@ class KeyBindingManager:
         self._user_overrides[action_name] = key_sequence
 
     def save_user_overrides(self) -> None:
-        """Write current overrides to the config file."""
+        """Write current overrides to the config file, Only saves entries that differ from defaults, keeping the file
+        minimal and allowing defaults to evolve across versions.
+        """
         path = self._config_path()
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -158,6 +161,23 @@ class KeyBindingManager:
     def _config_path(self) -> str:
         return os.path.join(os.path.expanduser("~"), ".pqwave", "keybindings.json")
 
+    def _ensure_default_config(self) -> None:
+        """Write the default keybindings file if it does not already exist."""
+        path = self._config_path()
+        if os.path.exists(path):
+            return
+        try:
+            defaults = {
+                action: seq
+                for action, (seq, _desc) in self.DEFAULTS.items()
+            }
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(defaults, f, indent=2)
+            logger.info("Wrote default keybindings to %s", path)
+        except OSError as e:
+            logger.warning("Failed to write default keybindings: %s", e)
+
     def _load_user_overrides(self) -> None:
         """Load user overrides from the config file.  Silently handle errors."""
         path = self._config_path()
@@ -173,6 +193,7 @@ class KeyBindingManager:
             self._user_overrides = {
                 k: v for k, v in data.items()
                 if k in self.DEFAULTS and isinstance(v, str)
+                and v != self.DEFAULTS[k][0]
             }
             logger.debug("Loaded %d user keybinding overrides", len(self._user_overrides))
         except (json.JSONDecodeError, OSError) as e:

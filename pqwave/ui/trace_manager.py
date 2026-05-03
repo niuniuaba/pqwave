@@ -12,8 +12,10 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtCore
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QColorDialog
+from PyQt6.QtWidgets import QColorDialog, QMessageBox
 from typing import Optional, List, Tuple
+
+from pqwave.ui.trace_analysis_dialog import TraceAnalysisDialog
 
 from pqwave.models.state import ApplicationState
 from pqwave.models.trace import Trace, AxisAssignment
@@ -44,9 +46,8 @@ class SelectableItemSample(ItemSample):
             event.accept()
             self.update()
             self.sigClicked.emit(self.item)
-        elif event.button() == QtCore.Qt.MouseButton.RightButton:
-            event.accept()
-            self.sigRightClicked.emit(self.item)
+        else:
+            super().mouseClickEvent(event)
 
 
 class _StaticCurveItem(pg.PlotCurveItem):
@@ -85,9 +86,6 @@ class _StaticCurveItem(pg.PlotCurveItem):
                 return QtCore.QRectF()
             self._boundingRect = QtCore.QRectF(xmn, ymn, xmx - xmn, ymx - ymn)
         return self._boundingRect
-
-
-from PyQt6 import QtCore
 
 
 class TraceManager:
@@ -235,6 +233,7 @@ class TraceManager:
                 self.logger.debug(f"X data length: {len(x_data)}")
 
                 traces_added = []
+                _fft_db_axes: set[str] = set()
 
                 for var in variables:
                     evaluator = ExprEvaluator(self.raw_file, self.current_dataset)
@@ -245,9 +244,11 @@ class TraceManager:
 
                     trace_x_data = x_data
                     is_fft = self._is_fft_expression(var)
+                    fft_repr = "linear"
                     if is_fft:
                         from pqwave.ui.fft_engine import compute_fft
                         cfg = self.state.fft_config
+                        fft_repr = cfg.representation
 
                         if cfg.x_range_mode == "current zoom":
                             vb = self.plot_widget.plotItem.vb
@@ -319,6 +320,16 @@ class TraceManager:
                     traces_added.append(trace)
 
                     self.logger.info(f"Added trace: {var} on {y_axis.value}")
+
+                    if fft_repr == "db":
+                        _fft_db_axes.add(y_axis.value)
+
+                # Enable dB suffix once per axis after the loop
+                for axis_side in _fft_db_axes:
+                    orientation = 'left' if axis_side == 'Y1' else 'right'
+                    ax = self.plot_widget.plotItem.getAxis(orientation)
+                    if hasattr(ax, 'setDbMode'):
+                        ax.setDbMode(True)
 
                 # Refresh legend after adding all new traces
                 self._refresh_legend()
@@ -395,6 +406,24 @@ class TraceManager:
                 except Exception:
                     pass
                 sample.sigRightClicked.connect(self._on_legend_sample_right_clicked)
+
+                # Also intercept right-click on the text label (LabelItem),
+                # which is a separate GraphicsWidget that pyqtgraph places next
+                # to the color-patch sample.  Without this, right-clicks on
+                # the legend text do nothing.
+                label = self.legend.getLabel(plot_item)
+                if label is not None:
+                    _orig_label_press = label.mousePressEvent
+                    def _label_press(ev, s=sample, orig=_orig_label_press):
+                        if ev.button() == QtCore.Qt.MouseButton.RightButton:
+                            ev.accept()
+                            s.sigRightClicked.emit(s.item)
+                        else:
+                            try:
+                                orig(ev)
+                            except RuntimeError:
+                                pass
+                    label.mousePressEvent = _label_press
             # Apply bold styling to selected traces
             if i < len(self.state.traces) and self.state.traces[i].selected:
                 label = self.legend.getLabel(plot_item)
@@ -436,6 +465,12 @@ class TraceManager:
 
         # Clear traces from application state
         self.state.clear_traces()
+
+        # Reset dB mode on Y axes
+        for orientation in ('left', 'right'):
+            ax = self.plot_widget.plotItem.getAxis(orientation)
+            if hasattr(ax, 'setDbMode'):
+                ax.setDbMode(False)
 
         # Remove right axis and y2 viewbox references
         # Note: This should be handled by axis manager, but we clean up our references
@@ -525,6 +560,72 @@ class TraceManager:
     def get_selected_traces(self) -> list[tuple[int, Trace]]:
         """Return (index, Trace) pairs for all selected traces."""
         return [(i, t) for i, t in enumerate(self.state.traces) if t.selected]
+
+    def _show_stats_for_traces(self, targets: list[tuple[int, Trace]]) -> None:
+        """Compute visible-range statistics for *targets* and show the dialog."""
+        xmin, xmax = self.plot_widget.plotItem.vb.viewRange()[0]
+        if self.x_log:
+            xmin, xmax = 10.0 ** xmin, 10.0 ** xmax
+        range_str = self._format_range_str(xmin, xmax)
+
+        dlg = TraceAnalysisDialog(self.plot_widget)
+        dlg.set_region_str(range_str)
+        for _, trace in targets:
+            metrics = self._compute_visible_stats(trace, xmin, xmax)
+            if not metrics:
+                QMessageBox.information(
+                    self.plot_widget, "No Data",
+                    f"{trace.name}: no data points in visible range."
+                )
+                continue
+            dlg.add_trace_result(trace.name, metrics)
+        dlg.show()
+
+    def _compute_visible_stats(self, trace: Trace,
+                               xmin: float, xmax: float) -> dict:
+        """Compute statistics for *trace* over [xmin, xmax]."""
+        mask = (trace.x_data >= xmin) & (trace.x_data <= xmax)
+        if not mask.any():
+            return {}
+        y_seg = trace.y_data[mask]
+        x_seg = trace.x_data[mask]
+        results = {
+            'avg': float(np.mean(y_seg)),
+            'RMS': float(np.sqrt(np.mean(y_seg ** 2))),
+            'min': float(np.min(y_seg)),
+            'max': float(np.max(y_seg)),
+            'pk-pk': float(np.ptp(y_seg)),
+            'freq': None,
+        }
+        if len(y_seg) >= 4:
+            dx = np.diff(x_seg)
+            dt = np.median(dx)
+            # Check uniformity: if sample spacing varies more than 1%,
+            # the FFT frequency estimate is unreliable.
+            if dt > 0:
+                cv = float(np.std(dx) / dt) if dt > 0 else 0.0
+                if cv < 0.01:
+                    n_fft = 1 << (len(y_seg) - 1).bit_length()
+                    yw = y_seg - np.mean(y_seg)
+                    mag = np.abs(np.fft.rfft(yw, n=n_fft))
+                    freqs = np.fft.rfftfreq(n_fft, d=dt)
+                    if len(mag) > 2:
+                        peak_idx = np.argmax(mag[1:]) + 1
+                        results['freq'] = float(freqs[peak_idx])
+        return results
+
+    @staticmethod
+    def _format_range_str(xmin: float, xmax: float) -> str:
+        """Format an X range as a human-readable string with SI prefix hints."""
+        span = xmax - xmin
+        if span < 1e-6:
+            return f"{xmin*1e9:.4g}ns — {xmax*1e9:.4g}ns"
+        elif span < 1e-3:
+            return f"{xmin*1e6:.4g}µs — {xmax*1e6:.4g}µs"
+        elif span < 1:
+            return f"{xmin*1e3:.4g}ms — {xmax*1e3:.4g}ms"
+        else:
+            return f"{xmin:.4g}s — {xmax:.4g}s"
 
     def _find_trace_index(self, plot_item) -> int | None:
         """Find the index of *plot_item* in self.traces, or None."""

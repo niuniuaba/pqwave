@@ -72,8 +72,11 @@ class AxisConfig:
         raw_range = data.get('range')
         if raw_range is not None:
             raw_range = (float(raw_range[0]), float(raw_range[1]))
+        label = data.get('label', '')
+        if label.endswith(' (dB)'):
+            label = label[:-5]
         return cls(
-            label=data.get('label', ''),
+            label=label,
             log_mode=data.get('log_mode', False),
             range=raw_range,
             visible=data.get('visible', True),
