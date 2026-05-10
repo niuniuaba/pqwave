@@ -10,9 +10,13 @@ It also overrides grid-line rendering to use a dashed pen style, reducing
 visual interference with traces.
 """
 
+import logging
+
 from pyqtgraph import AxisItem
 from PyQt6.QtGui import QPen
 from PyQt6.QtCore import Qt
+
+logger = logging.getLogger(__name__)
 
 
 class LogAxisItem(AxisItem):
@@ -22,6 +26,7 @@ class LogAxisItem(AxisItem):
         super().__init__(orientation, **kwargs)
         self.log_mode = False
         self._db_mode = False
+        self.hide_tick_labels = False
         self.log_mode_changed_callback = log_mode_changed_callback
         # Initially enable auto SI prefix (for linear mode)
         # It will be disabled when log mode is enabled
@@ -84,8 +89,10 @@ class LogAxisItem(AxisItem):
         self._linkedView = None
         try:
             super().setLogMode(x=x, y=y)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "super().setLogMode() failed for %s axis: %s",
+                self.orientation, e)
         finally:
             self._linkedView = linked_view_backup
 
@@ -93,8 +100,10 @@ class LogAxisItem(AxisItem):
             if self.log_mode_changed_callback:
                 try:
                     self.log_mode_changed_callback(self.orientation, new_mode)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(
+                        "log_mode_changed_callback failed for %s axis: %s",
+                        self.orientation, e)
 
     # Reasonable bounds for log10-exponent ticks. In pqwave, the ViewBox
     # coordinate space holds log10-transformed values (e.g. 3.0 for 1000).
@@ -132,8 +141,18 @@ class LogAxisItem(AxisItem):
             major.append(float(v2))
         return [(float(step), major)]
 
+    def setHideTickLabels(self, hide: bool) -> None:
+        """Hide or show tick labels.  Triggers a repaint when the value changes."""
+        if hide == self.hide_tick_labels:
+            return
+        self.hide_tick_labels = hide
+        self.picture = None
+        self.update()
+
     def tickStrings(self, values, scale, spacing):
-        """Convert tick values to strings"""
+        """Convert tick values to strings (empty when hide_tick_labels is set)."""
+        if self.hide_tick_labels:
+            return [''] * len(values)
         strings = []
         for v in values:
             if self.log_mode:

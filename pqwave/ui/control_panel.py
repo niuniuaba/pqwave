@@ -16,6 +16,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 from pqwave.ui.functions_combo import FunctionsCombo
 from pqwave.ui.measures_combo import MeasuresCombo
+from pqwave.ui.grouped_vector_combo import GroupedVectorCombo
 
 
 class ControlPanel(QWidget):
@@ -78,20 +79,10 @@ class ControlPanel(QWidget):
         # Add spacing
         first_row.addSpacing(20)
 
-        # Vector controls
+        # Vector controls (grouped, multi-select)
         vector_label = QLabel("Vector:")
-        self.vector_combo = QComboBox()
-        self.vector_combo.activated.connect(self._on_vector_activated)
-        self.vector_combo.setMinimumWidth(250)
-        self.vector_combo.setMaximumWidth(500)
-        self.vector_combo.setEditable(True)
-        self.vector_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.vector_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        completer = QCompleter(self.vector_combo.model(), self.vector_combo)
-        completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.vector_combo.setCompleter(completer)
-        self.vector_combo.lineEdit().editingFinished.connect(self._on_vector_editing_finished)
+        self.vector_combo = GroupedVectorCombo()
+        self.vector_combo.vectors_selected.connect(self._on_vectors_selected)
         first_row.addWidget(vector_label)
         first_row.addWidget(self.vector_combo)
 
@@ -198,19 +189,10 @@ class ControlPanel(QWidget):
         self.trace_expr.installEventFilter(self)
         self.measure_expr.installEventFilter(self)
 
-    def _on_vector_activated(self, index):
-        """Emit vector_selected with the current text (including user-typed)."""
-        text = self.vector_combo.currentText()
+    def _on_vectors_selected(self, text: str):
+        """Handle multi-selection from the grouped vector popup."""
         if text:
             self.vector_selected.emit(text)
-
-    def _on_vector_editing_finished(self):
-        """Restore the last valid selection if the typed text doesn't match any item."""
-        text = self.vector_combo.currentText()
-        if text and self.vector_combo.findText(text) < 0:
-            self.vector_combo.setEditText(
-                self.vector_combo.itemText(self.vector_combo.currentIndex())
-            )
 
     def eventFilter(self, obj, event):
         """Track which QLineEdit last received focus."""
@@ -264,20 +246,17 @@ class ControlPanel(QWidget):
         if 0 <= index < self.dataset_combo.count():
             self.dataset_combo.setCurrentIndex(index)
 
-    def set_variables(self, variables):
-        """Update vector combo with list of variable names."""
-        # Block signals to prevent spurious vector_selected emissions during population
-        self.vector_combo.blockSignals(True)
-        self.vector_combo.clear()
-        for var in variables:
-            self.vector_combo.addItem(var)
-        self.vector_combo.blockSignals(False)
+    def set_variables(self, groups):
+        """Update vector combo with grouped variable names.
+
+        Args:
+            groups: dict mapping source-file label → list of variable names.
+        """
+        self.vector_combo.set_groups(groups)
 
     def set_current_variable(self, name):
-        """Set current variable selection."""
-        index = self.vector_combo.findText(name)
-        if index >= 0:
-            self.vector_combo.setCurrentIndex(index)
+        """Set current variable selection (no-op for grouped combo)."""
+        self.vector_combo.set_check_state(name, True)
 
     def set_expression(self, text):
         """Set trace expression text."""

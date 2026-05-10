@@ -87,6 +87,7 @@ class PlotWidget(pg.PlotWidget):
         self.setMouseTracking(True)
 
         # Initialize attributes
+        self._digital_y1_range: Optional[tuple[float, float]] = None
         self.y2_viewbox: Optional[pg.ViewBox] = None
         self.right_axis: Optional[pg.AxisItem] = None
         self.cross_hair_vline: Optional[pg.InfiniteLine] = None
@@ -579,6 +580,13 @@ class PlotWidget(pg.PlotWidget):
         so only the target axis is adjusted.
         """
         vb = self.plotItem.vb
+        # pyqtgraph's vb.autoRange() calls setRange() with BOTH axes computed
+        # from item bounding rects.  When we have a fixed Y1 range set, we must
+        # save it before any autoRange and restore it afterwards, otherwise X
+        # or Y2 auto-range would collapse the Y1 range back to trace-data-fit.
+        need_restore_y = (axis != 'Y1' and self._digital_y1_range is not None)
+        saved_y = vb.viewRange()[1] if need_restore_y else None
+
         if axis == 'X':
             items = [it for it in vb.addedItems
                      if not isinstance(it, pg.InfiniteLine)]
@@ -589,13 +597,18 @@ class PlotWidget(pg.PlotWidget):
             vb.autoRange(padding=0.05, items=items)
             vb.enableAutoRange(x=False)
         elif axis == 'Y1':
-            items = [it for it in vb.addedItems
-                     if not isinstance(it, pg.InfiniteLine)]
-            if not items:
-                return
-            vb.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
-            vb.enableAutoRange(x=False, y=True)
-            vb.autoRange(padding=0.05, items=items)
+            if self._digital_y1_range is not None:
+                y_min, y_max = self._digital_y1_range
+                vb.enableAutoRange(x=False, y=False)
+                vb.setYRange(y_min, y_max, padding=0.05)
+            else:
+                items = [it for it in vb.addedItems
+                         if not isinstance(it, pg.InfiniteLine)]
+                if not items:
+                    return
+                vb.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
+                vb.enableAutoRange(x=False, y=True)
+                vb.autoRange(padding=0.05, items=items)
         elif axis == 'Y2' and self.y2_viewbox:
             y2vb = self.y2_viewbox
             items = [it for it in y2vb.addedItems
@@ -605,6 +618,20 @@ class PlotWidget(pg.PlotWidget):
             y2vb.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
             y2vb.enableAutoRange(y=True)
             y2vb.autoRange(padding=0.05, items=items)
+
+        if need_restore_y:
+            vb.enableAutoRange(x=False, y=False)
+            vb.setYRange(saved_y[0], saved_y[1], padding=0)
+
+    # Digital Y1 fixed range (surfer-style fixed-height rendering) ---
+
+    def set_digital_y1_bounds(self, y_min: float, y_max: float) -> None:
+        """Store a fixed Y range for digital traces, used by auto_range_axis."""
+        self._digital_y1_range = (y_min, y_max)
+
+    def clear_digital_y1_bounds(self) -> None:
+        """Revert to normal autoRange behaviour."""
+        self._digital_y1_range = None
 
     # Grid control
 

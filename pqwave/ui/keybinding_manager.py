@@ -30,8 +30,11 @@ class KeyBindingManager:
         # === File operations ===
         'open_file':               ('Ctrl+O',       'Open Raw File'),
         'open_new_window':         ('Ctrl+N',       'Open New Window'),
-        'save_current_state':      ('Ctrl+S',       'Save Current State'),
-        'save_as_raw_data':        ('Ctrl+Shift+S', 'Save As Raw Data'),
+        'save_current_state':      ('Ctrl+S',       'Save Project'),
+        'save_project_as':         ('Ctrl+Shift+S', 'Save Project As'),
+        'save_as_data_file':       ('Ctrl+Shift+R', 'Save As Data File'),
+        'compute_power_analysis':  ('Ctrl+Shift+P', 'Power Analysis'),
+        'compute_trace_stats':     ('Ctrl+Alt+S',   'Trace Statistics'),
 
         # === Edit / Settings ===
         'edit_trace_properties':   ('Ctrl+E',       'Edit Trace Properties'),
@@ -69,6 +72,12 @@ class KeyBindingManager:
         'split_horizontal':        ('Ctrl+Shift+O', 'Split Panel Horizontally'),
         'split_vertical':          ('Ctrl+Shift+E', 'Split Panel Vertically'),
         'close_panel':             ('Ctrl+Shift+W', 'Close Active Panel'),
+
+        # === Digital signal operations ===
+        'toggle_digital_analog':   ('Ctrl+D',       'Toggle Digital/Analog View'),
+        'group_bus':               ('Ctrl+B',       'Group Selected as Bus'),
+        'eye_diagram':             ('Ctrl+I',       'Show Eye Diagram'),
+        'threshold_settings':      ('Ctrl+T',       'Threshold Settings'),
     }
 
     def __init__(self):
@@ -161,22 +170,39 @@ class KeyBindingManager:
     def _config_path(self) -> str:
         return os.path.join(os.path.expanduser("~"), ".pqwave", "keybindings.json")
 
+    @staticmethod
+    def _filter_overrides(data: dict, defaults: dict) -> dict:
+        """Keep only entries that are known actions with non-default values."""
+        return {
+            k: v for k, v in data.items()
+            if k in defaults and isinstance(v, str)
+            and v != defaults[k][0]
+        }
+
     def _ensure_default_config(self) -> None:
-        """Write the default keybindings file if it does not already exist."""
+        """Migrate the keybindings file: remove entries that match current
+        defaults so that default changes in new versions take effect.
+        Only preserves user overrides that differ from the current defaults.
+        """
         path = self._config_path()
-        if os.path.exists(path):
+        if not os.path.exists(path):
             return
         try:
-            defaults = {
-                action: seq
-                for action, (seq, _desc) in self.DEFAULTS.items()
-            }
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(defaults, f, indent=2)
-            logger.info("Wrote default keybindings to %s", path)
-        except OSError as e:
-            logger.warning("Failed to write default keybindings: %s", e)
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                os.remove(path)
+                return
+            overrides = self._filter_overrides(data, self.DEFAULTS)
+            if overrides:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(overrides, f, indent=2)
+                logger.info("Migrated keybindings: %d overrides kept", len(overrides))
+            else:
+                os.remove(path)
+                logger.info("Removed stale keybindings file (no overrides)")
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to migrate keybindings: %s", e)
 
     def _load_user_overrides(self) -> None:
         """Load user overrides from the config file.  Silently handle errors."""
@@ -189,12 +215,7 @@ class KeyBindingManager:
             if not isinstance(data, dict):
                 logger.warning("Keybindings file is not a JSON object, ignoring")
                 return
-            # Only keep entries that match known actions
-            self._user_overrides = {
-                k: v for k, v in data.items()
-                if k in self.DEFAULTS and isinstance(v, str)
-                and v != self.DEFAULTS[k][0]
-            }
+            self._user_overrides = self._filter_overrides(data, self.DEFAULTS)
             logger.debug("Loaded %d user keybinding overrides", len(self._user_overrides))
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load keybindings from %s: %s", path, e)

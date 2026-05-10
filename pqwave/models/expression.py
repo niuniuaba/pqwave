@@ -7,7 +7,10 @@ ExprEvaluator - Infix expression evaluator for SPICE raw data
 Full SPICE expression language support with ~90 functions and ~17 operators.
 """
 
+import logging
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 try:
     from scipy.special import erf, erfc, gamma, gammaln, jv, yv
@@ -209,8 +212,8 @@ class ExprEvaluator:
             pos = 0
             result, _ = self._eval_boolean_or(tokens, pos)
             return result
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Expression parse failed for '%s': %s", expr, e)
 
         # Fall back to exact variable name lookup. This handles variable
         # names that look like expressions but can't be parsed, such as

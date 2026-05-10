@@ -11,7 +11,7 @@ operations with a maximum of 4 panels (2x2 grid). Tracks the active panel
 import uuid
 from typing import Dict, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter
 
 from pqwave.models.state import ApplicationState
@@ -116,19 +116,29 @@ class PanelGrid(QWidget):
             return None
 
         new_panel_id = str(uuid.uuid4())
+        # Save old panel's view range before register_panel deepcopy
+        # (may trigger side effects on the source ViewBox via shared state).
+        old_vb = panel.plot_widget.plotItem.vb
+        old_x_range = old_vb.viewRange()[0]
+        old_y_range = old_vb.viewRange()[1]
+
         self.state.register_panel(new_panel_id, copy_from=panel_id)
         new_panel = Panel(self.state, self._color_manager, self, panel_id=new_panel_id)
         self._panels[new_panel.panel_id] = new_panel
         new_panel.panel_clicked.connect(self._on_panel_clicked)
 
-        # Propagate raw_file and current_dataset from source panel so the
-        # new panel can evaluate expressions immediately.
+        # Propagate raw_file, vcd_file, and current_dataset from source panel
+        # so the new panel can evaluate expressions immediately.
         src_raw_file = panel.trace_manager.raw_file
         if src_raw_file is not None:
             new_panel.trace_manager.set_raw_file(src_raw_file)
             new_panel.trace_manager.set_current_dataset(
                 panel.trace_manager.current_dataset
             )
+
+        src_vcd_file = panel.trace_manager.vcd_file
+        if src_vcd_file is not None:
+            new_panel.trace_manager.set_vcd_file(src_vcd_file)
 
         splitter = QSplitter()
         splitter.setOrientation(
@@ -148,6 +158,18 @@ class PanelGrid(QWidget):
         splitter.addWidget(new_panel)
         half = max(total // 2, 50)
         splitter.setSizes([half, half])
+
+        # Restore old panel's view range after all reparent/resize events.
+        def _restore():
+            try:
+                if old_vb is None or old_vb.scene() is None:
+                    return  # ViewBox was destroyed before timer fired
+                old_vb.enableAutoRange(x=False, y=False)
+                old_vb.setXRange(old_x_range[0], old_x_range[1], padding=0)
+                old_vb.setYRange(old_y_range[0], old_y_range[1], padding=0)
+            except RuntimeError:
+                pass  # wrapped C/C++ object deleted
+        QTimer.singleShot(0, _restore)
 
         if saved_sizes is not None:
             splitter.parentWidget().setSizes(saved_sizes)

@@ -12,12 +12,12 @@ This widget provides controls for:
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox,
     QGroupBox, QGridLayout, QPushButton, QDoubleSpinBox, QComboBox,
-    QFontComboBox, QSpinBox, QColorDialog, QMessageBox
+    QFontComboBox, QSpinBox, QColorDialog, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
-from pqwave.models.state import AxisId, ApplicationState, ViewboxTheme, THEME_COLORS, FontConfig
+from pqwave.models.state import AxisId, ApplicationState, ViewboxTheme, THEME_COLORS, FontConfig, EyeDiagramConfig
 from pqwave.ui.axis_manager import AxisManager
 
 
@@ -71,6 +71,15 @@ class SettingsWidget(QWidget):
         """Create the user interface."""
         layout = QVBoxLayout(self)
 
+        # Scroll area wraps all content groups
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(6)
+
         # Viewbox theme selector
         theme_group = QGroupBox("Viewbox Theme")
         theme_layout = QHBoxLayout()
@@ -83,7 +92,7 @@ class SettingsWidget(QWidget):
         theme_layout.addWidget(self.theme_combo)
         theme_layout.addStretch()
         theme_group.setLayout(theme_layout)
-        layout.addWidget(theme_group)
+        content_layout.addWidget(theme_group)
 
         # Fonts
         fonts_group = QGroupBox("Fonts")
@@ -131,7 +140,7 @@ class SettingsWidget(QWidget):
             fonts_layout.addWidget(reset_btn, row, 4)
 
         fonts_group.setLayout(fonts_layout)
-        layout.addWidget(fonts_group)
+        content_layout.addWidget(fonts_group)
 
         # Axes settings
         axes_group = QGroupBox("Axes Settings")
@@ -150,7 +159,7 @@ class SettingsWidget(QWidget):
         axes_layout.addWidget(y2_group)
 
         axes_group.setLayout(axes_layout)
-        layout.addWidget(axes_group)
+        content_layout.addWidget(axes_group)
 
         # FFT settings
         fft_group = QGroupBox("FFT Settings")
@@ -233,7 +242,7 @@ class SettingsWidget(QWidget):
         fft_layout.addWidget(self.fft_reset_btn, 2, 3)
 
         fft_group.setLayout(fft_layout)
-        layout.addWidget(fft_group)
+        content_layout.addWidget(fft_group)
 
         # Store FFT widgets for bulk operations (reset, etc.)
         self._fft_widgets = [
@@ -242,7 +251,58 @@ class SettingsWidget(QWidget):
             self.fft_xrange_start, self.fft_xrange_end, self.fft_binomial_spin,
         ]
 
-        # Close button
+        # Eye Diagram settings
+        eye_group = QGroupBox("Eye Diagram")
+        eye_layout = QGridLayout()
+
+        eye_layout.addWidget(QLabel("Window Size:"), 0, 0)
+        self._eye_window_spin = QSpinBox()
+        self._eye_window_spin.setRange(8, 2048)
+        self._eye_window_spin.setValue(48)
+        self._eye_window_spin.setSingleStep(8)
+        self._eye_window_spin.setToolTip("Samples per eye window (2x samples per symbol)")
+        self._eye_window_spin.valueChanged.connect(self._on_eye_changed)
+        eye_layout.addWidget(self._eye_window_spin, 0, 1)
+
+        eye_layout.addWidget(QLabel("Mode:"), 0, 2)
+        self._eye_mode_combo = QComboBox()
+        self._eye_mode_combo.addItems(["Overlay", "Persistence"])
+        self._eye_mode_combo.currentTextChanged.connect(self._on_eye_changed)
+        eye_layout.addWidget(self._eye_mode_combo, 0, 3)
+
+        eye_layout.addWidget(QLabel("Offset:"), 1, 0)
+        self._eye_offset_spin = QSpinBox()
+        self._eye_offset_spin.setRange(0, 2048)
+        self._eye_offset_spin.setValue(16)
+        self._eye_offset_spin.setSingleStep(8)
+        self._eye_offset_spin.setToolTip("Sample phase offset")
+        self._eye_offset_spin.valueChanged.connect(self._on_eye_changed)
+        eye_layout.addWidget(self._eye_offset_spin, 1, 1)
+
+        self._eye_fuzz_cb = QCheckBox("Fuzz (anti-alias)")
+        self._eye_fuzz_cb.setChecked(True)
+        self._eye_fuzz_cb.setToolTip("Reduce aliasing via random jitter (grid_count only)")
+        self._eye_fuzz_cb.stateChanged.connect(self._on_eye_changed)
+        eye_layout.addWidget(self._eye_fuzz_cb, 1, 2, 1, 2)
+
+        self._eye_reset_btn = QPushButton("Reset")
+        self._eye_reset_btn.clicked.connect(self._reset_eye)
+        eye_layout.addWidget(self._eye_reset_btn, 2, 0)
+
+        eye_group.setLayout(eye_layout)
+        content_layout.addWidget(eye_group)
+
+        # Store eye diagram widgets for bulk reset
+        self._eye_widgets = [
+            self._eye_window_spin, self._eye_mode_combo,
+            self._eye_offset_spin, self._eye_fuzz_cb,
+        ]
+
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+
+        # Close button (outside scroll area, always visible)
         button_layout = QHBoxLayout()
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.close)
@@ -414,6 +474,24 @@ class SettingsWidget(QWidget):
         self.fft_binomial_spin.setValue(fft.binomial_smooth)
         self._update_fft_xrange_visibility()
 
+        # Load eye diagram settings
+        eye = self.state.eye_diagram_config
+        self._eye_window_spin.blockSignals(True)
+        self._eye_window_spin.setValue(eye.window_size)
+        self._eye_window_spin.blockSignals(False)
+        idx = self._eye_mode_combo.findText(
+            "Overlay" if eye.mode == "overlay" else "Persistence")
+        if idx >= 0:
+            self._eye_mode_combo.blockSignals(True)
+            self._eye_mode_combo.setCurrentIndex(idx)
+            self._eye_mode_combo.blockSignals(False)
+        self._eye_offset_spin.blockSignals(True)
+        self._eye_offset_spin.setValue(eye.offset)
+        self._eye_offset_spin.blockSignals(False)
+        self._eye_fuzz_cb.blockSignals(True)
+        self._eye_fuzz_cb.setChecked(eye.fuzz)
+        self._eye_fuzz_cb.blockSignals(False)
+
     def _on_fft_changed(self) -> None:
         """Handle FFT settings changes — write to ApplicationState."""
         cfg = self.state.fft_config
@@ -473,6 +551,38 @@ class SettingsWidget(QWidget):
             w.blockSignals(False)
 
         self._on_fft_changed()
+
+    # --- Eye Diagram settings handlers ---
+
+    def _on_eye_changed(self) -> None:
+        """Handle eye diagram settings changes — write to ApplicationState."""
+        cfg = self.state.eye_diagram_config
+        cfg.window_size = self._eye_window_spin.value()
+        mode_text = self._eye_mode_combo.currentText()
+        cfg.mode = "overlay" if mode_text == "Overlay" else "persistence"
+        cfg.offset = self._eye_offset_spin.value()
+        cfg.fuzz = self._eye_fuzz_cb.isChecked()
+
+    def _reset_eye(self) -> None:
+        """Reset eye diagram settings to defaults."""
+        cfg = EyeDiagramConfig()
+        self.state.eye_diagram_config = cfg
+
+        for w in self._eye_widgets:
+            w.blockSignals(True)
+
+        self._eye_window_spin.setValue(cfg.window_size)
+        idx = self._eye_mode_combo.findText(
+            "Overlay" if cfg.mode == "overlay" else "Persistence")
+        if idx >= 0:
+            self._eye_mode_combo.setCurrentIndex(idx)
+        self._eye_offset_spin.setValue(cfg.offset)
+        self._eye_fuzz_cb.setChecked(cfg.fuzz)
+
+        for w in self._eye_widgets:
+            w.blockSignals(False)
+
+        self._on_eye_changed()
 
     def _read_fft_size(self) -> int:
         """Read FFT size from editable combo, accepting user-typed values."""

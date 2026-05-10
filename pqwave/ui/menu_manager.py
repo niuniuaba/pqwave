@@ -95,25 +95,33 @@ class MenuManager:
         # File menu
         file_menu = QMenu("File", self.parent)
 
-        save_current_state_action = QAction("Save Current State", self.parent)
-        save_current_state_action.triggered.connect(
+        save_project_action = QAction("Save Project", self.parent)
+        save_project_action.triggered.connect(
             self.callbacks.get("save_current_state", lambda: None)
         )
-        self._set_action_shortcut(save_current_state_action, "save_current_state")
-        file_menu.addAction(save_current_state_action)
+        self._set_action_shortcut(save_project_action, "save_current_state")
+        file_menu.addAction(save_project_action)
 
-        save_as_action = QAction("Save As...", self.parent)
-        save_as_action.triggered.connect(
-            self.callbacks.get("save_as_raw_data", lambda: None)
+        save_project_as_action = QAction("Save Project As...", self.parent)
+        save_project_as_action.triggered.connect(
+            self.callbacks.get("save_project_as", lambda: None)
         )
-        self._set_action_shortcut(save_as_action, "save_as_raw_data")
+        self._set_action_shortcut(save_project_as_action, "save_project_as")
+        file_menu.addAction(save_project_as_action)
+
+        save_as_action = QAction("Save As Data File...", self.parent)
+        save_as_action.triggered.connect(
+            self.callbacks.get("save_as_data_file", lambda: None)
+        )
+        self._set_action_shortcut(save_as_action, "save_as_data_file")
+        self._save_as_action = save_as_action
         file_menu.addAction(save_as_action)
         file_menu.addSeparator()
 
-        open_raw_action = QAction("Open Raw File", self.parent)
-        open_raw_action.triggered.connect(self.callbacks.get("open_file", lambda: None))
-        self._set_action_shortcut(open_raw_action, "open_file")
-        file_menu.addAction(open_raw_action)
+        open_file_action = QAction("Open File...", self.parent)
+        open_file_action.triggered.connect(self.callbacks.get("open_file", lambda: None))
+        self._set_action_shortcut(open_file_action, "open_file")
+        file_menu.addAction(open_file_action)
 
         open_new_window_action = QAction("Open New Window", self.parent)
         open_new_window_action.triggered.connect(
@@ -321,6 +329,7 @@ class MenuManager:
         analyze_menu = QMenu("Analyze", self.parent)
 
         trace_stats_action = QAction("Trace Statistics", self.parent)
+        self._set_action_shortcut(trace_stats_action, "compute_trace_stats")
         trace_stats_action.triggered.connect(
             self.callbacks.get("compute_trace_stats", lambda: None)
         )
@@ -328,6 +337,7 @@ class MenuManager:
         self.actions["compute_trace_stats"] = trace_stats_action
 
         power_action = QAction("Power Analysis", self.parent)
+        self._set_action_shortcut(power_action, "compute_power_analysis")
         power_action.triggered.connect(
             self.callbacks.get("compute_power_analysis", lambda: None)
         )
@@ -356,6 +366,12 @@ class MenuManager:
             self.callbacks.get("show_measures_help", lambda: None)
         )
         help_menu.addAction(measures_help_action)
+
+        vectors_help_action = QAction("Select Vectors", self.parent)
+        vectors_help_action.triggered.connect(
+            self.callbacks.get("show_vector_selection_help", lambda: None)
+        )
+        help_menu.addAction(vectors_help_action)
 
         self.menubar.addMenu(help_menu)
 
@@ -394,7 +410,7 @@ class MenuManager:
         add_action(
             "open_file",
             "Open File",
-            "Open RAW file",
+            "Open data (.raw/.qraw/.vcd) or project (.json) file",
             "document-open",
             SI.SP_DialogOpenButton,
         )
@@ -408,11 +424,20 @@ class MenuManager:
             SI.SP_ComputerIcon,
         )
 
-        # Save As
+        # Save Project
         add_action(
-            "save_as_raw_data",
-            "Save As",
-            "Save displayed traces to raw file",
+            "save_current_state",
+            "Save Project",
+            "Save project file (Ctrl+S)",
+            "document-save",
+            SI.SP_DialogSaveButton,
+        )
+
+        # Save As Data File
+        add_action(
+            "save_as_data_file",
+            "Save As Data File",
+            "Save displayed traces to data file",
             "document-save-as",
             SI.SP_DialogSaveButton,
         )
@@ -558,6 +583,17 @@ class MenuManager:
     def update_dataset_label(self, dataset_info):
         """Update dataset info in status bar."""
         self.dataset_label.setText(f"Dataset: {dataset_info}")
+
+    def set_save_as_data_enabled(self, enabled: bool) -> None:
+        """Enable/disable the Save As Data File action."""
+        if hasattr(self, '_save_as_action'):
+            self._save_as_action.setEnabled(enabled)
+            if not enabled:
+                self._save_as_action.setToolTip(
+                    "Save as data file is only available for single-file sessions."
+                )
+            else:
+                self._save_as_action.setToolTip("")
 
     def set_toolbar_visible(self, visible):
         """Show/hide toolbar."""

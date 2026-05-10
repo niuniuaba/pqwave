@@ -1,5 +1,5 @@
 ## issues
-### 1. init state ✅ **fixed**
+### ✅ 1. init state ✅ **fixed**
 - what is: 
   - there are two guessed variables show up in trace_expr
 - how to reproduce:
@@ -10,7 +10,7 @@
 - what expected:
   - when a variable or variables or expressions are "Add" the trace_expr should be cleared for next input
 
-### 2. mouse tracking ✅ fixed
+### ✅ 2. mouse tracking ✅ fixed
 - what is:
   - mouse tracking doesn't function
 - how to produce:
@@ -20,7 +20,7 @@
 - What expected
   - the status bar should show the current position of mouse in form of X: 0.000, Y1: 0.000, Y2: 0.000
 
-### 3. zoom in / zoom out / zoom box ✅ **fixed**
+### ✅ 3. zoom in / zoom out / zoom box ✅ **fixed**
 - what is:
   - zoom in / zoom out / zoom box not implemented
 - how to reproduce
@@ -28,7 +28,7 @@
 - what expected
   - zoom in / zoom out / zoom box functions.
 
-### 4. cross-hair cursor feature ✅ **fixed (v0.2.2.1)**
+### ✅ 4. cross-hair cursor feature ✅ **fixed (v0.2.2.1)**
 - what is:
   - 需要实现 cross-hair cursor 功能，包括 ON/OFF toggle、mark 标注、数据面板
 - what expected
@@ -43,7 +43,7 @@
   - `pqwave/ui/main_window.py` — 新增 toggle_cross_hair、mark 面板生命周期管理
   - `pqwave/ui/menu_manager.py` — 新增 View 菜单项和工具栏按钮
 
-### 5. log mode 下坐标数值和 mark 位置错误 ✅ **fixed (v0.2.2.1)**
+### ✅ 5. log mode 下坐标数值和 mark 位置错误 ✅ **fixed (v0.2.2.1)**
 - what is:
   - 当轴设为对数模式时，status bar 和 mark 面板显示的坐标值是 log10 指数（如 3.0），而非实际线性值（如 1000.0）
   - 对数模式下 mark 的位置不对（mark 渲染到了错误位置）
@@ -82,7 +82,7 @@
 
 - 关键原则：凡是添加到 viewbox/plotItem 的可视化元素（InfiniteLine、ScatterPlotItem、PlotCurveItem），必须使用 viewbox 坐标系；凡是显示给用户的数值（status bar、数据面板），必须使用线性空间值
 
-### 6. mark hover tooltip 显示 index ✅ **fixed (v0.2.2.1)**
+### ✅ 6. mark hover tooltip 显示 index ✅ **fixed (v0.2.2.1)**
 - what is:
   - 需要给绘图区的 mark 添加 index 标签（#1, #2...），使其与 Mark Data 面板的 index 一一对应
   - 需求：鼠标移动到 mark 附近时才显示，不干扰波形观察
@@ -103,10 +103,10 @@
 - files changed:
   - pqwave/ui/plot_widget.py — 新增 _mark_label, _check_mark_hover, _show_mark_label, _hide_mark_label
 
-### 7. performance improvement (v0.2.2.1) ✅ **fixed (v0.2.2.1)**)
+### ✅ 7. performance improvement (v0.2.2.1) ✅ **fixed (v0.2.2.1)**)
 - apply rules 功能实现规则 in README.md to improvement
 
-### 8. 改善cross-hair模式下的行为 ✅ **fixed (v0.2.2.2)**
+### ✅ 8. 改善cross-hair模式下的行为 ✅ **fixed (v0.2.2.2)**
 - what is : 在cross-hair cursor模式下，当Mark Data widget 被关闭后，继续mark时，Mark Data widget不再被弹出
 - how to reproduce: 启动pqwave，打开pqware/tests/bridge.raw，添加v(r1)到Y1，触发cross-hair至ON状态，在绘图区mark一个点，关闭mark dat widget, 接着mark一个点，mark data widget 不再出现。
 - what expected : 当cross-hair保持在ON的状态下时，关闭data widget只是让它不再显示，但不是杀死它。当继续mark时，mark data widget应该弹出，且保留有关闭前的数据，并且把新mark点的坐标数据追加上去。也就是说只有cross-hair被turn off时才能结束一个周期，消除其数据和状态。
@@ -119,7 +119,7 @@
   - `pqwave/ui/mark_panel.py` — 新增 closeEvent 重写、window_closed 信号
   - `pqwave/ui/main_window.py` — _on_mark_clicked 增加 show()，_connect_mark_panel, _on_mark_panel_closed
 
-### 9. 改善对字符编码的支持 ✅ **fixed (v0.2.2.1)**
+### ✅ 9. 改善对字符编码的支持 ✅ **fixed (v0.2.2.1)**
 - what is: 某些字符无法正确显示（显示为乱码）
 - how to reproduce：启动pqwave，打开tests/SMPS.qraw, 在变量列表（X comb，Y comb）中有些变量的名称中的字符无法识别，如V(?1#inn), I(B2??1), 等。
 - what expected ：正确显示字符
@@ -148,7 +148,7 @@
   - toggle cross-hair cursor in pqwave, drag X cursor, nothing shown in xschem schematic
 - what expected : r2 voltage (v(r2)) should be shown somewhere in xschem schematic when drag X cursor in pqwave.
 
-### 13. X cursor out-of-range shows misleading floater values ✅ **fixed**
+### ✅ 13. X cursor out-of-range shows misleading floater values ✅ **fixed**
 - what is: When X cursors are positioned outside the dataset range, floaters in xschem still show interpolated numbers, which can mislead users into thinking data exists at that X value.
 - what expected: Show "-" (dash) instead of interpolated values when cursor is outside data range.
 - root cause: The sign-change detection in backannotate_cursor_x only triggers when cursor_x is between two data points. When cursor_x is before the first or after the last data point, no sign change occurs, the loop falls through to found:, and the nearest edge point's value is shown.
@@ -156,7 +156,7 @@
 - files changed:
   - `/home/wing/Apps/xschem.git/src/callback.c` — cursor_in_range flag + out-of-range dash logic
 
-###  12. bugs found after implementation of back-annotation (v0.2.3) ✅ **fixed**
+###  ✅ 12. bugs found after implementation of back-annotation (v0.2.3) ✅ **fixed**
 - xschem complained about undefined Tcl variables (backannotate_sync_draw, backannotate_min_delta, backannotate_last_x)
 - all objects other than text such as components, wires, etc. dismiss (not rendered) when doing back-annotation.
 - Xa / Xb cursor break autorange. when toggle Xa or Xb cursor before adding any trace to plot widget, autorange doesn't work. Y cursors doesn't cause this problem. And if traces are plot prior to trigger x cursors on there is no this problem either.  
@@ -262,8 +262,9 @@
 - how to reproduce : ctrl+shift+e to split to 2 panels, ctrl+shift+w to close one panel, ctrl+shift+e or ctrl+shift+o to split panel agaain leads to a RuntimeError: wrapped C/C++ object of type PlotWidget has been deleted.
 - refer to log file : ./tests/bridge.log
 
-### 31. Y tick number doesn't indicate 'db' in db presentation     
+### ✅31. Y tick number doesn't indicate 'db' in db presentation✅ **fixed**     
 - what is : in db presentation, Y tick number doesn't have a 'db' sufix which make it hard to distinct which presentation (linear or db) is in used. 
+- what expected : in db presentation Y tick numbers have a 'db' suffix which coine the tick numbers in form of something like -10db, 0db, 10db, 20db, .......(number here is for example purpose)
 
 ### ✅32. tick number is wrong when X axis is in log mode in a fft() plot ✅ **fixed**     
 - what is : in a fft() plot when set X asis (frequency) to log mode the tick number is wrong (not transfered correctly)
@@ -291,6 +292,272 @@
 - what expected : do nothing when user set Y to log mode in fft plot. pop up a message would be metter. (in fft plot Y is already in log (dB)).
 - fix : In `_toggle_log_axis()`, detect FFT traces on the target Y axis and prevent enabling log mode, showing an informational message that FFT is already in dB.
 
-### 38. tick numbers clusters in fft plot when set x axis to log mode 
-- what is : when set X axies to log mode in a fft plot the tick number cluster and make them unreadable.
-- how to re-produce : rm tests/bridge.json && pqwave tests/bridgge.raw, plot fft(v(ac_p)), ctrl+shit+x to set x axis to log mode. the x tick numbers cluster at near x=0. 
+### ✅38. tick numbers clusters in fft plot when set x axis to log mode✅ **fixed** 
+- what is : when set X axes to log mode in a fft plot the tick number cluster and make them unreadable.
+- how to re-produce : rm tests/bridge.json && pqwave tests/bridgge.raw, plot fft(v(ac_p)), ctrl+shit+x to set x axis to log mode. the x tick numbers cluster at near x=0.
+
+### ✅39. formatted message not rendered correctly in Help - Keybindings menu✅ **fixed** 
+- what is : formatted message is rendered in plain text in Help - Keybindings menu : To customise, edit the file: <code> .....Keybindings.json</code> Format: &#123;
+
+### ✅40. There is no default keybindings.json in place.✅ **fixed**  
+- what is : there is no default keybindings.json in current codebase
+- what expected : user can customise keybindings by editing ~/.pqwave/keybindings.json. in case of problem, they may want to fallback to default settings, there should be a default keybindings.json file for reference or just copy from.
+
+### ✅41. Improve FFT Settings options and UI layout✅ **fixed**  
+- what is :
+  - there is no 'Reset' option in FFT settings
+  - 'DC Removal' is not set as default 
+  - there is room for UI layout improvement
+- what expected : 
+  - there is a 'Reset' option to reset to default values.
+  - 'DC Removal' is default value (box checked by default)
+  - UI layout as below:     
+      Window: combo    FFT Size: combo      
+      X range: combo   Representation: combo    
+      Binomial Smooth: combo   DC Removal  Reset button     
+                       
+### ✅42. not all FFT options reset to default values at a single reset action✅ **fixed**  
+- what is : when press 'Reset' button only one option is reset so user have to press Reset button multiple times to reset all options.
+- what expected : a single press reset them all.
+
+###✅43. keybindings and Edit > Settings of setting log mode doesn't synchronize✅ **fixed**  
+- what is : when trigger log mode by keybindings ctrl+shift+X/Y/Z, the check boxes in Edit > Settings > Axes Settings are not checked / unchecked accordingly
+- what expected : these two trigger methods synchronize to identical status.
+
+### ✅44. no way to tell which plot widget is the active one in multiple plot widget mode.✅ **fixed**  
+- what is : in multiple plot widget mode, a plot widget is set to active by click it. but when it is clicked there is no indicate to tell that so it's difficult for the user to know which one is active.
+
+### ~~45. cannot trigger statistic analysis context menu by right click~~  
+
+### ✅46. trace statistics analysis result needs improvement✅ **fixed**  
+- what is : trace statistics analysis result dialog covers the plot view and cannot move independently from main window.
+- what expect : can move result dialog (or widget, whatever) from the plot view region so user can check the numbers and the waveforms accordingly.
+
+### ✅47. trace statistics analysis result needs improvement for multiple traces analysis.✅ **fixed**   
+- what is : when select multiple traces (ctrl+click) and Analyze > Compute Trace Statistics, the result dialogs overlap and user has to close the most-front one to see the next underneath.
+- wht expected : user can see results of all selected traces at the same time.
+
+### ✅48. no x axis range infomation in power analysis result.✅ **fixed**   
+- what is : there is no x axis range information in power analysis result
+- what expect : provide x axis range of current zoom in power analysis result, like what it does in trace statistics analysis result.
+
+### ✅49. font color in mean row make text hard to reads✅ **fixed**    
+- what is : in power analysis result, the bottom row (mean numbers) of per-cycle breakdown has a font color in blue, makes it hard to read in dark mode.
+- what expected : easy to read font colors for both light and dark mode. (maybe green?)
+
+### ✅50. inconvenient data export in power analysis✅ **fixed**   
+- what is : in power analysis result user has to click copy tsv to copy data and paste it in some kind of spreadsheet applications.
+- what expected : export data to a csv directly by a single click. just like what it does in mark data widget.
+
+### ✅51. there is no keybind to trigger trace statistic analysis✅ **fixed**  
+- what is : currently Analyze > Trace Statistics menu item is the only way to execute a trace statistic analysis.
+- what expected : provide a keybind Ctrl+Shift+S to execute trace statistic analysis. register the keybind to default keybindings.json and Help > Keybindings menu item. 
+
+### ✅52. there is no keybind to trigger power analysis✅ **fixed**   
+- what is : currently Analyze > Power Analysis menu item is the only way to execute a trace statistic analysis.
+- what expected : provide a keybind Ctrl+Shift+P to execute power analysis. register the keybind to default keybindings.json and Help > Keybindings menu item.
+
+### ✅53. cannot open vcd file✅ **fixed**   
+- what is : File > Open VCD File doesn't open a vcd file
+- how to re-produce : launch pqwave, File > Open VCD File, select tests/dump.vcd, there is no data load, and terminal output error message.
+- error message see ./tests/dump.log
+
+### ✅54. vcd variables are not list up in vectors combo✅ **fixed**  
+- what is : when open a standalone vcd file (without any raw in prior), vcd variables are not list up in vectors combo.
+- how to re-produce : launch pqwave, File > Open VCD File, select tests/dump.vcd, it sas vcd variables are loaded. but the vectors combo is empty.
+
+### ✅55. failed to add vcd trace in vcd-alone mode✅ **fixed**  
+- what is : pqwave failed to plot a vcd trace in vcd-alone mode.
+- how to re-produce : launch pqwave, open tests/dump.vcd, select 'adc_core_digital_tb.conv_finished_osr_out' then press 'Y1' button, an error message pop up and says failed to add trace for expression : adc_core_digital_tb.conv_finished_osr_out.
+- terminal output : 'DEBUG: add_trace called: expression=adc_core_digital_tb.conv_finished_osr_out, x_var_name=time, y_axis=AxisAssignment.Y1
+WARNING: No raw file opened'
+
+### ✅56. ValueError when plot vcd trace in vcd-alone mode✅ **fixed**  
+- what is : when plot a vcd trace in vcd-alone mode, trace_manager raises a ValueError.
+- how to re-produce : see ./tests/ValueError.log
+
+### ✅57. Attribute Error when plot vcd trace in vcd-alone mode✅ **fixed**  
+- what is : when plot a vcd trace in vcd-alone mode, AttributeError raise.
+- how to re-produce : see ./tests/AttributeError.log
+
+### ✅58. failed to plot vcd traces in vcd-alone mode✅ **fixed**   
+- what is : pqwave complains failed to add trace for expression.
+- see ./tests/vcd_signal_not_found.log
+
+### ✅59. incorrect digital wave rendering✅ **fixed**  
+- what is : digital traces are not rendered in compact stack (gtkwave-like) fashion
+- how to re-produce : (1)launch pqwave by venv/bin/pqwave; (2)File > Open VCD File and select tests/mixed_signa.vcd; (3)select '[VCD] dig_clk' from Vectors combo; (4)press 'Y1' button. '[VCD] dig_clk' trace is not rendering visibly in plot widget.
+- what expected : the trace should poses a couple of 0->1 cycles in the time range from 0 to 8*10^-6 s.
+
+### ✅60. X axis (time) not alligned in mixed_signal simulation data✅ **fixed**  
+- what is : X axis (time) not alligned correctly in digital and analog panel in a mixed signal simulation dataset.
+- how to reproduce : (1)pqwave tests/mixed_signal.raw; (2)File > Load VCD then select tests/mixed_signal.vcd;(3)Ctrl+Shift+E to split plot panel; (4) plot vcd variables in upper panel, analog variables in lower panel, the X axis (time) is not alligned correctly. see tests/mixed_signal_time_alignment.png
+- some findings / thoughts : (1) digital and analog plot doesn't share a time range (0-16 us in digital and 0- 10 in analog), autorange X axis or autorange all (zoom to fit) doesn't change this. (2) analog plot shows left and right ticks but digital plot doesn't. even they share a time range how to arrange X axes in pixel precision? Maybe a column intentation in both left and right tick positions in digital plot?   
+
+### ✅61. not using established vcd parser✅ **fixed** 
+- what is : pqwave is using a self-written vcd parser
+- what expected : use an established and maintained parser - vcdvcd 
+
+### ✅62. Y2 in digital plot confuse user✅ **fixed**  
+- what is : Y2 is enabled by default in all plot panels. but if digital traces are plot against multiple Y axes it confuse user.
+- what expected : digital traces represent time-series events and they should use single Y axis.
+
+### ✅63. Y tick values in digital plot confuse user✅ **fixed**  
+- what is : Y tick values (-1, 0, 1, 2, ..., n) in digital plot confuse user. it's hard to tell what does these number mean.
+- what expected : digital traces represent time-series events and they don't have a physical dimension unit. digital plot should not show Y tick values unless in analog view of trace.
+
+### ✅64. X label shown as 'X' in pure vcd plot✅ **fixed**  
+- what is : in pure vcd plot X axis label is named 'X'
+- what expected : in vcd plot X axis should be named 'time' by default which is the case in a mixed vcd plot.
+
+### ✅65. cannot add multiple vcd traces at a time in pure vcd plots✅ **fixed**  
+- what is : in pure vcd plots adding multiple vcd traces to Add Trace expr then pressing 'Y1' button raises an error : Failed to add trace to expression.
+- what expected : can add multiple tarces in a time which is the case in both analog plots and mixed vcd plots.
+
+### ✅66. Ctrl+D doesn't work in vcd plot✅ **fixed**   
+- what is : Ctrl+D doesn't trigger analog representation of digital tarce.
+- how to re-produce : (1) launch pqwave; (2) File > Open VCD File and open tests/mixed_singal.vcd; (3) select 'dig_clk' from Vectors combo then press 'Y1' button; (4) left click dig_clk legend to select trace (turns to bold); (5) Ctrl+D but nothing happens
+- what expected : Ctrl+D triggers 'dig_clk' to its analog representation.
+
+### ✅67. Ctrl+Shift+E is broken✅ **fixed**   
+- what is : when pres Ctrl+Shift+E an error raises says QAction::event: Ambiguous shortcut overload: Ctrl+Shift+E
+- what expected : Ctrl+Shift+E should split plot panel vertically
+
+### ✅68. inconsistent analog representation of same vcd trace in pure vcd plot and mixed vcd plot✅ **fixed**  
+- what is : analog representation of vcd trace in a pure vcd plot shows a visible slop of transition from minimum to maximum voltage of the trace but no visible slop in mixed vcd plot. in mixed vcd plot the analog representation of a trace looks like a step transition.
+
+### ✅69. cannot edit property of bus trace✅ **fixed**   
+- what is : when edit property of a bus trace an AttributeError raises.
+- how to re-produce : (1) launch pqwave; (2) File > Open VCD File to open tests/mixed_signal.vcd; (3) Add traces q1~q4; (4) Ctrl+click to multi-select q1~q4; (5) Ctrl+B to group q1~q4 as a bus where it is named to bus5 automatically; (6) Edit > Edit Trace Properties, when edit properties of bus5 an error raises :Traceback (most recent call last):
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 1363, in <lambda>
+    apply_btn.clicked.connect(lambda: self._apply_trace_properties(list_widget.currentRow(), list_widget))
+                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 1453, in _apply_trace_properties
+    plot_item.setPen(new_pen)
+    ^^^^^^^^^^^^^^^^
+AttributeError: 'DigitalStepCurveItem' object has no attribute 'setPen'. Did you mean: 'setPos'?
+
+### ✅70. bus trace invisible ✅ **fixed**  
+- what is : bus trace in digital plot is solid-filled with color and invisible. see tests/bus_invisible.png
+
+### ✅71. property edition only applys to one line of bus trace✅ **fixed**   
+- what is : when setting properties (color, line width) for a bus trace it only applys to one line of the trace.
+- what expected : bus trace is represented by two lines and properties should apply to both lines.
+
+### ✅72. pqwave stop response when open ltspice raw file✅ **fixed**   
+- what is : when open ltspice raw file through command line or File > Open Raw File pqwave stop response. btop shows pqwave uses 100% CPU and 250Mb memory.
+- how to re-produce : pqwave tests/bridge_ltspice.raw --debug
+
+### ✅73. pqwave doesn't save state when close window in pure vcd case.✅ **fixed** 
+- what is : when close pqwave window of a pure vcd case it doesn't save state (no .json state file generated). user has to save current state through File > Save Current State.
+- what expected : save state of pure vcd case too when close window.
+
+### ✅74. pqwave doesn't recover stored state of a pure vcd.✅ **fixed** 
+- what is : when open a vcd file, the stored state is not recovered
+- how to reproduce : (1)pqwave tests/mixed_signal.vcd; (2)choose dig_clk from vectors combo then press "Y1"; (3) File > Save Current State; (4) close pqwave window; (5) pqwave tests/mixed_signal.vcd, the plot widget is empty, X / Y1 scale shows initial state.
+
+### ✅75. X/Y data is saved to state json for vcd plot.✅ **fixed**  
+- what is : when save state of a pure vcd or mixed vcd case the X/Y data of vcd (vcd_time / vcd_value) is also saved. when the plot consists of many digital traces it makes state json bulky.
+- what expected : save trace name (trace entry) only like what is done in raw case.
+
+### ✅76. selected vectors by checkbox are not emitted ✅ **fixed**  
+- what is : when selecting vectors by checking checkbox, then close popup, the selected items are not emitted to Add Trace expr. (for reference : double click works.)
+
+### ✅77. Ctrl+click and Shift+click vector names doesn't make vectors selected✅ **fixed**   
+- what is : selecting vectors only works through checkbox which makes Ctrl+click and Shift+click vector names doesn't select vectors.
+- what expected : Ctrl+click names and Shift+click names make them checked.
+
+### ✅78. need help doc for vector selection✅ **fixed**  
+- what is : there is no help doc for vector selection
+- what expected : a Help > Select Vectors item to document how the select vectors widget works.
+
+### ✅79. AttributeError raises when launch pqwave✅ **fixed**  
+- what is : when launch pqwave from command line AttributeError raises. Error message : 
+Traceback (most recent call last):
+  File "/home/wing/.local/bin/pqwave", line 8, in <module>                              sys.exit(main())
+             ~~~~^^
+  File "/home/wing/Apps/pqwave.git/pqwave/main.py", line 441, in main
+    window = MainWindow(xschem_ba_port=args.xschem_ba_port)
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 119, in __init__
+    self._setup_ui()
+    ~~~~~~~~~~~~~~^^
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 154, in _setup_ui
+    callbacks = self._create_menu_callbacks()
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 206, in _create_menu_callbacks                                                                           'compute_trace_stats': self._compute_trace_stats,                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute '_compute_trace_stats'
+
+### ✅80. autorange when trigger analog view or vise versa✅ **fixed**   
+- what is : when transfer a trace from digital to analog representation or vise versa the trace is out of plot widget
+- what expected : autorange when trigger digital/analog representation of trace to keep it fit to plot widget.
+
+### ✅81. Save As Raw Data is not disable in multifile session✅ **fixed**   
+- what is : in multifile session when user trys to Save As Raw Data pqwave doesn't stop it.
+- what expected : Disabled when len(source_files) > 1. Tooltip: "Save as data file is only available for single-file sessions."
+
+### ✅82. No Save As VCD Data option for pure vcd case✅ **fixed**     
+- what is : there is no option to save as vcd file in pure vcd case
+- what expected : 
+  - change File > Save As Raw to File > Save As Data File
+  - add VCD to target format list
+  - in pure vcd case set vcd as default target format
+
+### ✅83. 'Open File' toolbar item tip message improvement✅ **fixed**  
+- what is : the message says 'Open .raw or .vcd file'
+- what expected : the message says 'Open data (.raw/.qraw/.vcd) or project (.json) file'
+
+### ✅84. File > Save Project and File > Save Project As improvement✅ **fixed**  
+- what is : in save file widget the show file type combo only indicate 'Project Files' but 'project' or 'project file' is not a common concept in the field of spice wave viewing and users may not be aware that a json file is to be saved.
+- what expected : the show file type combo indicate 'Project Files (.json)' and/or file name input field includes .json automatically.
+
+### ✅ 85. add vcd support to pqwave --extract ✅ **fixed**
+- what is : `pqwave --extract` command line doesn't support vcd
+- what expected : `pqwave --extract` supports vcd input, vcd or ngspice raw output 
+
+### ✅ 86. render bus signal as-is ✅ **fixed**
+- what is : bus signal is rendered as a single digital trace with multiple pulse height 
+- how to re-produce : qpwave tests/dump.vcd; select adc_core_digital_tb.result_out[15:0] from vector combo then press Y1 button.
+- what expected : render bus signal as-is (a bus trace)
+
+### ✅ 87. can't read a vector name when it extend beyond vector combo width ✅ **fixed**
+- what is : can't read a long vector name when it extends beyond vector combo widht which leads to difficulty in vector section.
+- how to re-produce : pqwave tests/dump.vcd, then expand vector comb, can't tell which vector is which because their names are too long and compressed.
+- what expected: a vector full-name tip on mouse hover.
+
+### ✅ 88. tcp port conflict when launch second pqwave session from terminal ✅ **fixed**
+- what is : when run a second pqwave session from terminal an error raises and syas ERROR:Failed to start Xschem server on port 2026: [Errno 98] Address already in use.
+- what expected : warn the user and ask if launch without tcp
+
+### ✅ 89. missed time vector when extract vcd trace to raw file from command line ✅ **fixed**
+- what is : when extract trace from vcd to raw file from command line, time is not included in the output raw file.
+- what expected : when extract trace from vcd to raw file from command line include time in the output raw file.
+
+### ✅ 90. pqwave doesn't render vcd trace correctly ✅ **fixed**
+- what is : pqwave doesn't read vcd data correctly
+- how to reproduce : (1) pqwave tests/dump.vcd, (2) plot 'adc_core_digital_tb.result_out[15:0]', it shows time range is [0, 2600 us] and the trace consists of 4 events
+- what expected : time range should be [0, 2810 us], the trace consists of 5 events among which the last event has a value of 3cc0 within time range [2600us, 2810us].
+
+### ✅ 91. only one line of bus trace is hidden ✅ **fixed**
+- what is : when trigger the visibility of a bus trace by clicking its legend only one of the two lines is hidden.
+- what expected : hide the whole trace
+
+### ✅ 92. cannot split plot panel in vcd case ✅ **fixed**
+- what is : Ctrl+Shift+E/Ctrl+Shift+O doesn't split plot panel in vcd case
+- how to re-produce : tests/split_vcd.log
+
+###  ✅ 93. vcd trace render improvement✅ **fixed** 
+- what is : when plot too few or too many vcd traces the render looks awful - trace height is too large or too small.
+- what expected : fix trace height to proper value with respect to pixel? plus : user can set trace height to x1, x2 through Edit > Edit Trace Properties
+
+### ✅ 94. vcd trace doesn't scale ✅ **fixed** 
+- what is : when set vcd trace height to x2.0 it doesn't stretch but translate to a x2.0 Y position
+- what expected : set trace height to x2.0 should hold its position, stretch to double height and keep its width.
+
+### ✅ 95. moveable edit trace properties widget ✅ **fixed**
+- wht is : edit trace properties dialog attach to main window and cover the visible plot widget
+- what expected : a moveable edit trace properties widget which can be moved independently to the main window.
+
+### ✅ 96. range is broken when split plot panel ✅ **fixed**
+- what is : when split plot panel the range of old panel is broken.
+- how to reproduce : pqwave tests/bridge.raw, plot v(r1), when split plot panel through Ctrl+Shift+E the x axis (time) of the old panel (which contains v(r1) trace) is stretched to 0~1000 (x0.001)
+- what expected : keep the old panel range as-is when split panel.
+

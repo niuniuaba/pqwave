@@ -45,6 +45,10 @@ FORMAT_CONFIG = {
         'freq_dtype': np.float64,
         'extension': '.raw',
     },
+    'vcd': {
+        'encoding': 'utf_8',
+        'extension': '.vcd',
+    },
 }
 
 
@@ -68,10 +72,10 @@ def _infer_variable_type(expression: str, raw_file, dataset_idx: int = 0) -> str
     """Infer the SPICE variable type string for a trace expression.
 
     Tokenizes the expression to find variable references, then looks up
-    their type in the source dataset.
+    their type in the source dataset. Returns 'unknown' when raw_file is None.
     """
-    if not expression:
-        return 'voltage'
+    if raw_file is None or not expression:
+        return 'unknown'
 
     from pqwave.models.expression import ExprEvaluator
     evaluator = ExprEvaluator(raw_file, dataset_idx)
@@ -108,7 +112,7 @@ def _infer_variable_type(expression: str, raw_file, dataset_idx: int = 0) -> str
 def extract_traces_to_raw(
     output_path: str,
     traces: list,
-    raw_file,
+    raw_file=None,
     target_format: str = 'ltspice',
     output_is_ac: bool = False,
     x_var_name: str | None = None,
@@ -123,15 +127,21 @@ def extract_traces_to_raw(
     Args:
         output_path: Path to write the output file
         traces: List of Trace dataclass objects with x_data, y_data
-        raw_file: Source RawFile instance (for dataset metadata and type inference)
+        raw_file: Source RawFile instance (for dataset metadata and type inference).
+                   Can be None for non-SPICE sources (e.g. VCD).
         target_format: One of 'ltspice', 'qspice', 'ngspice'
         output_is_ac: Force AC output mode (default: auto-detect from source dataset)
         x_var_name: Custom X variable name; appended as extra variable in output
         x_var_data: Custom X variable data array (uses first trace x_data if omitted)
     """
     config = FORMAT_CONFIG[target_format]
-    dataset = raw_file.datasets[dataset_idx]
-    is_ac = output_is_ac or dataset.get('_is_ac_or_complex', False)
+
+    if raw_file is not None:
+        dataset = raw_file.datasets[dataset_idx]
+        is_ac = output_is_ac or dataset.get('_is_ac_or_complex', False)
+    else:
+        dataset = None
+        is_ac = output_is_ac
 
     if not traces:
         raise ValueError("No traces to extract")
@@ -194,8 +204,8 @@ def extract_traces_to_raw(
             data[:, -1] = x_col
 
     # Get metadata from source dataset
-    title = dataset.get('title', 'pqwave extraction')
-    date = dataset.get('date', '')
+    title = dataset.get('title', 'pqwave VCD extraction') if dataset else 'pqwave VCD extraction'
+    date = dataset.get('date', '') if dataset else ''
     plotname = 'ac' if has_complex_data else 'transient'
     flags = 'complex' if has_complex_data else 'real'
 
@@ -322,4 +332,135 @@ def write_raw_file(
     logger.info(
         f"Written {target_format} raw file: {output_path} "
         f"({n_points} points, {n_vars} variables)"
+    )
+
+
+def write_vcd_file(
+    output_path: str,
+    traces: list,
+    timescale: float = 1e-9,
+):
+    """Write traces to a VCD (Value Change Dump) file.
+
+    Each trace becomes a 1-bit wire signal.  Transition events are
+    detected by scanning for value changes between consecutive samples.
+
+    Args:
+        output_path: Path to write the .vcd file.
+        traces: List of Trace objects, each with .name, .x_data, .y_data.
+        timescale: Time unit in seconds (default 1 ns).
+    """
+    if timescale <= 0:
+        raise ValueError(f"timescale must be positive, got {timescale}")
+
+    import datetime
+
+    def _ts(val: float) -> int:
+        """Convert time in seconds to VCD time units."""
+        return int(round(val / timescale))
+
+    lines = []
+    lines.append("$date")
+    lines.append(f"    {datetime.date.today().isoformat()}")
+    lines.append("$end")
+    lines.append("$version")
+    lines.append("    pqwave VCD export")
+    lines.append("$end")
+    lines.append("$timescale")
+    if timescale == 1e-9:
+        ts_str = "1 ns"
+    elif timescale == 1e-12:
+        ts_str = "1 ps"
+    elif timescale == 1e-6:
+        ts_str = "1 us"
+    elif timescale == 1e-3:
+        ts_str = "1 ms"
+    elif timescale == 1.0:
+        ts_str = "1 s"
+    else:
+        ts_str = f"{timescale:.0e} s"
+    lines.append(f"    {ts_str}")
+    lines.append("$end")
+
+    # Assign identifiers from safe ASCII range, skipping characters that are
+    # special in VCD syntax: " (34), # (35), $ (36)
+    _SAFE_CHARS = [chr(c) for c in range(33, 127)
+                   if c not in (34, 35, 36)]
+    # Generate unique identifiers using only _SAFE_CHARS for all positions.
+    identifiers: list = []
+    for i, t in enumerate(traces):
+        if i < len(_SAFE_CHARS):
+            c = _SAFE_CHARS[i]
+        else:
+            hi = _SAFE_CHARS[(i // len(_SAFE_CHARS)) % len(_SAFE_CHARS)]
+            lo = _SAFE_CHARS[i % len(_SAFE_CHARS)]
+            c = hi + lo
+        identifiers.append(c)
+        short_name = t.name[:32]
+        is_bus = getattr(t, 'trace_type', 'analog') == 'bus'
+        width = t.metadata.get('bus_width', 1) if is_bus else 1
+        lines.append(f"$var wire {width} {c} {short_name} $end")
+
+    lines.append("$enddefinitions $end")
+
+    # Build time-ordered event list
+    events = []
+    for i, t in enumerate(traces):
+        x = np.asarray(t.x_data, dtype=np.float64)
+        y = np.asarray(t.y_data, dtype=np.float64)
+        n = min(len(x), len(y))
+        if n == 0:
+            continue
+        c = identifiers[i]
+        is_bus = getattr(t, 'trace_type', 'analog') == 'bus'
+        bus_width = t.metadata.get('bus_width', 1) if is_bus else 1
+
+        if is_bus and bus_width > 1:
+            # Multi-bit bus: emit vector values in VCD binary format.
+            def _bus_fmt(val: float) -> str:
+                return f"b{int(val):0{bus_width}b}"
+            # Initial value
+            events.append((_ts(x[0]), _bus_fmt(y[0]), c))
+            for j in range(1, n):
+                if int(y[j]) != int(y[j - 1]):
+                    events.append((_ts(x[j]), _bus_fmt(y[j]), c))
+        else:
+            # 1-bit signal: emit 0/1 transition events.
+            events.append((_ts(x[0]), str(int(y[0] != 0)), c))
+            for j in range(1, n):
+                prev = int(y[j - 1] != 0)
+                curr = int(y[j] != 0)
+                if curr != prev:
+                    events.append((_ts(x[j]), str(curr), c))
+
+    events.sort(key=lambda e: e[0])
+
+    # Dump initial values at time 0 (required by VCD spec for every signal)
+    lines.append("$dumpvars")
+    for i, t in enumerate(traces):
+        y = np.asarray(t.y_data, dtype=np.float64)
+        c = identifiers[i]
+        is_bus = getattr(t, 'trace_type', 'analog') == 'bus'
+        bus_width = t.metadata.get('bus_width', 1) if is_bus else 1
+        if is_bus and bus_width > 1:
+            val_str = f"b{int(y[0]):0{bus_width}b}" if len(y) > 0 else f"b{'0' * bus_width}"
+        else:
+            val_str = str(int(y[0] != 0)) if len(y) > 0 else "0"
+        lines.append(f"{val_str}{c}")
+    lines.append("$end")
+
+    # Write time-value pairs
+    prev_time = -1
+    for ts_val, val, c in events:
+        if ts_val != prev_time:
+            lines.append(f"#{ts_val}")
+            prev_time = ts_val
+        lines.append(f"{val}{c}")
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+
+    logger.info(
+        f"Written VCD file: {output_path} "
+        f"({len(traces)} signals, {len(events)} events)"
     )

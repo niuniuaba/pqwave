@@ -1,6 +1,8 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 ## CHANGELOG.md
 
+** not maintained from v0.2.4. Refer to README.md, TODO.md and issues.md.**
+
 ###  v0.2.3 — Keybindings, auto-range fixes, and log mode improvements
 - **Keybinding system**: New `KeyBindingManager` with customizable shortcuts (JSON-based config), `KeyBindingsDialog` under Help menu showing all bindings with custom binding highlighting, and `WidgetWithChildrenShortcut` for plot-contextual keys
 - **Auto-range fix**: Auto-range X and Y now only affect their respective axis (previously both acted like zoom-to-fit). Context-menu auto-range still works correctly
@@ -132,5 +134,3 @@ pqwave/
 - Auto scale and manual range adjustment
 - Logarithmic Y axis
 - Scientific notation display
-
-

@@ -92,7 +92,7 @@ class XschemServer(QObject):
             return True
 
         except socket.error as e:
-            logger.error(f"Failed to start Xschem server on port {self.port}: {e}")
+            logger.warning(f"Xschem server not available on port {self.port}: {e}")
             self.server_socket = None
             return False
 

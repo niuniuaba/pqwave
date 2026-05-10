@@ -71,6 +71,7 @@ class Panel(QWidget):
             plot_widget=self.plot_widget,
             legend=self.legend,
             application_state=self.state,
+            panel_id=self.panel_id,
             color_manager=self._color_manager,
         )
 

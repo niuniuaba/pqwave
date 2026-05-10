@@ -90,13 +90,39 @@ def test_trace_property_editor():
     list_widget.addItem(f"1. {var} @ {y_axis}")
     list_widget.setCurrentRow(0)
 
-    # Update alias edit and color combo via the instance variables
-    window.alias_edit.setText("NewAlias")
-    window.color_combo.setCurrentIndex(1)  # Red
-    window.width_combo.setCurrentIndex(2)  # 3
+    # Create a mock dialog to hold widgets (edit_trace_properties stores
+    # widgets on the dialog, not on self, to avoid stale refs after close).
+    from PyQt6.QtWidgets import QLineEdit, QComboBox, QDialog
+    mock_dialog = QDialog()
+    mock_dialog.alias_edit = QLineEdit()
+    mock_dialog.color_combo = QComboBox()
+    mock_dialog.width_combo = QComboBox()
+    mock_dialog.height_combo = QComboBox()
+    # Populate color combo
+    colors = [
+        ("Default (auto)", None),
+        ("Red", (255, 0, 0)),
+        ("Green", (0, 255, 0)),
+        ("Blue", (0, 0, 255)),
+        ("Yellow", (255, 255, 0)),
+        ("Magenta", (255, 0, 255)),
+        ("Cyan", (0, 255, 255)),
+        ("Orange", (255, 165, 0)),
+        ("Purple", (128, 0, 128)),
+        ("Brown", (165, 42, 42))
+    ]
+    for color_name, color_value in colors:
+        mock_dialog.color_combo.addItem(color_name, color_value)
+    widths = [1, 2, 3, 4, 5]
+    for width in widths:
+        mock_dialog.width_combo.addItem(str(width), width)
+
+    mock_dialog.alias_edit.setText("NewAlias")
+    mock_dialog.color_combo.setCurrentIndex(1)  # Red
+    mock_dialog.width_combo.setCurrentIndex(2)  # 3
 
     # Call apply method
-    window._apply_trace_properties(0, list_widget)
+    window._apply_trace_properties(0, list_widget, mock_dialog)
 
     # Check updates
     new_var, new_plot_item, new_y_axis = window.trace_manager.traces[0]

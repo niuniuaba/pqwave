@@ -12,7 +12,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtCore
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QColorDialog, QMessageBox
+from PyQt6.QtWidgets import QMessageBox
 from typing import Optional, List, Tuple
 
 from pqwave.ui.trace_analysis_dialog import TraceAnalysisDialog
@@ -21,11 +21,21 @@ from pqwave.models.state import ApplicationState
 from pqwave.models.trace import Trace, AxisAssignment
 from pqwave.models.expression import ExprEvaluator
 from pqwave.utils.colors import ColorManager
+from pqwave.digital.digital_renderer import threshold_and_step
+from pqwave.digital.threshold_config import ThresholdConfig
+from pqwave.digital.trace_type_manager import TraceTypeManager
+from pqwave.digital.vcd_time_aligner import align_vcd_to_raw, vcd_to_step_arrays, vcd_to_uniform_grid
+from pqwave.digital.threshold_dialog import ThresholdDialog
 from pqwave.logging_config import get_logger
 
 # Pre-downsample target: 2x typical screen width.  This gives good visual
 # quality for moderate zoom-in while keeping per-paint overhead low.
 DOWNSAMPLE_TARGET = 1600
+
+# Rendering constants for bus trace visualisation
+BUS_BASE_OFFSET = 0.5     # base Y level for bus centre line (relative to y_off)
+BUS_RAIL_GAP = 0.25       # vertical gap from centre to each rail
+BUS_TW_FRACTION = 200.0   # transition width = total_time_span / this
 
 
 from pyqtgraph.graphicsItems.LegendItem import ItemSample
@@ -101,6 +111,7 @@ class TraceManager:
                  plot_widget: pg.PlotWidget,
                  legend: pg.LegendItem,
                  application_state: ApplicationState,
+                 panel_id: str = '',
                  color_manager: Optional[ColorManager] = None):
         """
         Initialize TraceManager.
@@ -109,11 +120,17 @@ class TraceManager:
             plot_widget: The PlotWidget instance for visual representation
             legend: The LegendItem for trace labels
             application_state: ApplicationState singleton for data management
+            panel_id: ID of the panel this TraceManager belongs to
             color_manager: ColorManager instance for color assignment (creates default if None)
         """
         self.plot_widget = plot_widget
         self.legend = legend
         self.state = application_state
+        self._panel_id = panel_id
+        if not panel_id:
+            self.logger.warning(
+                "TraceManager created without panel_id — "
+                "trace operations will be no-ops")
         self.color_manager = color_manager or ColorManager()
 
         # References to plot components for Y2 axis
@@ -123,6 +140,7 @@ class TraceManager:
         # Internal state
         self.traces: List[Tuple[str, pg.PlotCurveItem, str]] = []  # (var, plot_item, y_axis)
         self.raw_file = None
+        self.vcd_file = None  # Optional VcdFile for mixed-signal overlay
         self.current_dataset = 0
 
         # Log mode flags (should be synchronized with axis configuration)
@@ -133,15 +151,33 @@ class TraceManager:
         # Re-entrancy guard for update_traces_for_log_mode
         self._updating_log_mode = False
 
+        # Digital signal type manager (handles analog↔digital toggle, bus grouping)
+        self.type_manager = TraceTypeManager(
+            on_recreate=self.recreate_trace_plot_item)
 
         # Connect legend click signal for trace selection
         self.legend.sigSampleClicked.connect(self._on_legend_sample_clicked)
+
+    @property
+    def _state_traces(self) -> List[Trace]:
+        """Return traces belonging to this TraceManager's panel.
+
+        Unlike ApplicationState.traces (which routes through the active panel),
+        this always returns the trace list for the panel this manager was
+        created for, eliminating cross-panel data corruption.
+        """
+        panel = self.state.panels.get(self._panel_id) if self._panel_id else None
+        return panel.traces if panel else []
 
     # Public API
 
     def set_raw_file(self, raw_file) -> None:
         """Set the current raw file for trace evaluation."""
         self.raw_file = raw_file
+
+    def set_vcd_file(self, vcd_file) -> None:
+        """Set an optional VCD file for mixed-signal overlay."""
+        self.vcd_file = vcd_file
 
     def set_current_dataset(self, dataset_idx: int) -> None:
         """Set the current dataset index."""
@@ -176,16 +212,40 @@ class TraceManager:
         if error_out is not None:
             error_out.clear()
 
-        if not self.raw_file:
-            error_msg = "No raw file opened"
+        expr = expression.strip()
+        if not expr:
+            error_msg = "Empty expression"
             self.logger.warning(error_msg)
             if error_out is not None:
                 error_out.append(error_msg)
             return None
 
-        expr = expression.strip()
-        if not expr:
-            error_msg = "Empty expression"
+        # VCD-only mode: no raw file, only VCD signals available
+        if self.raw_file is None and self.vcd_file is not None:
+            try:
+                variables = self.split_expressions(expr)
+            except Exception:
+                self.logger.exception(f"Failed to split expression: {expr}")
+                if error_out is not None:
+                    error_out.append(f"Failed to parse expression: {expr}")
+                return None
+            existing = {v for v, _, _ in self.traces}
+            traces_added = []
+            for var in variables:
+                if var in existing:
+                    self.logger.info(f"Skipping duplicate VCD trace: {var}")
+                    continue
+                t = self._add_vcd_trace(var, AxisAssignment.Y1, custom_color, error_out)
+                if t is not None:
+                    traces_added.append(t)
+            if traces_added:
+                return traces_added[0]
+            if error_out is not None and not error_out:
+                error_out.append(f"VCD signal not found: {expr}")
+            return None
+
+        if not self.raw_file:
+            error_msg = "No raw file opened"
             self.logger.warning(error_msg)
             if error_out is not None:
                 error_out.append(error_msg)
@@ -236,10 +296,26 @@ class TraceManager:
                 _fft_db_axes: set[str] = set()
 
                 for var in variables:
-                    evaluator = ExprEvaluator(self.raw_file, self.current_dataset)
-                    self.logger.debug(f"Created evaluator for {var}")
+                    # Check if this is a VCD signal (mixed-signal overlay or VCD-only)
+                    vcd_sig = None
+                    if self.vcd_file and not self._is_fft_expression(var):
+                        vcd_sig = self._resolve_vcd_signal(var)
 
-                    y_data = evaluator.evaluate(var)
+                    if vcd_sig is not None:
+                        y_axis = AxisAssignment.Y1  # digital traces always Y1
+                        vcd_t, vcd_v = vcd_sig.to_arrays(
+                            self.vcd_file.timescale)
+                        _vcd_event_times = vcd_t.copy()
+                        _vcd_event_values = vcd_v.copy()
+                        if self.raw_file and x_data is not None:
+                            y_data = align_vcd_to_raw(x_data, vcd_t, vcd_v)
+                        else:
+                            trace_x_data, y_data = vcd_to_uniform_grid(vcd_t, vcd_v)
+                    else:
+                        evaluator = ExprEvaluator(self.raw_file, self.current_dataset)
+                        self.logger.debug(f"Created evaluator for {var}")
+
+                        y_data = evaluator.evaluate(var)
                     self.logger.debug(f"Evaluated expression {var}, result length: {len(y_data)}")
 
                     trace_x_data = x_data
@@ -250,6 +326,7 @@ class TraceManager:
                         cfg = self.state.fft_config
                         fft_repr = cfg.representation
 
+                        _x, _y = x_data, y_data  # default: full range
                         if cfg.x_range_mode == "current zoom":
                             vb = self.plot_widget.plotItem.vb
                             xmin, xmax = vb.viewRange()[0]
@@ -257,17 +334,17 @@ class TraceManager:
                             # [0,1]), fall back to full range to avoid silently
                             # clipping all data.
                             if xmin == 0.0 and xmax == 1.0 and not self.traces:
-                                pass  # fall through to "full" behavior
+                                pass  # use full-range defaults
                             else:
                                 if self.x_log:
                                     xmin, xmax = 10.0 ** xmin, 10.0 ** xmax
                                 mask = (x_data >= xmin) & (x_data <= xmax)
                                 if mask.any():
-                                    x_data = x_data[mask]
-                                    y_data = y_data[mask]
+                                    _x = x_data[mask]
+                                    _y = y_data[mask]
 
                         trace_x_data, y_data = compute_fft(
-                            x_data, y_data,
+                            _x, _y,
                             window=cfg.window,
                             fft_size=cfg.fft_size,
                             dc_removal=cfg.dc_removal,
@@ -309,6 +386,11 @@ class TraceManager:
                         dataset_idx=self.current_dataset
                     )
 
+                    if vcd_sig is not None:
+                        trace.trace_type = 'digital'
+                        trace.metadata['vcd_times'] = _vcd_event_times
+                        trace.metadata['vcd_values'] = _vcd_event_values
+
                     # Add trace to application state
                     self.state.add_trace(trace)
 
@@ -340,6 +422,9 @@ class TraceManager:
                 # Also auto-range X axis to match the new data
                 self._auto_range_x()
 
+                # Update Y tick visibility for digital panels
+                self._update_y_tick_visibility()
+
                 # Clear the trace expression input box (should be done by caller)
                 # Return the first trace if any were added
                 if traces_added:
@@ -366,6 +451,91 @@ class TraceManager:
             if error_out is not None:
                 error_out.append(error_msg)
             return None
+
+    def _resolve_vcd_signal(self, expr: str):
+        """Look up a VCD signal by name, with scope-prefix fallback.
+
+        Returns the VCD signal object or None.
+        """
+        stripped = expr.strip('"').strip("'")
+        sig = self.vcd_file.get_signal(stripped)
+        if sig is None:
+            for name in self.vcd_file.get_signal_names():
+                if name.endswith('.' + stripped) or name == stripped:
+                    sig = self.vcd_file.get_signal(name)
+                    break
+        return sig
+
+    def _add_vcd_trace(self, expr: str, y_axis: AxisAssignment,
+                       custom_color=None, error_out=None) -> Optional[Trace]:
+        """Add a trace from a VCD signal (VCD-only mode, no raw file)."""
+        vcd_sig = self._resolve_vcd_signal(expr)
+        if vcd_sig is None:
+            msg = f"VCD signal not found: {expr}"
+            self.logger.warning(msg)
+            if error_out is not None:
+                error_out.append(msg)
+            return None
+        stripped = expr.strip('"').strip("'")
+
+        vcd_t, vcd_v = vcd_sig.to_arrays(self.vcd_file.timescale)
+        _vcd_event_times = vcd_t.copy()
+        _vcd_event_values = vcd_v.copy()
+        if len(vcd_t) == 0 or len(vcd_v) == 0:
+            # Signal never changed — create a flat constant-unknown trace
+            t_max = max(1e-9, self.vcd_file.timescale * 1000)
+            for sig in self.vcd_file.signals.values():
+                if sig.times:
+                    t_max = max(t_max, max(sig.times) * self.vcd_file.timescale)
+            trace_x_data = np.array([0.0, t_max], dtype=np.float64)
+            y_data = np.array([-0.5, -0.5], dtype=np.float64)
+            _vcd_event_times = trace_x_data
+            _vcd_event_values = y_data
+            self.logger.info(f"VCD signal has no events, showing as constant: {stripped}")
+        else:
+            trace_x_data, y_data = vcd_to_step_arrays(vcd_t, vcd_v)
+            # Extend the last value to the VCD file's global max time so
+            # the trace doesn't end at the signal's last event time.
+            vcd_max = self.vcd_file.get_max_time()
+            if vcd_max > vcd_t[-1]:
+                trace_x_data = np.append(trace_x_data, vcd_max)
+                y_data = np.append(y_data, vcd_v[-1])
+                _vcd_event_times = np.append(_vcd_event_times, vcd_max)
+                _vcd_event_values = np.append(_vcd_event_values, vcd_v[-1])
+        if len(trace_x_data) == 0:
+            msg = f"Failed to grid VCD data: {stripped}"
+            self.logger.warning(msg)
+            if error_out is not None:
+                error_out.append(msg)
+            return None
+
+        color = custom_color or self.color_manager.get_next_color()
+        trace = Trace(
+            name=stripped, expression=stripped,
+            x_data=trace_x_data, y_data=y_data,
+            y_axis=y_axis, color=color, line_width=1.0,
+            dataset_idx=0,
+        )
+        if vcd_sig.width > 1:
+            trace.trace_type = 'bus'
+            trace.metadata['bus_width'] = vcd_sig.width
+            trace.metadata['bus_display_format'] = 'hex'
+        else:
+            trace.trace_type = 'digital'
+        trace.metadata.setdefault('digital_height', 1.0)
+        # Store VCD event data for accurate step rendering
+        trace.metadata['vcd_times'] = _vcd_event_times
+        trace.metadata['vcd_values'] = _vcd_event_values
+
+        self.state.add_trace(trace)
+        plot_item = self._create_plot_item(trace)
+        self.traces.append((stripped, plot_item, y_axis.value))
+        self._refresh_legend()
+        self._auto_range_y_axis(y_axis)
+        self._auto_range_x()
+        self.logger.info(f"Added VCD trace: {stripped} on {y_axis.value}")
+        self._update_y_tick_visibility()
+        return trace
 
     def add_trace_from_variable(self,
                                 variable_name: str,
@@ -399,43 +569,51 @@ class TraceManager:
         self.legend.clear()
         for i, (var, plot_item, y_axis) in enumerate(self.traces):
             legend_name = f"{var} @ {y_axis}"
+            if i < len(self._state_traces):
+                tt = self._state_traces[i].trace_type
+                if tt == 'digital':
+                    legend_name = f"{var} [D] @ {y_axis}"
+                elif tt == 'bus':
+                    t = self._state_traces[i]
+                    n_bits = t.metadata.get('bus_width', len(t.bus_signals or []))
+                    legend_name = f"{var} [BUS:{n_bits}] @ {y_axis}"
             sample = self.legend.addItem(plot_item, legend_name)
-            if isinstance(sample, SelectableItemSample):
-                try:
-                    sample.sigRightClicked.disconnect()
-                except Exception:
-                    pass
-                sample.sigRightClicked.connect(self._on_legend_sample_right_clicked)
-
-                # Also intercept right-click on the text label (LabelItem),
-                # which is a separate GraphicsWidget that pyqtgraph places next
-                # to the color-patch sample.  Without this, right-clicks on
-                # the legend text do nothing.
-                label = self.legend.getLabel(plot_item)
-                if label is not None:
-                    _orig_label_press = label.mousePressEvent
-                    def _label_press(ev, s=sample, orig=_orig_label_press):
-                        if ev.button() == QtCore.Qt.MouseButton.RightButton:
-                            ev.accept()
-                            s.sigRightClicked.emit(s.item)
-                        else:
-                            try:
-                                orig(ev)
-                            except RuntimeError:
-                                pass
-                    label.mousePressEvent = _label_press
             # Apply bold styling to selected traces
-            if i < len(self.state.traces) and self.state.traces[i].selected:
+            if i < len(self._state_traces) and self._state_traces[i].selected:
                 label = self.legend.getLabel(plot_item)
                 if label is not None:
                     label.setText(legend_name, bold=True)
+
+    def _update_y_tick_visibility(self) -> None:
+        """Hide Y tick labels when all traces are digital, show otherwise.
+
+        Digital traces carry no physical unit — showing numeric tick values
+        (-1, 0, 1, ...) confuses users.  Analog traces (or digital traces
+        viewed in analog mode) restore normal tick display.
+        """
+        traces = self._state_traces
+        all_digital = (
+            len(traces) > 0
+            and all(t.trace_type in ('digital', 'bus') for t in traces)
+        )
+
+        for orientation in ('left', 'right'):
+            axis = self.plot_widget.plotItem.getAxis(orientation)
+            if hasattr(axis, 'setHideTickLabels'):
+                axis.setHideTickLabels(all_digital)
 
     def clear_traces(self) -> None:
         """Clear all traces from plot and application state."""
         self.logger.debug(f"clear_traces called, current traces count: {len(self.traces)}")
         # import traceback
         # traceback.print_stack()  # Debug statement removed for test stability
-        # Clear traces from viewboxes
+        # Clear traces from viewboxes (including bus bottom lines)
+        for t in self._state_traces:
+            bot = t.metadata.pop('_bus_bot_item', None)
+            if bot is not None:
+                vb = bot.getViewBox()
+                if vb is not None:
+                    vb.removeItem(bot)
         for _, plot_item, y_axis in self.traces:
             if y_axis == "Y2" and self.y2_viewbox:
                 self.y2_viewbox.removeItem(plot_item)
@@ -463,6 +641,9 @@ class TraceManager:
         # Reset color manager
         self.color_manager.reset()
 
+        # Remove phantom digital Y bounds
+        self._remove_digital_y1_bounds()
+
         # Clear traces from application state
         self.state.clear_traces()
 
@@ -482,14 +663,18 @@ class TraceManager:
             # Remove y2_viewbox from scene
             try:
                 self.plot_widget.scene().removeItem(self.y2_viewbox)
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to remove y2_viewbox from scene: %s", e)
             self.y2_viewbox = None
 
         # Reset log mode flags for fresh start
         self.x_log = False
         self.y1_log = False
         self.y2_log = False
+
+        # Restore Y tick visibility (no traces → show ticks)
+        self._update_y_tick_visibility()
 
     # --- Trace selection ---
 
@@ -508,7 +693,7 @@ class TraceManager:
         modifiers = QApplication.keyboardModifiers()
         ctrl_held = bool(modifiers & QtCore.Qt.KeyboardModifier.ControlModifier)
 
-        trace = self.state.traces[idx] if idx < len(self.state.traces) else None
+        trace = self._state_traces[idx] if idx < len(self._state_traces) else None
         if trace is None:
             return
 
@@ -520,6 +705,10 @@ class TraceManager:
             if trace.selected and self._selected_count() == 1:
                 trace.visible = not trace.visible
                 plot_item.setVisible(trace.visible)
+                # Toggle bus bottom line if present
+                bot = trace.metadata.get('_bus_bot_item')
+                if bot is not None:
+                    bot.setVisible(trace.visible)
                 self._refresh_legend()
                 return
             # Single-select: deselect all, select this one
@@ -528,38 +717,62 @@ class TraceManager:
 
         self._refresh_legend()
 
-    def _on_legend_sample_right_clicked(self, plot_item) -> None:
-        """Handle right click on a legend item sample — change trace color."""
-        idx = self._find_trace_index(plot_item)
-        if idx is None or idx >= len(self.state.traces):
-            return
+    # --- Keybinding-accessible operations (no right-click menu) ---
 
-        trace = self.state.traces[idx]
-        old_color = QColor(*trace.color)
-        new_color = QColorDialog.getColor(old_color)
-        if not new_color.isValid():
-            return
+    def toggle_trace_type(self) -> None:
+        """Toggle selected traces between analog and digital."""
+        for idx, trace in self.get_selected_traces():
+            self.type_manager.toggle(trace, idx)
 
-        rgb = (new_color.red(), new_color.green(), new_color.blue())
-        self.color_manager.release_color(trace.color)
-        self.color_manager.mark_color_used(rgb)
-        trace.color = rgb
-        plot_item.setPen(pg.mkPen(color=rgb, width=1))
+    def group_selected_as_bus(self) -> None:
+        """Create a bus from selected digital traces."""
+        selected = self.get_selected_traces()
+        digital_traces = [(i, t) for i, t in selected if t.trace_type == 'digital']
+        if len(digital_traces) < 2:
+            return
+        name = f"bus{len(self.traces)}"
+        traces_for_bus = [t for _, t in digital_traces]
+        indices = [i for i, _ in digital_traces]
+        bus_trace = self.type_manager.group_as_bus(traces_for_bus, name, indices)
+        if bus_trace is None:
+            return
+        self.state.add_trace(bus_trace)
+        plot_item = self._create_plot_item(bus_trace)
+        self.traces.append((name, plot_item, bus_trace.y_axis.value))
+        # Hide member traces from view and legend
+        for i, t in digital_traces:
+            t.visible = False
+            t.metadata['_bus_member_hidden'] = True
+            if i < len(self.traces):
+                _, pi, _ = self.traces[i]
+                pi.setVisible(False)
         self._refresh_legend()
+        self._auto_range_y_axis(bus_trace.y_axis)
+        self._auto_range_x()
+        self._update_y_tick_visibility()
+
+    def show_threshold_dialog(self) -> None:
+        """Open threshold settings for the first selected digital trace."""
+        for idx, trace in self.get_selected_traces():
+            if trace.trace_type == 'digital':
+                dlg = ThresholdDialog(trace, self.plot_widget)
+                if dlg.exec():
+                    self.recreate_trace_plot_item(idx)
+                break
 
     def select_trace(self, idx: int) -> None:
         """Select the trace at *idx* and deselect all others."""
-        for i, trace in enumerate(self.state.traces):
+        for i, trace in enumerate(self._state_traces):
             trace.selected = (i == idx)
 
     def deselect_all(self) -> None:
         """Deselect all traces."""
-        for trace in self.state.traces:
+        for trace in self._state_traces:
             trace.selected = False
 
     def get_selected_traces(self) -> list[tuple[int, Trace]]:
         """Return (index, Trace) pairs for all selected traces."""
-        return [(i, t) for i, t in enumerate(self.state.traces) if t.selected]
+        return [(i, t) for i, t in enumerate(self._state_traces) if t.selected]
 
     def _show_stats_for_traces(self, targets: list[tuple[int, Trace]]) -> None:
         """Compute visible-range statistics for *targets* and show the dialog."""
@@ -636,7 +849,7 @@ class TraceManager:
 
     def _selected_count(self) -> int:
         """Return the number of selected traces."""
-        return sum(1 for t in self.state.traces if t.selected)
+        return sum(1 for t in self._state_traces if t.selected)
 
     def remove_trace_by_variable_name(self, variable_name: str) -> bool:
         """Remove a trace by variable name (unquoted or quoted).
@@ -683,16 +896,29 @@ class TraceManager:
         else:
             self.plot_widget.plotItem.vb.removeItem(plot_item)
 
+        # Remove bus bottom line if present (match by name, not index —
+        # self.traces and self._state_traces may diverge after bus grouping).
+        bot = None
+        for t in self._state_traces:
+            if t.name == var:
+                bot = t.metadata.get('_bus_bot_item')
+                break
+        if bot is not None:
+            vb = bot.getViewBox()
+            if vb is not None:
+                vb.removeItem(bot)
+
         # Remove from internal list (before refreshing legend)
         self.traces.pop(found_index)
 
         # Refresh legend to reflect removal
         self._refresh_legend()
+        self._update_y_tick_visibility()
 
         # Remove from application state
         # Find corresponding trace in state.traces
         state_trace_idx = -1
-        for i, trace in enumerate(self.state.traces):
+        for i, trace in enumerate(self._state_traces):
             # Compare trace name (expression) with var
             if trace.name == var:
                 state_trace_idx = i
@@ -715,6 +941,8 @@ class TraceManager:
         # Could implement color_manager.release_color(color) if needed.
 
         self.logger.info(f"Removed trace for variable '{variable_name}'")
+        self._auto_range_y_axis(AxisAssignment.Y1)
+        self._auto_range_x()
         return True
 
     def update_traces_for_log_mode(self) -> None:
@@ -731,11 +959,11 @@ class TraceManager:
             if not self.traces:
                 return
 
-            state_traces = self.state.traces
+            state_traces = self._state_traces
             for i, (var, plot_item, y_axis) in enumerate(self.traces):
                 y_log = self.y1_log if y_axis == "Y1" else self.y2_log
 
-                # Find matching trace by expression — self.state.traces is a
+                # Find matching trace by expression — self._state_traces is a
                 # global list shared across all panels, so indexed lookup
                 # (state_traces[i]) is WRONG when multiple panels exist.
                 # Match by expression instead.
@@ -743,40 +971,17 @@ class TraceManager:
                 if trace is not None:
                     x_orig = trace.x_data
                     y_orig = trace.y_data
+                    is_fft = self._is_fft_expression(trace.expression)
                 else:
                     # Fallback: use whatever is in the curve item
                     x_orig, y_orig = plot_item.getData()
                     if x_orig is None or y_orig is None:
                         continue
+                    is_fft = self._is_fft_expression(var)
 
-                # Apply log10 transform to original data, filtering non-positive
-                # values that can't be represented on a log scale.
-                if self.x_log:
-                    x_mask = x_orig > 0
-                    if x_mask.any():
-                        x = np.log10(x_orig[x_mask])
-                        y_orig = y_orig[x_mask]
-                    else:
-                        x = np.array([0.0])
-                        y_orig = np.array([0.0])
-                else:
-                    x = x_orig.copy()
-                # FFT traces in dB representation are already logarithmic;
-                # applying log10 would double-transform and filter out all
-                # negative dB values.
-                is_fft = self._is_fft_expression(trace.expression)
-                if y_log and not is_fft:
-                    y_mask = y_orig > 0
-                    if y_mask.any():
-                        y = np.log10(y_orig[y_mask])
-                        if self.x_log:
-                            x = x[y_mask]
-                    else:
-                        y = np.array([0.0])
-                        if self.x_log:
-                            x = np.array([0.0])
-                else:
-                    y = y_orig.copy()
+                x, y = self._apply_log10_if_needed(
+                    x_orig, y_orig, self.x_log, y_log, is_fft
+                )
 
                 # Re-downsample the transformed data
                 x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
@@ -805,7 +1010,7 @@ class TraceManager:
         if np.iscomplexobj(new_x_data) and np.all(new_x_data.imag == 0):
             new_x_data = new_x_data.real
 
-        state_traces = self.state.traces
+        state_traces = self._state_traces
         updated_count = 0
         for var, plot_item, y_axis in self.traces:
             y_log = self.y1_log if y_axis == "Y1" else self.y2_log
@@ -828,32 +1033,10 @@ class TraceManager:
                 continue
             trace.x_data = new_x_data.copy()
 
-            # Apply log10 transform if the axis is in log mode, filtering
-            # non-positive values that can't be represented on a log scale.
-            if self.x_log:
-                x_mask = new_x_data > 0
-                if x_mask.any():
-                    x = np.log10(new_x_data[x_mask])
-                    y_data = trace.y_data[x_mask]
-                else:
-                    x = np.array([0.0])
-                    y_data = np.array([0.0])
-            else:
-                x = new_x_data.copy()
-                y_data = trace.y_data.copy()
             is_fft = self._is_fft_expression(trace.expression)
-            if y_log and not is_fft:
-                y_mask = y_data > 0
-                if y_mask.any():
-                    y = np.log10(y_data[y_mask])
-                    if self.x_log:
-                        x = x[y_mask]
-                else:
-                    y = np.array([0.0])
-                    if self.x_log:
-                        x = np.array([0.0])
-            else:
-                y = y_data
+            x, y = self._apply_log10_if_needed(
+                new_x_data, trace.y_data, self.x_log, y_log, is_fft
+            )
 
             # Downsample and update the plot item
             x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
@@ -880,7 +1063,7 @@ class TraceManager:
         if not self.traces or not self.legend:
             return
 
-        state_traces = self.state.traces
+        state_traces = self._state_traces
 
         for i, (var, plot_item, y_axis) in enumerate(self.traces):
             trace = state_traces[i] if i < len(state_traces) else None
@@ -952,49 +1135,303 @@ class TraceManager:
 
         return x_ds, y_ds
 
-    def _create_plot_item(self, trace: Trace) -> pg.PlotCurveItem:
-        """Create a PlotCurveItem for the trace with pre-downsampled data.
+    @staticmethod
+    def _apply_log10_if_needed(
+        x: np.ndarray, y: np.ndarray,
+        x_log: bool, y_log: bool,
+        is_fft: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Apply log10 transforms when the corresponding axis is in log mode.
 
-        Uses PlotCurveItem (not PlotDataItem) to eliminate per-paint overhead:
-        no autoDownsample rebuild, no dataBounds nanmin/max, no updateItems.
-        Downsampling runs once at creation time.
-
-        If the axis is already in log mode, data is log10-transformed before
-        plotting so that the log-scale axis receives correct exponent values.
+        Filters out non-positive values that can't be represented on a log
+        scale.  Used by all three code paths that apply log transforms
+        (trace creation, log-mode toggle, X-variable update).
         """
-        pen = pg.mkPen(color=trace.color, width=1)
-
-        x_data = trace.x_data
-        y_data = trace.y_data
-
-        # Apply log10 transform if the corresponding axis is in log mode.
-        # Filter non-positive values (e.g. DC bin at 0 Hz in FFT, t=0 in
-        # transient) that can't be represented on a log scale. The 1e-300
-        # fallback used previously corrupted auto-range when x_data[0] == 0.
-        if self.x_log:
-            x_mask = x_data > 0
+        if x_log:
+            x_mask = x > 0
             if x_mask.any():
-                x = np.log10(x_data[x_mask])
-                y_data = y_data[x_mask]
+                x = np.log10(x[x_mask])
+                y = y[x_mask]
             else:
-                x = np.array([0.0])
-                y_data = np.array([0.0])
-        else:
-            x = x_data
-        y_log = self.y1_log if trace.y_axis == AxisAssignment.Y1 else self.y2_log
-        is_fft = self._is_fft_expression(trace.expression)
+                return np.array([0.0]), np.array([0.0])
+
         if y_log and not is_fft:
-            y_mask = y_data > 0
+            y_mask = y > 0
             if y_mask.any():
-                y = np.log10(y_data[y_mask])
-                if self.x_log:
+                y = np.log10(y[y_mask])
+                if x_log:
                     x = x[y_mask]
             else:
                 y = np.array([0.0])
-                if self.x_log:
+                if x_log:
                     x = np.array([0.0])
+
+        return x, y
+
+    def _create_plot_item(self, trace: Trace) -> pg.PlotCurveItem:
+        """Create a graphics item for the trace.
+
+        Dispatches to the analog or digital rendering path based on
+        trace.trace_type.  Analog traces use _StaticCurveItem (PlotCurveItem
+        subclass with cached bounds).  Digital traces use _StaticCurveItem
+        with stepMode='center' for step-function rendering.
+        """
+        if trace.trace_type in ('digital', 'bus'):
+            return self._create_digital_plot_item(trace)
+        return self._create_analog_plot_item(trace)
+
+    def _create_digital_plot_item(self, trace: Trace) -> pg.PlotCurveItem:
+        """Create a step-mode PlotCurveItem for a digital or bus trace.
+
+        Uses pyqtgraph's native stepMode='center' which draws each y[i]
+        from x[i] to x[i+1].  VCD event data (stored in trace metadata)
+        yields the most accurate step rendering; uniform-grid data falls
+        back to midpoint boundaries.
+        """
+        # Compute Y stacking offset from previous traces' actual slot heights.
+        # Only count traces assigned to the same Y axis to avoid cross-axis
+        # contamination when digital/bus traces are split across Y1 and Y2.
+        trace_height = trace.metadata.get('digital_height', 1.0)
+        target_axis = trace.y_axis
+        y_off = 0.0
+        for t in self._state_traces:
+            if t is trace:
+                break
+            if t.trace_type in ('digital', 'bus') and t.y_axis == target_axis:
+                h = t.metadata.get('digital_height', 1.0)
+                y_off += h * 2.0 + 0.3  # digital values span [-1,1] → range 2
+
+        if trace.trace_type == 'bus':
+            return self._create_bus_plot_item(trace, y_off)
+
+        # Prefer raw VCD event data for accurate transition placement
+        vcd_t = trace.metadata.get('vcd_times')
+        vcd_v = trace.metadata.get('vcd_values')
+        if vcd_t is not None and vcd_v is not None and len(vcd_t) >= 2:
+            t_arr = np.asarray(vcd_t, dtype=np.float64)
+            v_arr = np.asarray(vcd_v, dtype=np.float64)
+            # Extend by one boundary so stepMode covers the final segment
+            dt = t_arr[-1] - t_arr[-2] if len(t_arr) >= 2 else t_arr[-1] * 0.1 or 1e-9
+            x_bounds = np.append(t_arr, t_arr[-1] + dt)
+            y_vals = v_arr
         else:
-            y = y_data
+            x = np.asarray(trace.x_data, dtype=np.float64)
+            y = np.asarray(trace.y_data, dtype=np.float64)
+            if len(x) == 0:
+                return _StaticCurveItem([], [], pen=pg.mkPen(color=trace.color, width=1))
+            if len(x) >= 2:
+                x_bounds = np.empty(len(x) + 1, dtype=np.float64)
+                x_bounds[0] = x[0] - (x[1] - x[0]) / 2.0
+                x_bounds[1:-1] = (x[:-1] + x[1:]) / 2.0
+                x_bounds[-1] = x[-1] + (x[-1] - x[-2]) / 2.0
+            else:
+                x_bounds = np.array([x[0], x[0] + 1e-9], dtype=np.float64)
+            y_vals = y
+
+        y_vals = y_vals * trace_height + y_off
+
+        pen = pg.mkPen(color=trace.color, width=1)
+        plot_item = _StaticCurveItem(x_bounds, y_vals, pen=pen, stepMode='center')
+        self._add_to_viewbox(plot_item, trace.y_axis)
+        self.logger.debug(
+            f"_create_digital_plot_item: stepMode plot, "
+            f"n_bounds={len(x_bounds)}, n_vals={len(y_vals)}, "
+            f"x_range=[{x_bounds[0]:.6g}, {x_bounds[-1]:.6g}], "
+            f"y_range=[{y_vals.min():.6g}, {y_vals.max():.6g}], "
+            f"y_off={y_off:.3f}"
+        )
+        return plot_item
+
+    def _create_bus_plot_item(self, trace: Trace,
+                              y_off: float = 0.0) -> pg.PlotCurveItem:
+        """Create a bus trace: two parallel lines that cross at value
+        transitions, with hex/bin labels placed between them.
+
+        At each transition the two lines swap levels through diagonal
+        segments, forming a visible X pattern (like xschem/surfer).
+        """
+        from PyQt6.QtGui import QColor
+
+        y = np.nan_to_num(np.asarray(trace.y_data, dtype=np.float64), nan=0)
+        x = trace.x_data
+        n = len(y)
+
+        scale = trace.metadata.get('digital_height', 1.0)
+        base_level = BUS_BASE_OFFSET * scale + y_off
+        gap = BUS_RAIL_GAP * scale
+        high = base_level + gap
+        low  = base_level - gap
+
+        if n >= 2:
+            total_span = float(x[-1]) - float(x[0])
+            tw = max(total_span / BUS_TW_FRACTION, 1e-12)
+        else:
+            tw = 1e-9
+
+        # Collect transition times first so we can start / end at the
+        # first / last crossing instead of the full data range.
+        transitions = []
+        prev_val = int(y[0]) if n > 0 else 0
+        for i in range(1, n):
+            curr_val = int(y[i])
+            if curr_val != prev_val:
+                transitions.append(float(x[i]))
+                prev_val = curr_val
+
+        top_t = []
+        top_v = []
+        bot_t = []
+        bot_v = []
+
+        if len(transitions) == 0:
+            top_t = [float(x[0]), float(x[-1])]
+            top_v = [high, high]
+            bot_t = [float(x[0]), float(x[-1])]
+            bot_v = [low, low]
+        elif len(transitions) == 1:
+            tx = transitions[0]
+            # Pre-transition segment + right half of crossing + flat to end
+            top_t = [float(x[0]), tx, tx + tw, x[-1]]
+            top_v = [base_level, base_level, low, low]
+            bot_t = [float(x[0]), tx, tx + tw, x[-1]]
+            bot_v = [base_level, base_level, high, high]
+        else:
+            first_tx = transitions[0]
+            last_tx  = transitions[-1]
+            # Start at centre of first crossing (matches surfer)
+            top_t.append(first_tx)
+            top_v.append(base_level)
+            bot_t.append(first_tx)
+            bot_v.append(base_level)
+
+            for k, tx in enumerate(transitions):
+                is_first = (k == 0)
+                is_last  = (k == len(transitions) - 1)
+                if is_first:
+                    # Right half only: centre → tw → new level
+                    top_t.extend([tx + tw])
+                    top_v.extend([low])
+                    bot_t.extend([tx + tw])
+                    bot_v.extend([high])
+                elif is_last:
+                    # Full crossing + flat segment + sharp closure at endpoint
+                    tx_end = tx + tw
+                    if x[-1] > tx_end + tw:
+                        # Enough room: flat to near-end, then close
+                        close_start = x[-1] - tw
+                        top_t.extend([tx - tw, tx, tx_end, close_start, x[-1]])
+                        top_v.extend([high, base_level, low, low, base_level])
+                        bot_t.extend([tx - tw, tx, tx_end, close_start, x[-1]])
+                        bot_v.extend([low, base_level, high, high, base_level])
+                    else:
+                        top_t.extend([tx - tw, tx, tx_end, x[-1]])
+                        top_v.extend([high, base_level, low, base_level])
+                        bot_t.extend([tx - tw, tx, tx_end, x[-1]])
+                        bot_v.extend([low, base_level, high, base_level])
+                else:
+                    # Full crossing: left half + centre + right half
+                    top_t.extend([tx - tw, tx, tx + tw])
+                    top_v.extend([high, base_level, low])
+                    bot_t.extend([tx - tw, tx, tx + tw])
+                    bot_v.extend([low, base_level, high])
+                high, low = low, high
+
+        x_top = np.array(top_t, dtype=np.float64)
+        y_top = np.array(top_v, dtype=np.float64)
+        x_bot = np.array(bot_t, dtype=np.float64)
+        y_bot = np.array(bot_v, dtype=np.float64)
+
+        BUS_COLOR = (0, 180, 255)
+        pen = pg.mkPen(color=BUS_COLOR, width=1.0)
+        top_item = _StaticCurveItem(x_top, y_top, pen=pen, symbol=None,
+                                    skipFiniteCheck=True)
+        bot_item = _StaticCurveItem(x_bot, y_bot, pen=pen, symbol=None,
+                                    skipFiniteCheck=True)
+        self._add_to_viewbox(top_item, trace.y_axis)
+        self._add_to_viewbox(bot_item, trace.y_axis)
+
+        # Value labels at the centre of each flat segment
+        fmt = trace.metadata.get('bus_display_format', 'hex')
+        n_bits = trace.metadata.get('bus_width', len(trace.bus_signals or []))
+        prev_val = int(y[0]) if n > 0 else 0
+        label_times = [float(x[0])] if n > 0 else []
+        for i in range(1, n):
+            curr_val = int(y[i])
+            if curr_val != prev_val:
+                label_times.append(float(x[i]))
+                prev_val = curr_val
+
+        # Ensure the final segment gets a label.  For constant-value buses
+        # there are no transitions; show a single label at the midpoint.
+        if len(label_times) == 1 and n > 1:
+            label_times.append(float(x[-1]))
+        elif len(label_times) >= 1 and label_times[-1] < x[-1]:
+            label_times.append(float(x[-1]))
+
+        # Build label font from tick font config (match axis tick appearance)
+        from PyQt6.QtGui import QFont
+        label_font = QFont()
+        tf = self.state.tick_font
+        if tf.family:
+            label_font.setFamily(tf.family)
+        if tf.size > 0:
+            label_font.setPointSize(tf.size)
+
+        step = max(1, len(label_times) // 20)
+        for k in range(len(label_times) - 1):
+            if k % step != 0:
+                continue
+            t_mid = (label_times[k] + label_times[k + 1]) / 2.0
+            idx = int(np.searchsorted(x, t_mid))
+            if idx >= n:
+                idx = n - 1
+            val_at_t = int(y[idx])
+            if fmt == 'hex':
+                n_hex = (n_bits + 3) // 4 if n_bits else 2
+                label_text = f"0x{val_at_t:0{n_hex}X}"
+            elif fmt == 'bin':
+                w = n_bits if n_bits else 8
+                label_text = f"{val_at_t:0{w}b}"
+            else:
+                label_text = str(val_at_t)
+
+            text_item = pg.TextItem(label_text, color=QColor(200, 200, 200),
+                                    anchor=(0.5, 0.5))
+            text_item.setFont(label_font)
+            text_item.setPos(t_mid, base_level)
+            text_item.setParentItem(top_item)
+
+        trace.metadata['_bus_bot_item'] = bot_item
+        if not trace.visible:
+            top_item.setVisible(False)
+            bot_item.setVisible(False)
+        return top_item
+
+    def _add_to_viewbox(self, plot_item, y_axis: AxisAssignment) -> None:
+        """Add a plot item to the correct ViewBox."""
+        if y_axis == AxisAssignment.Y2:
+            self.ensure_y2_axis()
+            self.y2_viewbox.addItem(plot_item)
+            vb = self.y2_viewbox
+        else:
+            vb = self.plot_widget.plotItem.vb
+            vb.addItem(plot_item)
+        self.logger.debug(
+            f"_add_to_viewbox: added {type(plot_item).__name__} to "
+            f"{'Y2' if y_axis == AxisAssignment.Y2 else 'Y1'}, "
+            f"vb.addedItems count={len(vb.addedItems)}, "
+            f"vb.viewRange={vb.viewRange()}"
+        )
+
+    def _create_analog_plot_item(self, trace: Trace) -> pg.PlotCurveItem:
+        """Create a PlotCurveItem for the trace with pre-downsampled data."""
+        pen = pg.mkPen(color=trace.color, width=1)
+
+        y_log = self.y1_log if trace.y_axis == AxisAssignment.Y1 else self.y2_log
+        is_fft = self._is_fft_expression(trace.expression)
+        x, y = self._apply_log10_if_needed(
+            trace.x_data, trace.y_data, self.x_log, y_log, is_fft
+        )
 
         # Pre-downsample to fixed resolution
         x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
@@ -1007,16 +1444,64 @@ class TraceManager:
         # Uses drawLines() instead of drawPath().
         plot_item.setSegmentedLineMode('on')
 
-        if trace.y_axis == AxisAssignment.Y2:
-            # Ensure Y2 axis exists
-            self.ensure_y2_axis()
-            # Add to Y2 viewbox
-            self.y2_viewbox.addItem(plot_item)
-        else:
-            # Add to main viewbox (Y1)
-            self.plot_widget.plotItem.vb.addItem(plot_item)
+        self._add_to_viewbox(plot_item, trace.y_axis)
 
         return plot_item
+
+    def recreate_trace_plot_item(self, trace_idx: int) -> None:
+        """Recreate the plot item for a trace after type change.
+
+        Removes the old item from the ViewBox, creates a new one via
+        _create_plot_item dispatch, and refreshes the legend.
+        """
+        if trace_idx < 0 or trace_idx >= len(self.traces):
+            return
+        var, old_item, y_axis = self.traces[trace_idx]
+        vb = old_item.getViewBox()
+        if vb is not None:
+            vb.removeItem(old_item)
+        if old_item.scene() is not None:
+            old_item.scene().removeItem(old_item)
+
+        trace = next((t for t in self._state_traces if t.name == var), None)
+        if trace is None:
+            self.logger.warning(
+                f"recreate_trace_plot_item: trace '{var}' not found in state; "
+                "plot item was removed but not replaced.")
+            return
+        # Clean up old bus bottom rail if present
+        bot = trace.metadata.pop('_bus_bot_item', None)
+        if bot is not None:
+            vb = bot.getViewBox()
+            if vb is not None:
+                vb.removeItem(bot)
+        new_item = self._create_plot_item(trace)
+        self.traces[trace_idx] = (var, new_item, y_axis)
+        self._refresh_legend()
+        self._auto_range_y_axis(trace.y_axis)
+        self._auto_range_x()
+        self._update_y_tick_visibility()
+
+    def recreate_all_digital(self) -> None:
+        """Recreate all digital and bus trace plot items (e.g., after height change)."""
+        for i, (var, old_item, y_axis) in enumerate(self.traces):
+            t = next((s for s in self._state_traces if s.name == var), None)
+            if t is None or t.trace_type not in ('digital', 'bus'):
+                continue
+            vb = old_item.getViewBox()
+            if vb is not None:
+                vb.removeItem(old_item)
+            bot = t.metadata.pop('_bus_bot_item', None)
+            if bot is not None:
+                bvb = bot.getViewBox()
+                if bvb is not None:
+                    bvb.removeItem(bot)
+            new_item = self._create_plot_item(t)
+            self.traces[i] = (var, new_item, y_axis)
+        self._refresh_legend()
+        self._auto_range_y_axis(AxisAssignment.Y1)
+        self._auto_range_x()
+        self._update_y_tick_visibility()
 
     def _auto_range_y_axis(self, y_axis: AxisAssignment) -> None:
         """Auto-range the specified Y axis."""
@@ -1030,8 +1515,32 @@ class TraceManager:
         self.plot_widget.auto_range_axis('X')
 
     def _auto_range_y1(self) -> None:
-        """Auto-range Y1 axis."""
+        """Auto-range Y1 axis.
+
+        When all visible Y1 traces are digital/bus, places phantom boundary
+        markers so pyqtgraph's autoRange includes a fixed minimum viewport
+        height, preventing a single trace from filling the entire Y axis.
+        """
+        traces = self._state_traces
+        y1_traces = [t for t in traces
+                     if t.y_axis == AxisAssignment.Y1 and t.visible]
+        y1_digital = [t for t in y1_traces
+                      if t.trace_type in ('digital', 'bus')]
+        if y1_digital and all(t.trace_type in ('digital', 'bus')
+                               for t in y1_traces):
+            total_h = sum(t.metadata.get('digital_height', 1.0) * 2.0 + 0.3
+                          for t in y1_digital)
+            y_max = max(20.0, total_h)
+            self._set_digital_y1_bounds(-0.5, y_max)
+        else:
+            self._remove_digital_y1_bounds()
         self.plot_widget.auto_range_axis('Y1')
+
+    def _set_digital_y1_bounds(self, y_min: float, y_max: float) -> None:
+        self.plot_widget.set_digital_y1_bounds(y_min, y_max)
+
+    def _remove_digital_y1_bounds(self) -> None:
+        self.plot_widget.clear_digital_y1_bounds()
 
     def _auto_range_y2(self) -> None:
         """Auto-range Y2 axis."""

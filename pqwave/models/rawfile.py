@@ -173,6 +173,21 @@ def _parse_header_variables(raw_bytes: bytes):
     return variables, is_ac_or_complex
 
 
+def _is_utf16le(filepath: str) -> bool:
+    """Detect UTF-16 LE encoding via BOM or zero-byte pattern.
+
+    spicelib handles UTF-16 natively — no preprocessing needed.
+    """
+    with open(filepath, 'rb') as f:
+        first_bytes = f.read(4)
+    if len(first_bytes) >= 2:
+        if first_bytes[:2] == b'\xff\xfe':
+            return True
+        if len(first_bytes) >= 4 and first_bytes[1] == 0 and first_bytes[3] == 0:
+            return True
+    return False
+
+
 def preprocess_raw_file(filepath: str) -> str:
     """Preprocess a QSPICE raw file for spicelib data reading.
 
@@ -187,38 +202,42 @@ def preprocess_raw_file(filepath: str) -> str:
         Path to a temporary file, or the original path if no preprocessing
         was needed.  Caller must clean up if a temp file was created.
     """
+    if _is_utf16le(filepath):
+        return filepath
+
     # Scan for binary marker using chunked reads (header is always near the
     # beginning, typically within first 64 KB).
+    MAX_HEADER_SCAN = 64 * 1024 * 1024  # 64 MB safety limit
     marker = b'Binary:\n'
     marker_len = len(marker)
     header_end = None
     chunk_size = 64 * 1024
     overlap = marker_len - 1  # handle marker split across chunks
+    total_scanned = 0
 
     with open(filepath, 'rb') as f:
-        while True:
+        while total_scanned < MAX_HEADER_SCAN:
             chunk = f.read(chunk_size)
             if not chunk:
                 break
-            pos = chunk.find(marker)
-            if pos >= 0:
-                header_end = f.tell() - len(chunk) + pos + marker_len
+            total_scanned += len(chunk)
+            offset_in_chunk = chunk.find(marker)
+            if offset_in_chunk >= 0:
+                header_end = f.tell() - len(chunk) + offset_in_chunk + marker_len
                 break
             if header_end is None:
-                # Also check for Values:\n fallback
-                pos = chunk.find(b'Values:\n')
-                if pos >= 0:
-                    header_end = f.tell() - len(chunk) + pos + len(b'Values:\n')
+                offset_in_chunk = chunk.find(b'Values:\n')
+                if offset_in_chunk >= 0:
+                    header_end = f.tell() - len(chunk) + offset_in_chunk + len(b'Values:\n')
                     break
             # Seek back `overlap` bytes so we don't miss a split marker
             f.seek(-overlap, 1)
 
     if header_end is None:
-        # No marker found — fallback: read entire file (rare case)
-        logger.warning("No binary/values marker found, processing entire file")
-        with open(filepath, 'rb') as f:
-            header_bytes = f.read()
-        binary_offset = len(header_bytes)
+        raise ValueError(
+            f"No Binary:/Values: marker found within first {MAX_HEADER_SCAN // 1024**2} MB. "
+            f"File may not be a valid SPICE raw file."
+        )
     else:
         with open(filepath, 'rb') as f:
             header_bytes = f.read(header_end)
@@ -294,8 +313,21 @@ class RawFile:
 
         Returns the header bytes (including the marker).  Does NOT read
         the entire file into memory — scans using chunked I/O.
+
+        For UTF-16 LE files (LTspice), returns the header decoded from
+        UTF-16 and re-encoded as UTF-8 so downstream parsing works.
         """
-        marker = b'Binary:\n'
+        is_utf16le = _is_utf16le(self.filename)
+
+        if is_utf16le:
+            # Decode the whole header portion as UTF-16 LE.
+            # spicelib handles the binary portion natively.
+            marker = 'Binary:\n'.encode('utf-16-le')
+            values_marker = 'Values:\n'.encode('utf-16-le')
+        else:
+            marker = b'Binary:\n'
+            values_marker = b'Values:\n'
+
         marker_len = len(marker)
         chunk_size = 64 * 1024
         overlap = marker_len - 1
@@ -309,10 +341,16 @@ class RawFile:
                 buf.extend(chunk)
                 pos = buf.find(marker)
                 if pos >= 0:
-                    return bytes(buf[:pos + marker_len])
-                pos = buf.find(b'Values:\n')
+                    header = bytes(buf[:pos + marker_len])
+                    if is_utf16le:
+                        header = header.decode('utf-16-le').encode('utf-8')
+                    return header
+                pos = buf.find(values_marker)
                 if pos >= 0:
-                    return bytes(buf[:pos + len(b'Values:\n')])
+                    header = bytes(buf[:pos + len(values_marker)])
+                    if is_utf16le:
+                        header = header.decode('utf-16-le').encode('utf-8')
+                    return header
                 # Keep only the last `overlap + marker_len` bytes to bound
                 # memory while scanning a file with a very long header.
                 keep = overlap + chunk_size
@@ -453,14 +491,19 @@ class RawFile:
                 estimated_total = n_points * len(valid_variables) * ref_dtype.itemsize
                 if estimated_total > 500 * 1024 * 1024:
                     # Use memmap to avoid a second full copy in memory
-                    mmap_path = tempfile.mktemp(prefix='pqwave_mmap_')
+                    mmap_fd, mmap_path = tempfile.mkstemp(prefix='pqwave_mmap_')
+                    os.close(mmap_fd)
                     shape = (n_points, len(valid_variables))
-                    data = np.memmap(mmap_path, dtype=ref_dtype, mode='w+', shape=shape)
-                    for i, arr in enumerate(data_list):
-                        data[:, i] = arr
-                        del arr  # Release source array after writing column
-                    data_list.clear()
-                    self._mmap_path = mmap_path
+                    try:
+                        data = np.memmap(mmap_path, dtype=ref_dtype, mode='w+', shape=shape)
+                        for i, arr in enumerate(data_list):
+                            data[:, i] = arr
+                            del arr
+                        data_list.clear()
+                        self._mmap_path = mmap_path
+                    except Exception:
+                        os.unlink(mmap_path)
+                        raise
                     logger.info(
                         f"Using memmap for large dataset: {shape}, {estimated_total / 1024**2:.0f} MB"
                     )

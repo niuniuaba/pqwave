@@ -1,4 +1,6 @@
 PyQt6==6.11.0
 pyqtgraph==0.14.0
 numpy==2.4.4
+scipy>=1.0
 spicelib==1.5.1
+eyediagram>=0.1.2

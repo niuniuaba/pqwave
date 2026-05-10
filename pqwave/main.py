@@ -63,13 +63,13 @@ def _send_command_to_server(port, command_text):
 def _run_extract() -> int:
     """Handle --extract CLI mode: extract traces from a raw file.
 
-    Usage: pqwave --extract <inputfile> <expr1[,expr2[,...]]> (-ltspice|-ngspice|-qspice) <outputfile>
+    Usage: pqwave --extract <inputfile> <expr1[,expr2[,...]]> (-ltspice|-ngspice|-qspice|-vcd) <outputfile>
 
     Operates without QApplication — pure models-layer operation.
     """
     args = sys.argv[sys.argv.index('--extract') + 1:]
     if len(args) < 3:
-        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <outputfile>", file=sys.stderr)
+        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <outputfile>", file=sys.stderr)
         return 1
 
     input_file = args[0]
@@ -82,7 +82,7 @@ def _run_extract() -> int:
     i = 2
     while i < len(args):
         a = args[i]
-        if a in ('-ltspice', '-ngspice', '-qspice'):
+        if a in ('-ltspice', '-ngspice', '-qspice', '-vcd'):
             target_format = a.lstrip('-')
             if i + 1 < len(args):
                 output_file = args[i + 1]
@@ -90,10 +90,16 @@ def _run_extract() -> int:
         i += 1
 
     if not target_format or not output_file:
-        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <outputfile>", file=sys.stderr)
+        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <outputfile>", file=sys.stderr)
         return 1
 
-    # Load raw file
+    if input_file.lower().endswith('.vcd'):
+        return _run_extract_vcd(input_file, expr_str, target_format, output_file)
+    return _run_extract_raw(input_file, expr_str, target_format, output_file)
+
+
+def _run_extract_raw(input_file: str, expr_str: str, target_format: str, output_file: str) -> int:
+    """Extract traces from a SPICE raw file."""
     try:
         raw_file = RawFile(input_file)
     except Exception as e:
@@ -106,12 +112,10 @@ def _run_extract() -> int:
 
     dataset = raw_file.datasets[0]
 
-    # Detect AC analysis
     plotname = dataset.get('plotname', '').lower()
     flags = dataset.get('flags', '').lower()
     is_ac = 'ac' in plotname or 'complex' in flags
 
-    # Get first variable name as default X for trace metadata
     variables = dataset.get('variables', [])
     if not variables:
         print(f"Error: No variables found in {input_file}", file=sys.stderr)
@@ -119,13 +123,11 @@ def _run_extract() -> int:
 
     first_var_name = variables[0]['name']
 
-    # Split comma-separated expressions
     expressions = [e.strip() for e in expr_str.split(',') if e.strip()]
     if not expressions:
         print("Error: No expressions specified", file=sys.stderr)
         return 1
 
-    # Evaluate each expression and build Trace objects
     traces = []
     evaluator = ExprEvaluator(raw_file, dataset_idx=0)
 
@@ -136,11 +138,9 @@ def _run_extract() -> int:
             print(f"Error evaluating expression '{expr}': {e}", file=sys.stderr)
             return 1
 
-        # Get X data from the first variable
         try:
             x_data = evaluator.evaluate(first_var_name)
         except Exception:
-            # Fallback: read first data column directly
             data_matrix = dataset.get('data')
             if data_matrix is not None and data_matrix.size > 0:
                 x_data = data_matrix[:, 0].copy()
@@ -148,7 +148,6 @@ def _run_extract() -> int:
                 print(f"Error: Cannot read X axis data from {input_file}", file=sys.stderr)
                 return 1
 
-        # Trim to common length
         n = min(len(x_data), len(y_data))
         trace = Trace(
             name=expr,
@@ -160,12 +159,119 @@ def _run_extract() -> int:
         )
         traces.append(trace)
 
-    # Extract to raw file
     try:
         extract_traces_to_raw(output_file, traces, raw_file, target_format=target_format, output_is_ac=is_ac)
     except Exception as e:
         print(f"Error writing {output_file}: {e}", file=sys.stderr)
         return 1
+
+    print(f"Extracted {len(traces)} traces to {output_file} ({target_format})")
+    return 0
+
+
+def _run_extract_vcd(input_file: str, expr_str: str, target_format: str, output_file: str) -> int:
+    """Extract signals from a VCD file to raw or VCD format."""
+    from pqwave.models.vcdfile import VcdFile
+    from pqwave.digital.vcd_time_aligner import vcd_to_step_arrays
+
+    try:
+        vcd_file = VcdFile(input_file)
+    except Exception as e:
+        print(f"Error loading VCD {input_file}: {e}", file=sys.stderr)
+        return 1
+
+    signal_names = vcd_file.get_signal_names()
+    if not signal_names:
+        print(f"Error: No signals found in {input_file}", file=sys.stderr)
+        return 1
+
+    expressions = [e.strip() for e in expr_str.split(',') if e.strip()]
+    if not expressions:
+        print("Error: No expressions specified", file=sys.stderr)
+        return 1
+
+    # Resolve all signals and collect data
+    vcd_max_time = vcd_file.get_max_time()
+    traces = []
+    orig_events = []
+    valid_expressions = []
+    for expr in expressions:
+        sig = vcd_file.get_signal(expr)
+        if sig is None:
+            print(f"Error: Signal '{expr}' not found in {input_file}", file=sys.stderr)
+            return 1
+        vcd_t, vcd_v = sig.to_arrays(vcd_file.timescale)
+        if len(vcd_t) < 1:
+            print(f"Warning: Signal '{expr}' has no data, skipping", file=sys.stderr)
+            continue
+        step_t, step_v = vcd_to_step_arrays(vcd_t, vcd_v)
+        # Extend the last value to the VCD file's global max time
+        if vcd_max_time > vcd_t[-1]:
+            step_t = np.append(step_t, vcd_max_time)
+            step_v = np.append(step_v, vcd_v[-1])
+            vcd_t_ext = np.append(vcd_t, vcd_max_time)
+            vcd_v_ext = np.append(vcd_v, vcd_v[-1])
+        else:
+            vcd_t_ext, vcd_v_ext = vcd_t, vcd_v
+        traces.append(Trace(
+            name=expr,
+            expression=expr,
+            x_data=step_t,
+            y_data=step_v,
+            dataset_idx=0,
+            metadata={
+                'x_var_name': 'time',
+                'vcd_times': vcd_t_ext,
+                'vcd_values': vcd_v_ext,
+            },
+        ))
+        orig_events.append((vcd_t_ext, vcd_v_ext))
+        valid_expressions.append(expr)
+
+    if not traces:
+        print("Error: No valid signals to extract", file=sys.stderr)
+        return 1
+
+    if target_format == 'vcd':
+        # VCD output uses original event data for compact representation
+        from pqwave.models.raw_converter import write_vcd_file
+        vcd_traces = []
+        for expr, (t, v) in zip(valid_expressions, orig_events):
+            vcd_traces.append(Trace(
+                name=expr, expression=expr, x_data=t, y_data=v, dataset_idx=0,
+            ))
+        try:
+            write_vcd_file(output_file, vcd_traces, vcd_file.timescale)
+        except Exception as e:
+            print(f"Error writing {output_file}: {e}", file=sys.stderr)
+            return 1
+    else:
+        # Raw output: align all signals to a common uniform time grid
+        from pqwave.digital.vcd_time_aligner import align_vcd_to_raw
+        from pqwave.models.raw_converter import extract_traces_to_raw
+        t_min = min(np.min(m[0]) for m in orig_events)
+        t_max = max(np.max(m[0]) for m in orig_events)
+        max_pts = max(len(m[0]) for m in orig_events)
+        n_pts = min(max(1600, max_pts), 100000)
+        uniform_t = np.linspace(t_min, t_max, n_pts, dtype=np.float64)
+
+        raw_traces = []
+        for expr, (t, v) in zip(valid_expressions, orig_events):
+            aligned_v = align_vcd_to_raw(uniform_t, t, v)
+            raw_traces.append(Trace(
+                name=expr,
+                expression=expr,
+                x_data=uniform_t.copy(),
+                y_data=aligned_v,
+                dataset_idx=0,
+                metadata={'x_var_name': 'time'},
+            ))
+
+        try:
+            extract_traces_to_raw(output_file, raw_traces, raw_file=None, target_format=target_format, x_var_name='time')
+        except Exception as e:
+            print(f"Error writing {output_file}: {e}", file=sys.stderr)
+            return 1
 
     print(f"Extracted {len(traces)} traces to {output_file} ({target_format})")
     return 0
@@ -266,8 +372,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="pqwave - SPICE Waveform Viewer",
         usage=(
-            "pqwave [-h] [options] [raw_file]\n"
-            "       or: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <output>\n"
+            "pqwave [-h] [options] [files ...]\n"
+            "       or: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <output>\n"
             "       or: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -297,14 +403,14 @@ def main():
     )
 
     parser.add_argument(
-        "raw_file",
-        nargs="?",  # Optional positional argument
-        help="SPICE raw file to open"
+        "files",
+        nargs="*",  # Zero or more positional arguments
+        help="Files to open (.raw, .vcd, .json for project)"
     )
     parser.add_argument(
         "--extract",
         action="store_true",
-        help="Extract traces: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice) <output>"
+        help="Extract traces: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <output>"
     )
     parser.add_argument(
         "--convert",
@@ -365,30 +471,43 @@ def main():
     # Create xschem server and command handler if enabled
     xschem_server = None
     command_handler = None
+    xschem_port_busy = False
     if not args.no_xschem_server and args.xschem_port != 0:
-        xschem_server = XschemServer(port=args.xschem_port)
-        command_handler = CommandHandler()
-        command_handler.set_server(xschem_server)
-        # Store command handler in application state for window access
-        ApplicationState().command_handler = command_handler
-        # Connect signals for logging
-        xschem_server.command_received.connect(command_handler.handle_command)
-        # Log command handler signals for debugging
-        command_handler.table_set_received.connect(
-            lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"table_set: {raw_file} from {client_addr}")
-        )
-        command_handler.copyvar_received.connect(
-            lambda var_name, color, client_addr, connection_state, logger=logger: logger.debug(f"copyvar: {var_name} color {color} from {client_addr}")
-        )
-        command_handler.open_file_received.connect(
-            lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"open_file: {raw_file} from {client_addr}")
-        )
-        command_handler.add_trace_received.connect(
-            lambda var_name, axis, color, client_addr, connection_state, logger=logger: logger.debug(f"add_trace: {var_name} axis {axis} from {client_addr}")
-        )
-        command_handler.invalid_command_received.connect(
-            lambda command_dict, error_message, logger=logger: logger.warning(f"Invalid command: {error_message} - {command_dict}")
-        )
+        # Check port availability before binding — if another session owns
+        # the port, we'll ask the user before deciding to run standalone.
+        port_available = False
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind(('localhost', args.xschem_port))
+            probe.close()
+            port_available = True
+        except socket.error:
+            xschem_port_busy = True
+        if port_available:
+            xschem_server = XschemServer(port=args.xschem_port)
+            command_handler = CommandHandler()
+            command_handler.set_server(xschem_server)
+            # Store command handler in application state for window access
+            ApplicationState().command_handler = command_handler
+            # Connect signals for logging
+            xschem_server.command_received.connect(command_handler.handle_command)
+            # Log command handler signals for debugging
+            command_handler.table_set_received.connect(
+                lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"table_set: {raw_file} from {client_addr}")
+            )
+            command_handler.copyvar_received.connect(
+                lambda var_name, color, client_addr, connection_state, logger=logger: logger.debug(f"copyvar: {var_name} color {color} from {client_addr}")
+            )
+            command_handler.open_file_received.connect(
+                lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"open_file: {raw_file} from {client_addr}")
+            )
+            command_handler.add_trace_received.connect(
+                lambda var_name, axis, color, client_addr, connection_state, logger=logger: logger.debug(f"add_trace: {var_name} axis {axis} from {client_addr}")
+            )
+            command_handler.invalid_command_received.connect(
+                lambda command_dict, error_message, logger=logger: logger.warning(f"Invalid command: {error_message} - {command_dict}")
+            )
 
     # Handle --test argument
     if args.test:
@@ -407,18 +526,50 @@ def main():
 
     # Normal GUI startup
     # Prevent Qt from loading GTK theme plugin which triggers portal permission
-    # checks for theme settings. When the portal denies access, Qt's window
-    # decorations break (white title bar, no min/max/close buttons). This env
-    # var forces Qt to use the default platform theme, avoiding the portal
-    # check entirely. Fusion style provides consistent widget rendering.
+    # checks for theme settings. When the portal denies access (snap/sandbox
+    # environments, or when D-Bus portal is unavailable), Qt's window
+    # decorations break (white title bar, no min/max/close buttons).
+    # Force these settings BEFORE QApplication is constructed:
+    #   QT_QPA_PLATFORMTHEME=''  — disable platform theme plugin (no GTK/GNOME)
+    #   QT_STYLE_OVERRIDE=Fusion — ensure Fusion style is used for widgets
+    # Fusion style provides consistent cross-platform widget rendering and
+    # does not depend on any desktop environment theming infrastructure.
     os.environ.setdefault('QT_QPA_PLATFORMTHEME', '')
+    os.environ.setdefault('QT_STYLE_OVERRIDE', 'Fusion')
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
-    # Create window with optional initial file
-    if args.raw_file:
-        logger.info(f"Opening file from command line: {args.raw_file}")
-        window = MainWindow(initial_file=args.raw_file, xschem_ba_port=args.xschem_ba_port)
+    # If xschem port is busy, ask user whether to launch standalone
+    if xschem_port_busy:
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            None,
+            "Port Conflict",
+            f"TCP port {args.xschem_port} is already in use by another session.\n\n"
+            "Launch without TCP server?",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Close,
+            QMessageBox.StandardButton.Ok,
+        )
+        if reply == QMessageBox.StandardButton.Close:
+            return 0
+
+    # Validate: .json must be the only file argument
+    json_files = [f for f in args.files if f.lower().endswith('.json')]
+    other_files = [f for f in args.files if not f.lower().endswith('.json')]
+    if json_files and other_files:
+        logger.error("Cannot mix .json project file with .raw/.vcd files")
+        print("Error: Cannot open .json project file together with .raw/.vcd files.", file=sys.stderr)
+        return 1
+    if len(json_files) > 1:
+        logger.error("Only one .json project file can be opened at a time")
+        print("Error: Only one .json project file can be opened at a time.", file=sys.stderr)
+        return 1
+
+    # Create window
+    initial_files = json_files + other_files  # .json first, then raws/vcds
+    if initial_files:
+        logger.info(f"Opening files from command line: {initial_files}")
+        window = MainWindow(initial_files=initial_files, xschem_ba_port=args.xschem_ba_port)
     else:
         window = MainWindow(xschem_ba_port=args.xschem_ba_port)
 
@@ -428,17 +579,7 @@ def main():
             logger.info(f"Xschem server started on port {args.xschem_port}")
             xschem_servers.append(xschem_server)
         else:
-            logger.warning(f"Failed to start xschem server on port {args.xschem_port}")
-            # If port in use, assume another pqwave instance is running
-            # Forward raw_file command if provided
-            if args.raw_file:
-                logger.info(f"Forwarding file to existing xschem server on port {args.xschem_port}")
-                success = _send_command_to_server(args.xschem_port, f"table_set {args.raw_file}")
-                if success:
-                    return 0  # Exit after forwarding
-                else:
-                    logger.warning("Failed to forward command to existing server")
-            # Server failed but we continue with GUI
+            logger.warning("Xschem server failed to start (port conflict)")
 
     # Cleanup xschem servers on exit
     app.aboutToQuit.connect(lambda: [server.stop() for server in xschem_servers])

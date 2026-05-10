@@ -25,6 +25,33 @@ class ViewboxTheme(Enum):
     LIGHT = 'light'
 
 
+@dataclass
+class SourceFile:
+    """A source file loaded into the session."""
+    path: str          # absolute path
+    relative_path: str = ""  # relative to project file
+    file_type: str = ""      # "raw" or "vcd"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'path': self.relative_path or self.path,
+            'file_type': self.file_type,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], base_dir: str = "") -> 'SourceFile':
+        rel = data.get('path', '')
+        abs_path = rel
+        if base_dir and rel and not rel.startswith('/'):
+            import os
+            abs_path = os.path.normpath(os.path.join(base_dir, rel))
+        return cls(
+            path=abs_path,
+            relative_path=rel,
+            file_type=data.get('file_type', ''),
+        )
+
+
 # Theme color definitions
 THEME_COLORS = {
     ViewboxTheme.DARK: {
@@ -174,6 +201,32 @@ class FftConfig:
 
 
 @dataclass
+class EyeDiagramConfig:
+    """Global eye diagram configuration using eyediagram library params."""
+    window_size: int = 48           # samples per eye window (eyediagram window_size)
+    offset: int = 16               # sample phase offset (eyediagram offset)
+    fuzz: bool = True              # anti-aliasing jitter for grid_count
+    mode: str = "persistence"      # "overlay" or "persistence"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'window_size': self.window_size,
+            'offset': self.offset,
+            'fuzz': self.fuzz,
+            'mode': self.mode,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EyeDiagramConfig':
+        return cls(
+            window_size=int(data.get('window_size', 48)),
+            offset=int(data.get('offset', 16)),
+            fuzz=bool(data.get('fuzz', True)),
+            mode=str(data.get('mode', 'persistence')),
+        )
+
+
+@dataclass
 class FontConfig:
     """Font configuration for a UI element group."""
     family: str = ''    # empty = system default
@@ -212,6 +265,9 @@ class ApplicationState:
         self.datasets: List[Dataset] = []
         self.current_dataset_idx: int = 0
 
+        # Source files loaded into this session
+        self.source_files: List[SourceFile] = []
+
         # Per-panel state (replaces flat traces / axis_configs / current_x_var)
         self.panels: Dict[str, PanelState] = {}
         self.panel_order: List[str] = []
@@ -232,6 +288,7 @@ class ApplicationState:
         self.ui_font: FontConfig = FontConfig()
 
         self.fft_config: FftConfig = FftConfig()
+        self.eye_diagram_config: EyeDiagramConfig = EyeDiagramConfig()
 
         self.window_registry: WindowRegistry = get_registry()
         self.command_handler: Optional[CommandHandler] = None
@@ -277,8 +334,17 @@ class ApplicationState:
         """Register a new panel, optionally copying state from an existing panel."""
         if copy_from and copy_from in self.panels:
             import copy
-            panel_state = copy.deepcopy(self.panels[copy_from])
+            src = self.panels[copy_from]
+            # Strip UI-only metadata that can't be deepcopied (Qt objects).
+            saved_bots = []
+            for t in src.traces:
+                saved_bots.append(t.metadata.pop('_bus_bot_item', None))
+            panel_state = copy.deepcopy(src)
             panel_state.panel_id = panel_id
+            # Restore stripped items on the source panel.
+            for t, bot in zip(src.traces, saved_bots):
+                if bot is not None:
+                    t.metadata['_bus_bot_item'] = bot
         else:
             panel_state = PanelState(panel_id=panel_id)
             panel_state.axis_configs = {
@@ -422,6 +488,7 @@ class ApplicationState:
             'tick_font': self.tick_font.to_dict(),
             'ui_font': self.ui_font.to_dict(),
             'fft_config': self.fft_config.to_dict(),
+            'eye_diagram_config': self.eye_diagram_config.to_dict(),
             # Per-panel state (new format)
             'panels': {pid: ps.to_dict() for pid, ps in self.panels.items()},
             'panel_order': list(self.panel_order),
@@ -449,6 +516,7 @@ class ApplicationState:
             'panel_order': list(self.panel_order),
             'active_panel_id': self.active_panel_id,
             'fft_config': self.fft_config.to_dict(),
+            'eye_diagram_config': self.eye_diagram_config.to_dict(),
         }
         # Backward compat: include flat keys for the active panel
         if self.active_panel_id and self.active_panel_id in self.panels:

@@ -9,9 +9,22 @@ properties. It is independent of UI components and can be serialized/deserialize
 """
 
 import numpy as np
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
+
+try:
+    from typing import TypedDict
+except ImportError:
+    from typing_extensions import TypedDict
+
+
+class DigitalConfigDict(TypedDict, total=False):
+    """Expected schema for Trace.digital_config metadata dict."""
+    v_high: float
+    v_low: float
+    v_undef: float
+    description: str
 
 
 class AxisAssignment(Enum):
@@ -55,6 +68,41 @@ class Trace:
             raise ValueError(f"x_data length ({len(self.x_data)}) != y_data length ({len(self.y_data)})")
 
     @property
+    def trace_type(self) -> str:
+        """Signal type: 'analog', 'digital', or 'bus'.  Stored in metadata
+        for backward-compatible serialization (old JSON files default to
+        'analog')."""
+        return self.metadata.get('trace_type', 'analog')
+
+    @trace_type.setter
+    def trace_type(self, value: str) -> None:
+        self.metadata['trace_type'] = value
+
+    @property
+    def digital_config(self) -> Optional[DigitalConfigDict]:
+        """Per-trace digital threshold configuration, if set."""
+        return self.metadata.get('digital_config', None)
+
+    @digital_config.setter
+    def digital_config(self, value: Optional[DigitalConfigDict]) -> None:
+        if value is None:
+            self.metadata.pop('digital_config', None)
+        else:
+            self.metadata['digital_config'] = value
+
+    @property
+    def bus_signals(self) -> Optional[List[str]]:
+        """List of trace expression strings that form this bus, if bus type."""
+        return self.metadata.get('bus_signals', None)
+
+    @bus_signals.setter
+    def bus_signals(self, value: Optional[List[str]]) -> None:
+        if value is None:
+            self.metadata.pop('bus_signals', None)
+        else:
+            self.metadata['bus_signals'] = value
+
+    @property
     def n_points(self) -> int:
         """Number of data points in the trace."""
         return len(self.x_data)
@@ -67,6 +115,10 @@ class Trace:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert trace to serializable dictionary (includes data arrays)."""
+        safe_meta = {
+            k: v for k, v in self.metadata.items()
+            if k not in ('vcd_times', 'vcd_values', '_bus_bot_item')
+        }
         return {
             'name': self.name,
             'expression': self.expression,
@@ -78,11 +130,16 @@ class Trace:
             'visible': self.visible,
             'selected': self.selected,
             'dataset_idx': self.dataset_idx,
-            'metadata': self.metadata
+            'metadata': safe_meta
         }
 
     def to_per_file_dict(self) -> Dict[str, Any]:
         """Convert trace to dict without data arrays (for per-file state)."""
+        # Strip data-heavy VCD metadata that is reconstructed on reload.
+        safe_meta = {
+            k: v for k, v in self.metadata.items()
+            if k not in ('vcd_times', 'vcd_values', '_bus_bot_item')
+        }
         return {
             'name': self.name,
             'expression': self.expression,
@@ -92,7 +149,7 @@ class Trace:
             'visible': self.visible,
             'selected': self.selected,
             'dataset_idx': self.dataset_idx,
-            'metadata': self.metadata
+            'metadata': safe_meta,
         }
 
     @classmethod

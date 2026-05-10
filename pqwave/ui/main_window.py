@@ -28,7 +28,7 @@ from PyQt6.QtGui import QColor, QFont
 
 from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme, FontConfig, AxisConfig
 from pqwave.models.rawfile import RawFile
-from pqwave.models.raw_converter import write_raw_file, FORMAT_CONFIG, extract_traces_to_raw
+from pqwave.models.raw_converter import write_raw_file, write_vcd_file, FORMAT_CONFIG, extract_traces_to_raw
 from pqwave.models.dataset import Dataset
 from pqwave.models.trace import AxisAssignment
 from pqwave.ui.menu_manager import MenuManager
@@ -50,6 +50,7 @@ from pqwave.ui.measure_results_widget import MeasureResultsWidget
 from pqwave.ui.power_analysis_dialog import PowerAnalysisDialog
 from pqwave.measure.measure_engine import evaluate_measure
 from pqwave.measure.measure_script_parser import parse_meas_script
+from pqwave.digital.eye_renderer import render_overlay, render_persistence
 import uuid
 
 
@@ -58,33 +59,38 @@ logger = get_logger(__name__)
 class MainWindow(QMainWindow):
     """Main application window orchestrating all UI components."""
 
-    def __init__(self, initial_file=None, xschem_ba_port=2021):
+    def __init__(self, initial_file=None, xschem_ba_port=2021,
+                 initial_files=None):
         """
         Initialize MainWindow.
 
         Args:
-            initial_file: Optional path to initial raw file to load
+            initial_file: Deprecated; single file path (for backward compat).
+            initial_files: Optional list of file paths to open.
             xschem_ba_port: TCP port for xschem back-annotation (xschem_listen_port)
         """
         super().__init__()
         self.setWindowTitle("pqwave - SPICE Waveform Viewer")
         self.setGeometry(100, 100, 1200, 800)
 
-        # Initialize application state singleton
         self.state = ApplicationState()
-
-        # Xschem integration: window ID and registry
         self.window_id = str(uuid.uuid4())
-        self.raw_file_path = initial_file  # current raw file path (may be updated when loading new file)
         self._xschem_ba_port = xschem_ba_port
+
+        if initial_files is None:
+            initial_files = []
+        if initial_file is not None and initial_file not in initial_files:
+            initial_files.insert(0, initial_file)
+
+        self.raw_file_path = initial_files[0] if initial_files else None
         self.state.window_registry.register_window(
             window_id=self.window_id,
             window_instance=self,
             raw_file_path=self.raw_file_path
         )
 
-        # Store initial file for delayed loading
-        self.initial_file = initial_file
+        self.initial_files = initial_files
+        self._project_path = None  # set when project file is saved/loaded
 
         # Component references (will be initialized in _setup_ui)
         self.menu_manager = None
@@ -119,16 +125,14 @@ class MainWindow(QMainWindow):
         # Load global preferences (theme) and apply to UI
         self._load_global_prefs()
         self.axis_manager._initialize_axes()
-        self.plot_widget.enable_y2_axis()
         self.plot_widget.apply_fonts(self.state)
         self._apply_ui_font()
 
         # Flag to prevent double loading from timer
         self.initial_file_loaded = False
 
-        # Load initial file if provided
-        if self.initial_file:
-            QTimer.singleShot(100, self._load_initial_file)
+        if self.initial_files:
+            QTimer.singleShot(100, self._load_initial_files)
 
     def _setup_ui(self):
         """Create and arrange UI components."""
@@ -166,7 +170,8 @@ class MainWindow(QMainWindow):
             'open_file': self.open_file,
             'open_new_window': self.open_new_window,
             'save_current_state': self.save_current_state,
-            'save_as_raw_data': self.save_as_raw_data,
+            'save_project_as': self._save_project_as,
+            'save_as_data_file': self.save_as_data_file,
             'convert_raw_data': self.convert_raw_data,
             'edit_trace_properties': self.edit_trace_properties,
             'show_settings': self.show_settings,
@@ -195,11 +200,16 @@ class MainWindow(QMainWindow):
             'show_keybindings': self._show_keybindings,
             'show_functions_help': self._show_functions_help,
             'show_measures_help': self._show_measures_help,
+            'show_vector_selection_help': self._show_vector_selection_help,
             'split_horizontal': self._split_panel_horizontal,
             'split_vertical': self._split_panel_vertical,
             'close_panel': self._close_active_panel,
             'compute_trace_stats': self._compute_trace_stats,
             'compute_power_analysis': self._compute_power_analysis,
+            'toggle_digital_analog': self._toggle_digital_analog,
+            'group_bus': self._group_bus,
+            'eye_diagram': self._show_eye_diagram,
+            'threshold_settings': self._show_threshold_settings,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -320,7 +330,6 @@ class MainWindow(QMainWindow):
         if panel is None:
             return
         self.state.active_panel_id = panel_id
-        panel.plot_widget.enable_y2_axis()
         panel.plot_widget.apply_fonts(self.state)
         panel.axis_manager._initialize_axes()
         self._rebind_panel_signals(panel)
@@ -328,10 +337,24 @@ class MainWindow(QMainWindow):
     def _split_panel_horizontal(self) -> None:
         """Split active panel horizontally (side-by-side)."""
         self.panel_grid.split_panel(self.panel_grid.active_panel_id, orientation="horizontal")
+        self._sync_split_x_axes()
 
     def _split_panel_vertical(self) -> None:
         """Split active panel vertically (stacked)."""
         self.panel_grid.split_panel(self.panel_grid.active_panel_id, orientation="vertical")
+        self._sync_split_x_axes()
+
+    def _sync_split_x_axes(self) -> None:
+        """Link X axes of all panels when mixed-signal overlay is active."""
+        panel_list = list(self.panel_grid.panels.values())
+        if len(panel_list) > 1:
+            active = self.panel_grid.get_active_panel()
+            if active is None:
+                return
+            master_vb = active.plot_widget.plotItem.vb
+            for p in panel_list:
+                if p is not active:
+                    p.plot_widget.plotItem.vb.setXLink(master_vb)
 
     def _close_active_panel(self) -> None:
         """Close the active panel."""
@@ -909,9 +932,16 @@ class MainWindow(QMainWindow):
             rgb_int = int(hex_str, 16)
             # Extract components (ignore alpha)
             if len(hex_str) >= 6:
-                r = (rgb_int >> 16) & 0xFF
-                g = (rgb_int >> 8) & 0xFF
-                b = rgb_int & 0xFF
+                if len(hex_str) == 8:
+                    # 8-char hex: RRGGBBAA layout
+                    r = (rgb_int >> 24) & 0xFF
+                    g = (rgb_int >> 16) & 0xFF
+                    b = (rgb_int >> 8) & 0xFF
+                else:
+                    # 6-char hex: RRGGBB layout
+                    r = (rgb_int >> 16) & 0xFF
+                    g = (rgb_int >> 8) & 0xFF
+                    b = rgb_int & 0xFF
                 return (r, g, b)
             else:
                 return None
@@ -957,17 +987,129 @@ class MainWindow(QMainWindow):
     # Menu callbacks
 
     def open_file(self):
-        """Open a raw file."""
+        """Open supported files (.raw, .vcd) — appends to current session."""
         filename, _ = QFileDialog.getOpenFileName(
-            self, "Open Raw File", "", "Raw Files (*.raw);;All Files (*)"
+            self, "Open File", "",
+            "Supported Files (*.raw *.vcd *.json);;All Files (*)"
         )
-        if filename:
+        if not filename:
+            return
+
+        ext = filename.lower()
+        if ext.endswith('.json'):
+            if self.state.source_files:
+                # Block .json in non-fresh sessions
+                result = QMessageBox.warning(
+                    self, "Cannot Open Project",
+                    "State files (.json) can only be opened in a fresh "
+                    "session.\n\nOpen in a new window?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+                )
+                if result == QMessageBox.StandardButton.Yes:
+                    new_window = MainWindow(initial_files=[filename])
+                    new_window.show()
+                return
+            self._load_project(filename)
+        elif ext.endswith('.vcd'):
+            self._load_vcd(filename, vcd_only=(self.raw_file is None))
+        else:
             self._load_raw_file(filename)
 
     def open_new_window(self):
         """Open a new MainWindow instance."""
         new_window = MainWindow()
         new_window.show()
+
+    def _load_vcd(self, filename: str, vcd_only: bool = False):
+        """Internal: parse a VCD file and wire it into the active panel."""
+        from pqwave.models.vcdfile import VcdFile
+
+        try:
+            vcd = VcdFile(filename)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "VCD Parse Error",
+                f"Failed to parse VCD file:\n{e}"
+            )
+            return
+
+        for panel in self.panel_grid.panels.values():
+            panel.trace_manager.set_vcd_file(vcd)
+
+        names = vcd.get_signal_names()
+        if not names:
+            QMessageBox.warning(
+                self, "VCD File",
+                f"The VCD file contains no signals.\n\n"
+                f"File: {filename}\n\n"
+                f"The file may be corrupted or in an unsupported format."
+            )
+            return
+
+        logger.info(
+            f"Loaded VCD: {filename} ({len(names)} signals, timescale={vcd.timescale:.0e}s)")
+
+        self._update_variable_combo()
+
+        # Track source file
+        from pqwave.models.state import SourceFile
+        abs_path = os.path.abspath(filename)
+        existing = [s for s in self.state.source_files if s.path == abs_path]
+        if not existing:
+            self.state.source_files.append(SourceFile(
+                path=abs_path, file_type='vcd'))
+            self._update_save_as_enabled()
+
+        # Pure VCD mode (no raw file): default X axis to "time" and
+        # record the VCD path for per-file state save/restore.
+        if self.raw_file is None:
+            self.raw_file_path = filename
+            self.state.current_x_var = "time"
+            self.axis_manager.set_axis_label(AxisId.X, "time")
+
+        # Sync X axes across split panels for mixed-signal overlay
+        self._sync_split_x_axes()
+
+    def _load_project(self, json_path: str) -> None:
+        """Load a project file (.json), restoring sources and state."""
+        import json as _json
+        abs_json = os.path.abspath(json_path)
+        base_dir = os.path.dirname(abs_json)
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Project Load Error",
+                f"Failed to read project file:\n{e}"
+            )
+            return
+
+        # Load source files first
+        source_files = data.get('source_files', [])
+        from pqwave.models.state import SourceFile
+        for sf_data in source_files:
+            sf = SourceFile.from_dict(sf_data, base_dir)
+            if not os.path.exists(sf.path):
+                logger.warning(f"Source file not found: {sf.path}")
+                QMessageBox.warning(
+                    self, "Missing File",
+                    f"Source file not found:\n{sf.path}\n\nSkipping."
+                )
+                continue
+            if sf.file_type == 'vcd':
+                self._load_vcd(sf.path,
+                               vcd_only=(self.raw_file is None))
+            else:
+                self._load_raw_file(sf.path)
+
+        # Restore per-panel state
+        if 'panels' in data:
+            self._restore_panels_from_dict(data)
+
+        self._project_path = abs_json
+        logger.info(f"Project loaded: {json_path}")
 
     def convert_raw_data(self):
         """Convert currently loaded raw data to another format."""
@@ -1092,12 +1234,30 @@ class MainWindow(QMainWindow):
 
         dialog.exec()
 
-    def save_as_raw_data(self):
-        """Save currently displayed traces as a new SPICE raw file."""
-        if not self.raw_file or not self.raw_file.datasets:
+    def save_as_data_file(self):
+        """Save currently displayed traces as a data file.
+
+        Disabled for multi-file sessions. Supports raw and VCD source files.
+        """
+        if len(self.state.source_files) > 1:
+            QMessageBox.warning(
+                self, "Multi-File Session",
+                "Save as data file is only available for single-file sessions."
+            )
+            return
+
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            logger.warning("save_as_data_file: no active panel")
+            return
+        tm = panel.trace_manager
+        raw_file = tm.raw_file
+        vcd_file = tm.vcd_file
+
+        if raw_file is None and vcd_file is None:
             QMessageBox.warning(
                 self, "No Data",
-                "No raw data loaded. Open a raw file first."
+                "No data loaded. Open a file first."
             )
             return
 
@@ -1111,19 +1271,24 @@ class MainWindow(QMainWindow):
 
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, QPushButton
 
-        dataset = self.raw_file.datasets[0]
-        is_ac = dataset.get('_is_ac_or_complex', False)
+        vcd_only = (raw_file is None and vcd_file is not None)
 
-        # Detect source format
-        detected = self.raw_file.detected_format
-        if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
-            src_format = detected
+        if raw_file is not None:
+            dataset = raw_file.datasets[0]
+            is_ac = dataset.get('_is_ac_or_complex', False)
+            detected = raw_file.detected_format
+            if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
+                src_format = detected
+            else:
+                src_format = 'qspice' if raw_file.filename.lower().endswith('.qraw') else 'ltspice'
         else:
-            src_format = 'qspice' if self.raw_file.filename.lower().endswith('.qraw') else 'ltspice'
+            dataset = None
+            is_ac = False
+            src_format = 'vcd'
 
         # Format selection dialog
         dialog = QDialog(self)
-        dialog.setWindowTitle("Save Traces As Raw Data")
+        dialog.setWindowTitle("Save Traces As Data File")
         dialog.setMinimumWidth(350)
 
         layout = QVBoxLayout()
@@ -1134,7 +1299,13 @@ class MainWindow(QMainWindow):
         for fmt_key in FORMAT_CONFIG:
             label = f"{fmt_key.upper()} ({FORMAT_CONFIG[fmt_key]['extension']})"
             rb = QRadioButton(label)
-            rb.setChecked(fmt_key == src_format)
+            if vcd_only:
+                rb.setChecked(fmt_key == 'vcd')
+            else:
+                rb.setChecked(fmt_key == src_format)
+                if fmt_key == 'vcd':
+                    rb.setEnabled(False)
+                    rb.setToolTip("VCD output is only available for VCD-sourced data.")
             format_group.append((fmt_key, rb))
             layout.addWidget(rb)
 
@@ -1159,40 +1330,57 @@ class MainWindow(QMainWindow):
             dialog.accept()
 
             ext = FORMAT_CONFIG[target_fmt]['extension']
+            filter_label = "VCD Files" if target_fmt == 'vcd' else "Raw Files"
             save_path, _ = QFileDialog.getSaveFileName(
                 self, "Save Traces As",
-                "", f"Raw Files (*{ext});;All Files (*)"
+                "", f"{filter_label} (*{ext});;All Files (*)"
             )
             if not save_path:
                 return
 
             try:
-                # Pass custom X variable (if set) so it's preserved in the output
-                x_var = self.state.current_x_var
-                x_var_data = None
+                if target_fmt == 'vcd':
+                    ts = vcd_file.timescale if vcd_file else 1e-9
+                    write_vcd_file(save_path, traces, timescale=ts)
+                elif raw_file is not None:
+                    # Pass custom X variable (if set) so it's preserved in the output
+                    x_var = self.state.current_x_var
+                    x_var_data = None
 
-                # FFT traces carry frequency bins as x_data — use those
-                # instead of the original file's sweep variable (time)
-                if any(t.expression.lower().startswith('fft(') for t in traces):
-                    x_var = "frequency"
-                elif x_var and self.raw_file:
-                    try:
-                        x_var_data = self.raw_file.get_variable_data(
-                            x_var, self.state.current_dataset_idx
-                        )
-                    except Exception:
-                        x_var = None  # fall back to default X
+                    # FFT traces carry frequency bins as x_data — use those
+                    # instead of the original file's sweep variable (time)
+                    if any(t.expression.lower().startswith('fft(') for t in traces):
+                        x_var = "frequency"
+                    elif x_var:
+                        try:
+                            x_var_data = raw_file.get_variable_data(
+                                x_var, self.state.current_dataset_idx
+                            )
+                        except Exception as e:
+                            logger.warning("Failed to get X variable data for '%s': %s", x_var, e)
+                            x_var = None  # fall back to default X
 
-                extract_traces_to_raw(
-                    output_path=save_path,
-                    traces=traces,
-                    raw_file=self.raw_file,
-                    target_format=target_fmt,
-                    output_is_ac=is_ac,
-                    x_var_name=x_var,
-                    x_var_data=x_var_data,
-                    dataset_idx=self.state.current_dataset_idx,
-                )
+                    extract_traces_to_raw(
+                        output_path=save_path,
+                        traces=traces,
+                        raw_file=raw_file,
+                        target_format=target_fmt,
+                        output_is_ac=is_ac,
+                        x_var_name=x_var,
+                        x_var_data=x_var_data,
+                        dataset_idx=self.state.current_dataset_idx,
+                    )
+                else:
+                    # VCD-only → raw format: build data array from traces
+                    x_var = self.state.current_x_var
+                    x_var_data = None
+                    if x_var and not any(
+                        t.expression.lower().startswith('fft(') for t in traces
+                    ):
+                        x_var_data = traces[0].x_data
+                    self._save_vcd_traces_as_raw(
+                        save_path, traces, target_fmt, x_var, x_var_data)
+
                 QMessageBox.information(
                     self, "Save Successful",
                     f"Saved {len(traces)} trace(s) as {target_fmt.upper()}:\n{save_path}"
@@ -1209,9 +1397,48 @@ class MainWindow(QMainWindow):
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
 
+    def _save_vcd_traces_as_raw(self, path, traces, target_format, x_var_name, x_var_data):
+        """Write VCD-only traces to a raw-format file via write_raw_file."""
+        import numpy as np
+
+        if not traces:
+            logger.warning("_save_vcd_traces_as_raw: no traces to save")
+            return
+        n_pts = min(len(t.x_data) for t in traces)
+        n_vars = len(traces)
+        if x_var_name and x_var_data is not None:
+            n_vars += 1
+
+        data = np.empty((n_pts, n_vars), dtype=np.float64)
+        col = 0
+        for t in traces:
+            data[:, col] = t.y_data[:n_pts]
+            col += 1
+        if x_var_name and x_var_data is not None:
+            data[:, col] = x_var_data[:n_pts]
+
+        variables = []
+        for t in traces:
+            variables.append({'name': t.expression, 'type': 'voltage', 'index': len(variables)})
+        if x_var_name:
+            variables.append({'name': x_var_name, 'type': 'time', 'index': len(variables)})
+
+        write_raw_file(
+            output_path=path,
+            title='pqwave VCD extraction',
+            date='',
+            plotname='Transient Analysis',
+            flags='real',
+            variables=variables,
+            data=data,
+            target_format=target_format,
+            is_ac_or_complex=False,
+        )
+
     def edit_trace_properties(self):
         """Edit trace properties (alias, color, line width)"""
         logger.debug(f"edit_trace_properties called, traces count: {len(self.trace_manager.traces)}")
+        from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QLineEdit, QPushButton, QHBoxLayout, QLabel, QComboBox
 
         # Get traces from trace manager
@@ -1233,18 +1460,18 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(list_widget)
 
-        # Create alias edit
+        # Create alias edit (store on dialog, not self, to avoid stale refs)
         alias_layout = QHBoxLayout()
         alias_label = QLabel("Alias:")
-        self.alias_edit = QLineEdit()
+        dialog.alias_edit = QLineEdit()
         alias_layout.addWidget(alias_label)
-        alias_layout.addWidget(self.alias_edit)
+        alias_layout.addWidget(dialog.alias_edit)
         layout.addLayout(alias_layout)
 
         # Create color combo
         color_layout = QHBoxLayout()
         color_label = QLabel("Color:")
-        self.color_combo = QComboBox()
+        dialog.color_combo = QComboBox()
         # Add color options
         colors = [
             ("Default (auto)", None),
@@ -1259,51 +1486,66 @@ class MainWindow(QMainWindow):
             ("Brown", (165, 42, 42))
         ]
         for color_name, color_value in colors:
-            self.color_combo.addItem(color_name, color_value)
+            dialog.color_combo.addItem(color_name, color_value)
         color_layout.addWidget(color_label)
-        color_layout.addWidget(self.color_combo)
+        color_layout.addWidget(dialog.color_combo)
         layout.addLayout(color_layout)
+
+        # Create trace height combo (for digital/bus traces)
+        height_layout = QHBoxLayout()
+        height_label = QLabel("Height:")
+        dialog.height_combo = QComboBox()
+        heights = [("1.0x", 1.0), ("1.5x", 1.5), ("2.0x", 2.0), ("3.0x", 3.0)]
+        for name, val in heights:
+            dialog.height_combo.addItem(name, val)
+        height_layout.addWidget(height_label)
+        height_layout.addWidget(dialog.height_combo)
+        layout.addLayout(height_layout)
 
         # Create line width combo
         width_layout = QHBoxLayout()
         width_label = QLabel("Line width:")
-        self.width_combo = QComboBox()
+        dialog.width_combo = QComboBox()
         # Add line width options
         widths = [1, 2, 3, 4, 5]
         for width in widths:
-            self.width_combo.addItem(str(width), width)
+            dialog.width_combo.addItem(str(width), width)
         width_layout.addWidget(width_label)
-        width_layout.addWidget(self.width_combo)
+        width_layout.addWidget(dialog.width_combo)
         layout.addLayout(width_layout)
 
         # Connect list selection change to update all fields
-        list_widget.currentRowChanged.connect(lambda row: self._update_trace_properties(row, list_widget))
+        list_widget.currentRowChanged.connect(
+            lambda row, d=dialog, lw=list_widget: self._update_trace_properties(row, lw, d))
 
         # Create buttons
         button_layout = QHBoxLayout()
         apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(lambda: self._apply_trace_properties(list_widget.currentRow(), list_widget))
+        apply_btn.clicked.connect(
+            lambda d=dialog, lw=list_widget: self._apply_trace_properties(lw.currentRow(), lw, d))
         close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dialog.accept)
+        close_btn.clicked.connect(dialog.close)
         button_layout.addWidget(apply_btn)
         button_layout.addWidget(close_btn)
         layout.addLayout(button_layout)
 
         dialog.setLayout(layout)
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.Window)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         # Select first trace if available
         if traces:
             list_widget.setCurrentRow(0)
-            self._update_trace_properties(0, list_widget)
+            self._update_trace_properties(0, list_widget, dialog)
 
-        dialog.exec()
+        dialog.show()
 
-    def _update_trace_properties(self, row, list_widget):
+    def _update_trace_properties(self, row, list_widget, dialog):
         """Update trace properties fields with current trace values"""
         if 0 <= row < len(self.trace_manager.traces):
             var, plot_item, y_axis = self.trace_manager.traces[row]
             # Update alias field
-            self.alias_edit.setText(var)
+            dialog.alias_edit.setText(var)
 
             # Update color combo
             current_color = plot_item.opts['pen'].color()
@@ -1311,33 +1553,48 @@ class MainWindow(QMainWindow):
 
             # Find matching color in combo
             color_index = 0  # Default to "Default (auto)"
-            for i in range(self.color_combo.count()):
-                color_value = self.color_combo.itemData(i)
+            for i in range(dialog.color_combo.count()):
+                color_value = dialog.color_combo.itemData(i)
                 if color_value == current_rgb:
                     color_index = i
                     break
-            self.color_combo.setCurrentIndex(color_index)
+            dialog.color_combo.setCurrentIndex(color_index)
 
             # Update line width combo
             current_width = plot_item.opts['pen'].width()
             width_index = 0  # Default to 1
-            for i in range(self.width_combo.count()):
-                width_value = self.width_combo.itemData(i)
+            for i in range(dialog.width_combo.count()):
+                width_value = dialog.width_combo.itemData(i)
                 if width_value == current_width:
                     width_index = i
                     break
-            self.width_combo.setCurrentIndex(width_index)
+            dialog.width_combo.setCurrentIndex(width_index)
 
-    def _apply_trace_properties(self, row, list_widget):
+            # Update height combo (for digital/bus traces)
+            # Find trace object to get current height
+            trace_obj = None
+            for t in self.state.traces:
+                if t.name == var:
+                    trace_obj = t
+                    break
+            if trace_obj and trace_obj.trace_type in ('digital', 'bus'):
+                h = trace_obj.metadata.get('digital_height', 1.0)
+                for i in range(dialog.height_combo.count()):
+                    if abs(dialog.height_combo.itemData(i) - h) < 0.01:
+                        dialog.height_combo.setCurrentIndex(i)
+                        break
+
+    def _apply_trace_properties(self, row, list_widget, dialog):
         """Apply trace properties (alias, color, line width)"""
 
         if 0 <= row < len(self.trace_manager.traces):
             var, plot_item, y_axis = self.trace_manager.traces[row]
 
             # Get new values
-            new_alias = self.alias_edit.text().strip()
-            new_color = self.color_combo.currentData()
-            new_width = self.width_combo.currentData()
+            new_alias = dialog.alias_edit.text().strip()
+            new_color = dialog.color_combo.currentData()
+            new_width = dialog.width_combo.currentData()
+            new_height = dialog.height_combo.currentData()
 
             # Find matching Trace object in state
             trace_obj = None
@@ -1358,32 +1615,47 @@ class MainWindow(QMainWindow):
                 # Update list widget display
                 list_widget.item(row).setText(f"{row+1}. {new_alias} @ {y_axis}")
 
-            # Update color if not None (None means "Default (auto)")
+            # Bus traces have a second (bottom) line that must mirror
+            # the primary line's colour and width.
+            bus_bot = (trace_obj.metadata.get('_bus_bot_item')
+                       if trace_obj else None)
+
             if new_color is not None:
                 qcolor = QColor(*new_color)
                 pen = plot_item.opts['pen']
                 new_pen = pg.mkPen(color=qcolor, width=pen.width())
-                plot_item.setPen(new_pen)
-                # Update Trace object color if found
+                if hasattr(plot_item, 'setPen'):
+                    plot_item.setPen(new_pen)
+                else:
+                    plot_item.opts['pen'] = new_pen
+                    plot_item.update()
+                if bus_bot is not None:
+                    bus_bot.setPen(new_pen)
                 if trace_obj:
                     trace_obj.color = new_color
 
-            # Update line width
             if new_width:
                 pen = plot_item.opts['pen']
                 new_pen = pg.mkPen(color=pen.color(), width=new_width)
-                plot_item.setPen(new_pen)
-                # Update Trace object line width if found
+                if hasattr(plot_item, 'setPen'):
+                    plot_item.setPen(new_pen)
+                else:
+                    plot_item.opts['pen'] = new_pen
+                    plot_item.update()
+                if bus_bot is not None:
+                    bus_bot.setPen(new_pen)
                 if trace_obj:
                     trace_obj.line_width = new_width
 
-            # Refresh legend - trace manager should handle this
-            # We'll call trace manager's method to update legend for this trace
-            self._refresh_legend_for_trace(row, new_alias if new_alias else var, y_axis)
+            # Apply trace height (digital/bus only) — triggers full redraw
+            if (trace_obj and trace_obj.trace_type in ('digital', 'bus')
+                    and new_height is not None):
+                old_h = trace_obj.metadata.get('digital_height', 1.0)
+                if abs(new_height - old_h) > 0.01:
+                    trace_obj.metadata['digital_height'] = new_height
+                    self.trace_manager.recreate_all_digital()
 
-    def _refresh_legend_for_trace(self, trace_idx, trace_name, y_axis):
-        """Refresh legend entry for a specific trace."""
-        self.trace_manager._refresh_legend()
+            self.trace_manager._refresh_legend()
 
     def show_settings(self):
         """Show application settings widget."""
@@ -1648,9 +1920,6 @@ class MainWindow(QMainWindow):
             # Set raw file reference in trace manager
             self.trace_manager.set_raw_file(self.raw_file)
 
-            # Load per-file state (traces, axis configs) if available
-            self._load_per_file_state()
-
             # Update trace manager with current log mode settings from state
             self._update_trace_manager_log_modes()
 
@@ -1665,6 +1934,16 @@ class MainWindow(QMainWindow):
             self._update_dataset_label()
 
             logger.info(f"Successfully loaded: {filename}")
+
+            # Track source file
+            from pqwave.models.state import SourceFile
+            abs_path = os.path.abspath(filename)
+            existing = [s for s in self.state.source_files if s.path == abs_path]
+            if not existing:
+                self.state.source_files.append(SourceFile(
+                    path=abs_path, file_type='raw'))
+                self._update_save_as_enabled()
+
             # Process any pending xschem commands that arrived before file was loaded
             self._process_pending_xschem_commands()
 
@@ -1688,14 +1967,27 @@ class MainWindow(QMainWindow):
             raw_file_path=self.raw_file_path
         )
 
-    def _load_initial_file(self):
-        """Load the initial file provided via command line."""
+    def _load_initial_files(self):
+        """Load the initial files provided via command line."""
         if self.initial_file_loaded:
             return
-        if self.initial_file:
-            logger.info(f"Loading initial file: {self.initial_file}")
-            self._load_raw_file(self.initial_file)
+        if self.initial_files:
+            for f in self.initial_files:
+                ext = f.lower()
+                if ext.endswith('.json'):
+                    self._load_project(f)
+                elif ext.endswith('.vcd'):
+                    self._load_vcd(f, vcd_only=(self.raw_file is None))
+                else:
+                    self._load_raw_file(f)
             self.initial_file_loaded = True
+
+    def _update_save_as_enabled(self) -> None:
+        """Update the Save As Data File menu action based on source file count."""
+        if self.menu_manager:
+            self.menu_manager.set_save_as_data_enabled(
+                len(self.state.source_files) <= 1
+            )
 
     def _update_dataset_combo(self):
         """Update dataset combo box in control panel."""
@@ -1707,10 +1999,32 @@ class MainWindow(QMainWindow):
             self.control_panel.set_datasets(datasets)
 
     def _update_variable_combo(self):
-        """Update variable combo box in control panel."""
+        """Update variable combo box in control panel (grouped by source)."""
+        groups: dict[str, list[str]] = {}
+
+        # Raw file vectors
         if self.raw_file and self.state.current_dataset_idx is not None:
-            var_names = self.raw_file.get_variable_names(self.state.current_dataset_idx)
-            self.control_panel.set_variables(var_names)
+            raw_vars = self.raw_file.get_variable_names(
+                self.state.current_dataset_idx)
+            if raw_vars:
+                label = os.path.basename(self.raw_file.filename)
+                groups[label] = list(raw_vars)
+
+        # VCD vectors (from all panels, deduplicated)
+        vcd_names: set[str] = set()
+        vcd_label = ""
+        for panel in self.panel_grid.panels.values():
+            vf = panel.trace_manager.vcd_file
+            if vf is not None:
+                if not vcd_label:
+                    vcd_label = os.path.basename(vf.filename)
+                for n in vf.get_signal_names():
+                    vcd_names.add(n)
+        if vcd_names:
+            groups[vcd_label] = sorted(vcd_names)
+
+        if groups:
+            self.control_panel.set_variables(groups)
 
     def _update_dataset_label(self):
         """Update dataset label in status bar."""
@@ -1888,6 +2202,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Expression", "Please enter an expression first.")
             return
 
+        # Strip [VCD] prefix from all variable names in the expression.
+        # When multiple VCD signals are selected, each has the prefix.
+        vcd_prefix = "[VCD] "
+        expression = expression.replace(vcd_prefix, "")
+
         if axis == "X":
             # X button sets X-axis variable
             # For simplicity, treat whole expression as variable name
@@ -1924,13 +2243,26 @@ class MainWindow(QMainWindow):
 
         elif axis in ["Y1", "Y2"]:
             # Y1/Y2 buttons add traces
-            # Get current X-axis variable
-            x_var = self._get_current_x_var()
-            if not x_var:
-                QMessageBox.warning(self, "No X-axis", "Please select an X-axis variable.")
-                return
+            # VCD-only mode: no X variable needed (VCD timestamps serve as X)
+            panel = self.panel_grid.get_active_panel()
+            vcd_only = (not self.raw_file and panel
+                        and panel.trace_manager.vcd_file is not None)
+            if vcd_only:
+                x_var = "time"  # placeholder, _add_vcd_trace ignores it
+            else:
+                x_var = self._get_current_x_var()
+                if not x_var:
+                    QMessageBox.warning(self, "No X-axis", "Please select an X-axis variable.")
+                    return
 
-            # Map axis string to AxisAssignment
+            # Map axis string to AxisAssignment.
+            # Digital (VCD) traces always go to Y1 — a single stacking
+            # axis avoids confusing the user with multiple Y scales.
+            if axis == "Y2" and panel and panel.trace_manager.vcd_file:
+                stripped = expression.strip('\'"').strip()
+                if panel.trace_manager.vcd_file.get_signal(stripped):
+                    axis = "Y1"
+
             if axis == "Y1":
                 y_axis = AxisAssignment.Y1
             else:  # Y2
@@ -1959,13 +2291,18 @@ class MainWindow(QMainWindow):
                         return
 
             # Add trace
-            trace = target_trace_manager.add_trace(expression, x_var, y_axis)
+            error_out = []
+            trace = target_trace_manager.add_trace(expression, x_var, y_axis, error_out=error_out)
             if trace:
                 logger.info(f"Added trace: {trace.name} to {y_axis.value}")
                 # Clear expression after successful addition
                 self.control_panel.trace_expr.clear()
             else:
-                QMessageBox.warning(self, "Error", f"Failed to add trace for expression: {expression}")
+                detail = error_out[0] if error_out else "Unknown error"
+                QMessageBox.warning(
+                    self, "Error",
+                    f"Failed to add trace: {detail}"
+                )
         else:
             logger.warning(f"Unknown axis: {axis}")
 
@@ -2363,8 +2700,8 @@ class MainWindow(QMainWindow):
             }
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to save global preferences to %s: %s", filepath, e)
 
     def _load_global_prefs(self) -> None:
         """Load global preferences from disk and apply to singleton."""
@@ -2374,7 +2711,12 @@ class MainWindow(QMainWindow):
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load global preferences from %s: %s", filepath, e)
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
             return
 
         # Viewbox theme
@@ -2382,8 +2724,8 @@ class MainWindow(QMainWindow):
         try:
             self.state.viewbox_theme = ViewboxTheme(theme_str)
             self.plot_widget.set_viewbox_theme(self.state.viewbox_theme)
-        except ValueError:
-            pass
+        except ValueError as e:
+            logger.warning("Invalid viewbox theme in preferences: %s", e)
 
         # Font configs
         self.state.title_font = FontConfig.from_dict(data.get('title_font', {}))
@@ -2398,48 +2740,6 @@ class MainWindow(QMainWindow):
         self.state.status_bar_visible = data.get('status_bar_visible', True)
         self.set_toolbar_visible(self.state.toolbar_visible)
         self.set_statusbar_visible(self.state.status_bar_visible)
-
-    def _per_file_state_path(self) -> Optional[str]:
-        """Return the per-file state path (.json next to the current raw file)."""
-        if not self.raw_file_path:
-            return None
-        base, _ = os.path.splitext(self.raw_file_path)
-        return base + '.json'
-
-    def _save_per_file_state(self) -> None:
-        """Save per-file state to .json next to the raw file."""
-        if not self.raw_file_path or not os.path.exists(self.raw_file_path):
-            logger.debug("No raw file loaded, skipping per-file state save")
-            return
-        filepath = self._per_file_state_path()
-        if not filepath:
-            return
-        try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(self.state.to_per_file_dict(), f, indent=2, default=str)
-            logger.info(f"Per-file state saved to {filepath}")
-        except Exception:
-            logger.warning(f"Failed to save per-file state to {filepath}")
-
-    def _load_per_file_state(self) -> None:
-        """Load per-file state from .json next to the raw file and apply to UI."""
-        filepath = self._per_file_state_path()
-        if not filepath or not os.path.exists(filepath):
-            return
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception:
-            logger.warning(f"Failed to load per-file state from {filepath}")
-            return
-
-        logger.info(f"Loading per-file state from {filepath}")
-
-        # Restore per-panel state from new format (panels key) if present
-        if 'panels' in data:
-            self._restore_panels_from_dict(data)
-        elif 'axis_configs' in data:
-            self._restore_flat_state_from_dict(data)
 
     def _restore_panels_from_dict(self, data: dict) -> None:
         """Restore state from new per-panel format.
@@ -2555,6 +2855,7 @@ class MainWindow(QMainWindow):
 
     def _restore_traces_from_data(self, saved_traces: list, x_var: str) -> None:
         """Re-create traces from saved data and restore visual properties."""
+        failed_expressions = []
         for t_data in saved_traces:
             expression = t_data.get('expression', '')
             if not expression:
@@ -2564,12 +2865,26 @@ class MainWindow(QMainWindow):
             y_axis = AxisAssignment.Y1 if y_axis_str == 'Y1' else AxisAssignment.Y2
             color = tuple(t_data.get('color', (0, 0, 255)))
 
-            self.trace_manager.add_trace(
+            error_out = []
+            trace = self.trace_manager.add_trace(
                 expression=expression,
                 x_var_name=x_var,
                 y_axis=y_axis,
                 custom_color=color,
+                error_out=error_out,
             )
+            if trace is None:
+                detail = error_out[0] if error_out else "unknown error"
+                failed_expressions.append(f"{expression}: {detail}")
+                logger.warning("Failed to restore trace '%s': %s", expression, detail)
+
+        if failed_expressions:
+            joined = "\n".join(failed_expressions[:10])
+            if len(failed_expressions) > 10:
+                joined += f"\n... and {len(failed_expressions) - 10} more"
+            logger.warning(
+                "Failed to restore %d trace(s) during project load:\n%s",
+                len(failed_expressions), joined)
 
         # Apply saved visual properties (name alias, line width, visibility)
         for saved_t in saved_traces:
@@ -2631,12 +2946,54 @@ class MainWindow(QMainWindow):
         self._restore_traces_from_data(data.get('traces', []), x_var)
 
     def save_current_state(self) -> None:
-        """Save current state to per-file JSON (File > Save Current State)."""
-        self._save_per_file_state()
+        """Save project to JSON (Ctrl+S / File > Save Project).
+
+        First save: prompts for path (Save As). Subsequent saves: silent.
+        """
+        if self._project_path is None:
+            self._save_project_as()
+        else:
+            self._save_project(self._project_path)
+
+    def _save_project_as(self) -> None:
+        """File > Save Project As — always prompts for path."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", "",
+            "Project Files (*.json);;All Files (*)"
+        )
+        if path:
+            if not path.endswith('.json'):
+                path += '.json'
+            self._project_path = path
+            self._save_project(path)
+
+    def _save_project(self, path: str) -> None:
+        """Write the current project state to *path*."""
+        base_dir = os.path.dirname(os.path.abspath(path))
+
+        # Update relative paths
+        for sf in self.state.source_files:
+            try:
+                sf.relative_path = os.path.relpath(sf.path, base_dir)
+            except ValueError:
+                sf.relative_path = sf.path
+
+        data = self.state.to_per_file_dict()
+        data['source_files'] = [sf.to_dict() for sf in self.state.source_files]
+        data['version'] = 2
+
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, default=str)
+            logger.info(f"Project saved to {path}")
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Save Error",
+                f"Failed to save project:\n{e}"
+            )
 
     def closeEvent(self, event):
         """Handle window close event."""
-        self._save_per_file_state()
         self._save_global_prefs()
         self.state.window_registry.unregister_window(self.window_id)
         super().closeEvent(event)
@@ -2710,6 +3067,19 @@ class MainWindow(QMainWindow):
                 sc = QShortcut(QKeySequence(ks), self)
                 sc.activated.connect(callback)
 
+        # ---- digital signal operations (global) ----
+        digital_map = {
+            'toggle_digital_analog': self._toggle_digital_analog,
+            'group_bus':             self._group_bus,
+            'eye_diagram':           self._show_eye_diagram,
+            'threshold_settings':    self._show_threshold_settings,
+        }
+        for action_name, callback in digital_map.items():
+            ks = seq(action_name)
+            if ks:
+                sc = QShortcut(QKeySequence(ks), self)
+                sc.activated.connect(callback)
+
     def _toggle_log_axis(self, axis_id: AxisId) -> None:
         """Toggle log/linear mode for an axis."""
         config = self.state.get_axis_config(axis_id)
@@ -2748,6 +3118,23 @@ class MainWindow(QMainWindow):
         """Open the Measures Reference help dialog."""
         dialog = MeasuresHelpDialog(self)
         dialog.exec()
+
+    def _show_vector_selection_help(self) -> None:
+        """Open a help dialog explaining the vector selection widget."""
+        from PyQt6.QtWidgets import QMessageBox
+        msg = (
+            "The Vectors selector lets you pick signals from all loaded files.\n\n"
+            "  • Check a box to mark a vector for insertion.\n"
+            "  • Ctrl+click a name to add or remove it from the selection.\n"
+            "  • Shift+click to select a contiguous range.\n"
+            "  • Double-click a single name to add it immediately.\n"
+            "  • Close the popup (click outside, press Esc, or click ▼)\n"
+            "    to emit all checked vectors at once.\n"
+            "  • Use the Filter bar to narrow the list by name substring.\n\n"
+            "Checked vectors appear in the Add Trace expression field\n"
+            "separated by spaces and can be edited before adding."
+        )
+        QMessageBox.information(self, "Help — Select Vectors", msg)
 
     def _compute_trace_stats(self) -> None:
         """Compute statistics for selected traces over the visible X range."""
@@ -2790,6 +3177,91 @@ class MainWindow(QMainWindow):
             xmin, xmax,
         )
         dlg.show()
+
+
+    def _toggle_digital_analog(self) -> None:
+        """Toggle selected traces between digital and analog view."""
+        panel = self.panel_grid.get_active_panel()
+        if panel:
+            panel.trace_manager.toggle_trace_type()
+
+    def _group_bus(self) -> None:
+        """Group selected digital traces into a bus."""
+        panel = self.panel_grid.get_active_panel()
+        if panel:
+            panel.trace_manager.group_selected_as_bus()
+
+    def _show_eye_diagram(self) -> None:
+        """Show eye diagram for the first selected trace in a split panel."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        selected = panel.trace_manager.get_selected_traces()
+        if not selected:
+            QMessageBox.information(
+                self, "No Trace Selected",
+                "Select a trace first (left-click its legend), then use the Eye Diagram shortcut.")
+            return
+        _idx, trace = selected[0]
+
+        if self.panel_grid.panel_count >= PanelGrid.MAX_PANELS:
+            QMessageBox.information(
+                self, "Max Panels",
+                "Maximum 4 panels reached. Close a panel first.")
+            return
+
+        # Split the active panel horizontally (bypass _sync_split_x_axes)
+        new_panel = self.panel_grid.split_panel(
+            self.panel_grid.active_panel_id, orientation="horizontal")
+        if new_panel is None:
+            return
+
+        # Force linear axes on the eye panel
+        new_panel.axis_manager.set_axis_log_mode(AxisId.X, False)
+        new_panel.axis_manager.set_axis_log_mode(AxisId.Y1, False)
+
+        # Read eye diagram config from global settings
+        eye_cfg = self.state.eye_diagram_config
+
+        y_data = trace.y_data
+        if len(y_data) < eye_cfg.window_size:
+            QMessageBox.information(
+                self, "Insufficient Data",
+                f"Trace has {len(y_data)} samples, need at least "
+                f"{eye_cfg.window_size} for the configured window size.")
+            self.panel_grid.close_panel(new_panel.panel_id)
+            return
+
+        y_clean = y_data[np.isfinite(y_data)]
+        if len(y_clean) == 0:
+            QMessageBox.information(
+                self, "Invalid Data",
+                "Trace contains no finite values.")
+            self.panel_grid.close_panel(new_panel.panel_id)
+            return
+        y_min, y_max = float(y_clean.min()), float(y_clean.max())
+        yamp = y_max - y_min or 1.0
+        ybounds = (y_min - 0.05 * yamp, y_max + 0.05 * yamp)
+
+        pw = new_panel.plot_widget
+        try:
+            if eye_cfg.mode == "overlay":
+                render_overlay(pw, y_data, eye_cfg.window_size, eye_cfg.offset)
+            else:
+                render_persistence(pw, y_data, eye_cfg.window_size,
+                                   eye_cfg.offset, eye_cfg.fuzz, ybounds)
+        except Exception:
+            self.panel_grid.close_panel(new_panel.panel_id)
+            raise
+
+        n_windows = max(1, (len(y_data) - eye_cfg.offset) // eye_cfg.window_size)
+        pw.set_plot_title(f"Eye: {trace.name}  |  {n_windows} windows")
+
+    def _show_threshold_settings(self) -> None:
+        """Show threshold settings for the first selected digital trace."""
+        panel = self.panel_grid.get_active_panel()
+        if panel:
+            panel.trace_manager.show_threshold_dialog()
 
 
 if __name__ == "__main__":

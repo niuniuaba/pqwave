@@ -1,28 +1,44 @@
 ## TODO.md
 ###   v0.2.5 enhance analysis capability
-- ✅ 18.1 measurement (.meas / .measure)✅ **已完成** 
+- ✅ 18.1 measurement (.meas / .measure)✅ 
   - 在 vector combo, func combo那一行插入一个Measure comb，里面封装好spice中的.meas命令的函数（上升/下降时间、过冲、下冲、周期、频率、占空比、RMS、THD、SINAD、等），具体函数请参考./meas.md；Measure combo的行为类似Func combo的行为：按函数名alphabet排列，提供显示函数描述的tip messages，Ctrl+left click多选，Shit+left click连续选择，等。
   - 在Add Trace那一行的下方插入一个 Measurement expr，行为类似Add Trace expr，当用户从Measure combo选择后把被选择函数填入Measurement expr，同时用户可以在其中进行表达式编辑。注意
   - run a .meas script
   - built-in meas functions (上升/下降时间、过冲/下冲、周期、频率、占空比、RMS、THD、SINAD 等)
-- 18.2 Compute the average or RMS of a trace.
-  - integrate a trace to obtain the average and RMS value over the displayed region
-  - First zoom the waveform to the region of interest, then move the mouse to the label of the trace, hold down the control key and left mouse click 
+- ✅ 18.2 Compute the statistics of a trace.✅  
+  -Plot a trace, zoom to region of interest 
+  - label of the trace, hold down the control key and left mouse click 
   - RMS average is reported only if the physical units of the integrated quantity is volts or amps to avoid confusing people that need the average when power is integrated.
--  18.3 FFT  
-  - ✅ how does user access it?✅ **已完成**   
-  - ✅ THD, SINAD, SNR, SFDR (.meas functions) depend on FFT — currently stubs in measure_engine.py✅ **已完成**    
-  - ✅ register functions to measure combo.✅ **已完成**  
-- 18.3.1 improve fft funcionalities
+-  ✅ 18.3 FFT✅    
+  - ✅ how does user access it?✅   
+  - ✅ THD, SINAD, SNR, SFDR (.meas functions) depend on FFT — currently stubs in measure_engine.py✅    
+  - ✅ register functions to measure combo.✅  
+- ✅ 18.3.1 improve fft funcionalities✅ 
   - set default window function to 'none' (now is set to 'hann') 
   - add more window functions : triangular, parzen, welch, sine, bohman, nuttall, blackman-nuttall, blackman-harris, flattop, gaussion, general-normal, tukey, dolph-chebyshev poisson bartlett-hann, lanczos
   - extend data point option to 1000000 order. (now largest is 16384)
   - add x axis range option. user can choose to do fft in full range in origin raw data, current zoom range, or manual setting.
   - add binomial smooth before fft and windowing option. user can set number of points 
-- 18.4 功率分析（瞬态、平均）
-- 18.5 power supply - specific analysis 
-- ✅ 18.6 multiple plot panel✅ **已完成**   
-- 18.7 数字波形（时序图风格）
+- ✅18.4 / 18.5 功率分析（瞬态、平均）/ power supply - specific analysis✅   
+
+- ✅ 18.6 multiple plot panel✅   
+
+- 18.7 visualize mixed signal simulation Results
+  - ✅ 支持数字波形（时序图风格）✅   
+  - 支持数字波形（bit波形）的analog显示   
+  - 支持eye diagram
+  - ✅ 支持总线信号（bus signal）显示 ✅   
+
+- ✅ 18.7.1 open vcd file in command line ✅  
+  - pqwave finename.vcd to open a vcd file.
+
+- 18.7.2 open a mixed signal case from command line
+  - senario : user do a ngspice mixed signal simulation and write raw files and vcd files. there could be single or mutiple raw / vcd files in a simulation. and file names could be aribitary. now they want view waves of simulation in pqwave. the current situation: pqwave doesn't support opening multiple files in command line, or through File > Open Raw File; or File > Open VCD File, or File > Load VCD Data. 
+  - solution : (1) to support open multiple files in command line, files can be any mix of raw and vcd, and position doesn't matter. (2) to support open multiple files through File > Open File : merge 'Open Raw File' and 'Load VCD' and 'Open VCD File' to a single 'Open File', to support open any mix of raw and vcd
+
+- 18.7.3 open / load a mixed signal (actually it applys to pure vcd and pure analog too) case from json.
+  - senario : user save a state after they doing some wave viewing and analysis described in 18.7.2. they want to do more viewing / analysis of the case, but not from scratch.
+  - solution : pqwave filename.json to open/load all relevant files (raw and vcd) and recover to the state which described in the json.  
 
 ###   v0.2.4 feature add 
 17. add some features
@@ -30,9 +46,9 @@
   - only save the data of current traces. the result is a subset of original raw which is useful to save interested data after exploration of a large dataset.
   - support qspiec .qraw, ltspice .raw, ngspice .raw
   - a "File - Save as" item and a toolbar entry.
-- ✅ 17.2 a command line to do the same as 17.1✅ **已完成** 
+- ✅ 17.2 a command line to do the same as 17.1✅ 
   - something like `pqwave --extract <inputfile> <expr1[,expr2[,...]]> -ngspice|-ltspice|-qspice <outputfile>`  
-- ✅ 17.3 a command line to convert raw files.✅ **已完成** 
+- ✅ 17.3 a command line to convert raw files.✅ 
   - don't extract subset of data but just convert raw type.
   - `pqwave --convert <inputfile> -ngspice|-ltspice|-qspice <outputfile>`
   - the same feature is already available in 'File - Convert Raw Data'.  
@@ -57,21 +73,21 @@
   - 如果添加的是一个需要变量的函数，当其被加到Add Trace expr之后，光标停留在该函数的()内，等待用户编辑，此时如果用户从Vectors combo内选择一个向量，则把该向量添加到前述函数的()内，因为以一个向量作为一个函数的变量是正常的操作逻辑。
 
 ###  ✅ v0.2.3 keybindings ✅ **已完成**
-15.  keybindings ✅ **已完成**  
+15.  keybindings ✅  
 - 提供一套快捷键系统，目前需要实现的keybindings记录在./keybindings.md，今后可继续扩展
 - 提供一个用户可以设定keybindings的方法
 - 提供Help - Keybindings菜单项，为用户提示默认的keybindings列表以及定制化设定的方法
 
 ###   v0.2.3   
-14.  ✅ attach states to plot✅ **已完成**  
+14.  ✅ attach states to plot✅  
 - 提供一个机制，将当前state与当前的plot绑定，这样当用户下次打开同一个raw时自动加载绑定的state，这样用户不用重复去调整各种参数设置。
 - 默认将状态json文件保存到与打开的raw文件相同的目录下，文件名与raw文件名相同。比如打开name.raw文件，则保存name.json文件。
 - 当前窗口关闭时自动保存状态json文件，同时增加一个File - Save Current State菜单项，用户可以在任意时候保存状态。
 - 状态文件不要保存x_data，对于大的raw文件来说数据量太庞大了。
 - 不再保存stat.json到$HOME/.pqwave，也不要再从该位置读取stat.json，防止冲突。
 
-###  ✅ v0.2.3 independent vertical (x) and horizon (y) cursors✅ **已完成**  
-13. independent horizon (y) and vertical (x) cursors ✅ **已完成**  
+###  ✅ v0.2.3 independent vertical (x) and horizon (y) cursors✅  
+13. independent horizon (y) and vertical (x) cursors ✅  
 - 与cross-hair cursor分离，可以独立使用
 - 支持两个x cursors，两个y cursor
 - 用户可以使用一个x/y cursor，也可以使用两个
@@ -79,13 +95,13 @@
 - 当使用两个y cursor时，在status bar显示 delta y1和delta y2的值
 - 与cross-hair的区别：cross-hair用于在trace上打点并获取该点的数值，x/y cursor用于拖动，显示delta值，并为后续的back-anotate做准备（TODO No. 12）。
 
-###  ✅ v0.2.3 introduce new feature : back-anotate from pqwave to xschem✅ **已完成**   
-12. back-anotate to xschem schematic✅ **已完成**  
+###  ✅ v0.2.3 introduce new feature : back-anotate from pqwave to xschem✅   
+12. back-anotate to xschem schematic✅  
 - 当用户使用cross-hair cursor扫过某个或多个trace时，将数据点发送给xschem，xschem在电路图上这些trace对应的node处显示接收到的数值。
 - live backannotation: You can place / move a (vertical) cursor in the  and see voltages and currents annotated in the schematic.
 - 可能需要参考xschem的graph的实现方法。./xschem_graph.md; ../xschem.git/src
 
-### ✅ v0.2.3 introduce new feature : communicate with external eda tools. ✅ **已完成**   
+### ✅ v0.2.3 introduce new feature : communicate with external eda tools. ✅   
 11. communicate with xschem ✅ **已完成**
 - open pqwave as external wave viewer from xschem 
   - **实现**: 在 xschemrc 中添加 pqwave 到 `sim(spicewave)` 数组，支持 GAW 式 TCP 套接字通信，无需修改 xschem 源代码
@@ -185,7 +201,7 @@
 3. implement trace property editor✅  **已完成** 
 4. implement Settings widget, with respect to the requirements in settings_widget.md ✅ **已完成**
 
-### ✅ v0.2.1.2 add features ✅ **已完成** 
+### ✅ v0.2.1.2 add features ✅ 
 1. Add a menu item "View" ✅ **已完成**
   - to toggle the ON/OFF of tool bar and status bar
   - to toggle the ON/OF of X/Y grids（pyqtgraph的context menu已有X-grid ON/OFF, Y-grid ON/OFF功能，直接使用其方法，不要增加新的方法）
