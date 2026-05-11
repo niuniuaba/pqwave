@@ -120,24 +120,34 @@ class PanelState:
     axis_configs: Dict[AxisId, AxisConfig] = field(default_factory=dict)
     domain: str = "time"
     current_x_var: Optional[str] = None
+    is_eye_diagram: bool = False
+    eye_diagram_trace_name: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             'panel_id': self.panel_id,
             'traces': [t.to_dict() for t in self.traces],
             'axis_configs': {ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()},
             'domain': self.domain,
             'current_x_var': self.current_x_var,
         }
+        if self.is_eye_diagram:
+            d['is_eye_diagram'] = True
+            d['eye_diagram_trace_name'] = self.eye_diagram_trace_name
+        return d
 
     def to_per_file_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             'panel_id': self.panel_id,
             'traces': [t.to_per_file_dict() for t in self.traces],
             'axis_configs': {ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()},
             'domain': self.domain,
             'current_x_var': self.current_x_var,
         }
+        if self.is_eye_diagram:
+            d['is_eye_diagram'] = True
+            d['eye_diagram_trace_name'] = self.eye_diagram_trace_name
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PanelState':
@@ -159,6 +169,8 @@ class PanelState:
             axis_configs=axis_configs,
             domain=data.get('domain', 'time'),
             current_x_var=data.get('current_x_var'),
+            is_eye_diagram=data.get('is_eye_diagram', False),
+            eye_diagram_trace_name=data.get('eye_diagram_trace_name', ''),
         )
 
 

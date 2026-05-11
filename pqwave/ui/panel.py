@@ -62,6 +62,7 @@ class Panel(QWidget):
 
         # Legend (uses SelectableItemSample for trace click-to-select)
         self.legend = self.plot_widget.addLegend(sampleType=SelectableItemSample)
+        self.plot_widget._legend = self.legend  # for right-click hit test
 
         # Axis manager (per-panel axis state)
         self.axis_manager = AxisManager(self.plot_widget, self.state)

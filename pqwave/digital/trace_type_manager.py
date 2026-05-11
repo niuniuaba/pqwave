@@ -5,7 +5,8 @@ Trace.metadata in-place and notifies the TraceManager when a plot item
 needs recreation (type change) or legend refresh.
 """
 
-from typing import List, Callable, Optional
+import re
+from typing import List, Callable, Optional, Tuple
 
 import numpy as np
 
@@ -77,6 +78,10 @@ class TraceTypeManager:
         for t in traces:
             t.trace_type = 'digital'
 
+        # Auto-infer bit order from trace name numeric suffixes.
+        ordered = _reorder_by_bit_suffix(traces, indices)
+        traces, indices = ordered
+
         x_data = traces[0].x_data.copy()
         n_pts = len(x_data)
         bus_values = _compute_bus_values(traces, n_pts)
@@ -102,6 +107,49 @@ class TraceTypeManager:
     def set_bus_format(self, bus_trace: Trace, fmt: str) -> None:
         if fmt in ('hex', 'bin', 'dec'):
             bus_trace.metadata['bus_display_format'] = fmt
+
+
+def _extract_bit_suffix(name: str) -> int | None:
+    """Extract a bit-number suffix from a trace name.
+
+    Recognises ``d[0]``, ``d0``, ``data_7``, ``bus<3>``.
+    Returns the integer or None.
+    """
+    # bracket: d[0], bus[15]
+    m = re.search(r'\[(\d+)\]', name)
+    if m:
+        return int(m.group(1))
+    # angle bracket: bus<3>
+    m = re.search(r'<(\d+)>', name)
+    if m:
+        return int(m.group(1))
+    # underscore: data_7, sig_15
+    m = re.search(r'_(\d+)$', name)
+    if m:
+        return int(m.group(1))
+    # plain trailing digits: d0, q7  (must have non-digit prefix)
+    m = re.search(r'(\d+)$', name)
+    if m and m.start() > 0 and not name[m.start() - 1].isdigit():
+        return int(m.group(1))
+    return None
+
+
+def _reorder_by_bit_suffix(
+    traces: List[Trace], indices: List[int]
+) -> Tuple[List[Trace], List[int]]:
+    """Reorder *traces* and *indices* so bit 0 (LSB) comes first.
+
+    If every trace has a parseable bit suffix the list is sorted by it.
+    Otherwise the original order is preserved.
+    """
+    suffixes = [_extract_bit_suffix(t.expression) for t in traces]
+    if any(s is None for s in suffixes):
+        return traces, indices  # keep selection order
+    ordered = sorted(zip(suffixes, traces, indices), key=lambda x: x[0])
+    return (
+        [t for _, t, _ in ordered],
+        [i for _, _, i in ordered],
+    )
 
 
 def _compute_bus_values(traces: List[Trace], n_pts: int) -> np.ndarray:

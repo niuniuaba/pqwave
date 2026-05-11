@@ -66,11 +66,3 @@ PRESETS: Dict[str, ThresholdConfig] = {
     ),
     "Auto (20%/80%)": None,  # Sentinel: computed from signal range at runtime
 }
-
-
-from pqwave.utils.colors import (
-    DIGITAL_HIGH_COLOR,
-    DIGITAL_LOW_COLOR,
-    DIGITAL_UNKNOWN_COLOR,
-    DIGITAL_TRANSITION_COLOR,
-)

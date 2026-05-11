@@ -90,6 +90,28 @@ class PanelGrid(QWidget):
     def get_panel(self, panel_id: str) -> Optional[Panel]:
         return self._panels.get(panel_id)
 
+    def get_layout_splits(self) -> list:
+        """Return split orientations from the splitter tree, depth-first.
+        Each element is 'horizontal' or 'vertical'.
+        """
+        orientations = []
+        for i in range(self._layout.count()):
+            w = self._layout.itemAt(i).widget()
+            if w is None:
+                continue
+            self._collect_split_orientations(w, orientations)
+        return orientations
+
+    @staticmethod
+    def _collect_split_orientations(widget: QWidget, out: list) -> None:
+        if isinstance(widget, QSplitter):
+            out.append('horizontal' if widget.orientation() == Qt.Orientation.Horizontal
+                       else 'vertical')
+            for i in range(widget.count()):
+                child = widget.widget(i)
+                if child is not None:
+                    PanelGrid._collect_split_orientations(child, out)
+
     @property
     def panels(self) -> Dict[str, Panel]:
         return dict(self._panels)

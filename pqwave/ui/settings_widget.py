@@ -27,6 +27,7 @@ class SettingsWidget(QWidget):
     # Signal emitted when plot title changes
     viewbox_theme_changed = pyqtSignal(ViewboxTheme)
     font_changed = pyqtSignal()
+    eye_diagram_changed = pyqtSignal()
 
     def __init__(self,
                  axis_manager: AxisManager,
@@ -562,6 +563,7 @@ class SettingsWidget(QWidget):
         cfg.mode = "overlay" if mode_text == "Overlay" else "persistence"
         cfg.offset = self._eye_offset_spin.value()
         cfg.fuzz = self._eye_fuzz_cb.isChecked()
+        self.eye_diagram_changed.emit()
 
     def _reset_eye(self) -> None:
         """Reset eye diagram settings to defaults."""

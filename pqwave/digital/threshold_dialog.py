@@ -1,8 +1,10 @@
 """ThresholdDialog — configures digital signal logic thresholds."""
 
+import pyqtgraph as pg
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QDoubleSpinBox, QDialogButtonBox, QGroupBox,
+    QDoubleSpinBox, QCheckBox, QDialogButtonBox, QGroupBox,
 )
 
 from pqwave.models.trace import Trace
@@ -13,13 +15,15 @@ class ThresholdDialog(QDialog):
     """Dialog for setting logic thresholds on a digital trace.
 
     Provides preset configurations (TTL, CMOS, etc.) and manual override
-    of V_high and V_low thresholds with Schmitt-trigger hysteresis.
+    of V_high and V_low thresholds.  A *Show preview* checkbox (off by
+    default) draws the threshold lines on the plot in real time.
     """
 
     def __init__(self, trace: Trace, parent=None):
         super().__init__(parent)
         self._trace = trace
         self._config = self._load_config()
+        self._plot = parent
         self.setWindowTitle(f"Threshold Settings — {trace.name}")
         self.setMinimumWidth(350)
         self._build_ui()
@@ -79,6 +83,16 @@ class ThresholdDialog(QDialog):
         info.setStyleSheet("color: gray;")
         layout.addWidget(info)
 
+        self._preview_cb = QCheckBox("Show preview on plot")
+        self._preview_cb.setChecked(
+            self._trace.metadata.get('_thresh_preview', False))
+        self._preview_cb.toggled.connect(self._on_preview_toggled)
+        layout.addWidget(self._preview_cb)
+
+        # Connect spinbox changes for live preview updates
+        self._v_high_spin.valueChanged.connect(self._update_preview_lines)
+        self._v_low_spin.valueChanged.connect(self._update_preview_lines)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel)
@@ -98,6 +112,58 @@ class ThresholdDialog(QDialog):
         self._v_high_spin.setValue(cfg.v_high)
         self._v_low_spin.setValue(cfg.v_low)
         self._preset_desc.setText(cfg.description)
+
+    def _on_preview_toggled(self, checked: bool):
+        self._trace.metadata['_thresh_preview'] = checked
+        if checked:
+            self._add_preview_lines()
+        else:
+            self._remove_preview_lines()
+
+    @property
+    def _v_high_line(self):
+        return getattr(self._plot, '_thresh_preview_high', None)
+
+    @_v_high_line.setter
+    def _v_high_line(self, line):
+        self._plot._thresh_preview_high = line
+
+    @property
+    def _v_low_line(self):
+        return getattr(self._plot, '_thresh_preview_low', None)
+
+    @_v_low_line.setter
+    def _v_low_line(self, line):
+        self._plot._thresh_preview_low = line
+
+    def _add_preview_lines(self):
+        if self._plot is None:
+            return
+        if self._v_high_line is None:
+            line = pg.InfiniteLine(
+                angle=0, pen=pg.mkPen('r', width=1, style=Qt.PenStyle.DashLine))
+            self._plot.addItem(line)
+            self._v_high_line = line
+        if self._v_low_line is None:
+            line = pg.InfiniteLine(
+                angle=0, pen=pg.mkPen('b', width=1, style=Qt.PenStyle.DashLine))
+            self._plot.addItem(line)
+            self._v_low_line = line
+        self._update_preview_lines()
+
+    def _update_preview_lines(self):
+        if self._v_high_line is not None:
+            self._v_high_line.setValue(self._v_high_spin.value())
+        if self._v_low_line is not None:
+            self._v_low_line.setValue(self._v_low_spin.value())
+
+    def _remove_preview_lines(self):
+        if self._v_high_line is not None and self._plot is not None:
+            self._plot.removeItem(self._v_high_line)
+            self._v_high_line = None
+        if self._v_low_line is not None and self._plot is not None:
+            self._plot.removeItem(self._v_low_line)
+            self._v_low_line = None
 
     def _on_accept(self):
         v_high = self._v_high_spin.value()

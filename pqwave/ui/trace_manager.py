@@ -47,15 +47,25 @@ class SelectableItemSample(ItemSample):
     pyqtgraph's default ItemSample toggles plot_item visibility on every
     left click.  We replace that with a clean signal emission so the
     TraceManager selection handler controls all click behaviour.
+
+    Right-click looks up a callback stored on the parent LegendItem
+    (set by TraceManager) so each panel's context menu fires correctly.
     """
 
-    sigRightClicked = QtCore.pyqtSignal(object)
+    def __init__(self, item):
+        super().__init__(item)
+        self.setMinimumWidth(120)
 
     def mouseClickEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             event.accept()
             self.update()
             self.sigClicked.emit(self.item)
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
+            event.accept()
+            handler = getattr(self.parentItem(), '_right_click_handler', None)
+            if handler is not None:
+                handler(self.item)
         else:
             super().mouseClickEvent(event)
 
@@ -98,10 +108,13 @@ class _StaticCurveItem(pg.PlotCurveItem):
         return self._boundingRect
 
 
-class TraceManager:
+class TraceManager(QtCore.QObject):
     """Manages trace lifecycle, color assignment, and legend updates."""
 
     logger = get_logger(__name__)
+
+    # Emitted when user right-clicks a trace legend item
+    trace_context_menu_requested = QtCore.pyqtSignal(str)
 
     @staticmethod
     def _is_fft_expression(expr: str) -> bool:
@@ -123,6 +136,7 @@ class TraceManager:
             panel_id: ID of the panel this TraceManager belongs to
             color_manager: ColorManager instance for color assignment (creates default if None)
         """
+        super().__init__()
         self.plot_widget = plot_widget
         self.legend = legend
         self.state = application_state
@@ -157,6 +171,9 @@ class TraceManager:
 
         # Connect legend click signal for trace selection
         self.legend.sigSampleClicked.connect(self._on_legend_sample_clicked)
+
+        # Wire right-click on legend samples via legend attribute
+        self.legend._right_click_handler = self._on_legend_sample_right_clicked
 
     @property
     def _state_traces(self) -> List[Trace]:
@@ -678,6 +695,16 @@ class TraceManager:
 
     # --- Trace selection ---
 
+    def _on_legend_sample_right_clicked(self, plot_item) -> None:
+        """Forward right-click on legend sample to MainWindow for context menu."""
+        idx = self._find_trace_index(plot_item)
+        if idx is None:
+            return
+        trace = self._state_traces[idx] if idx < len(self._state_traces) else None
+        if trace is None:
+            return
+        self.trace_context_menu_requested.emit(trace.name)
+
     def _on_legend_sample_clicked(self, plot_item) -> None:
         """Handle left click on a legend item sample.
 
@@ -750,6 +777,78 @@ class TraceManager:
         self._auto_range_y_axis(bus_trace.y_axis)
         self._auto_range_x()
         self._update_y_tick_visibility()
+
+    def toggle_bus_expand(self, bus_trace_name: str) -> None:
+        """Expand/collapse a bus: show or hide its member traces."""
+        bus_trace = next(
+            (t for t in self._state_traces if t.name == bus_trace_name), None)
+        if bus_trace is None or bus_trace.trace_type != 'bus':
+            return
+        if bus_trace.bus_signals is None:
+            return
+
+        expanded = bus_trace.metadata.get('bus_expanded', False)
+        member_exprs = set(bus_trace.bus_signals)
+
+        if expanded:
+            for i, t in enumerate(self._state_traces):
+                if t.expression in member_exprs:
+                    t.metadata['_bus_member_hidden'] = True
+                    t.visible = False
+                    if i < len(self.traces):
+                        self.traces[i][1].setVisible(False)
+            bus_trace.metadata['bus_expanded'] = False
+        else:
+            for i, t in enumerate(self._state_traces):
+                if t.expression in member_exprs:
+                    t.metadata.pop('_bus_member_hidden', None)
+                    t.visible = True
+                    if i < len(self.traces):
+                        self.traces[i][1].setVisible(True)
+            bus_trace.metadata['bus_expanded'] = True
+
+        self._refresh_legend()
+
+    def ungroup_bus(self, bus_trace_name: str) -> None:
+        """Ungroup a bus: restore member visibility and remove the bus trace."""
+        bus_trace = next(
+            (t for t in self._state_traces if t.name == bus_trace_name), None)
+        if bus_trace is None or bus_trace.trace_type != 'bus':
+            return
+
+        # Restore member trace visibility
+        if bus_trace.bus_signals:
+            member_exprs = set(bus_trace.bus_signals)
+            for i, t in enumerate(self._state_traces):
+                if t.expression in member_exprs:
+                    t.metadata.pop('_bus_member_hidden', None)
+                    t.visible = True
+                    if i < len(self.traces):
+                        self.traces[i][1].setVisible(True)
+                    t.trace_type = 'digital'
+
+        # Remove bus from state
+        state_idx = next((i for i, t in enumerate(self._state_traces)
+                          if t.name == bus_trace_name), -1)
+        if state_idx >= 0:
+            self._state_traces.pop(state_idx)
+            self.state.remove_trace(state_idx)
+
+        # Remove bus plot items (main line + bottom rail)
+        bot = bus_trace.metadata.pop('_bus_bot_item', None)
+        if bot is not None:
+            bvb = bot.getViewBox()
+            if bvb is not None:
+                bvb.removeItem(bot)
+        for i, (name, pi, axis) in enumerate(self.traces):
+            if name == bus_trace_name:
+                vb = pi.getViewBox()
+                if vb is not None:
+                    vb.removeItem(pi)
+                self.traces.pop(i)
+                break
+
+        self._refresh_legend()
 
     def show_threshold_dialog(self) -> None:
         """Open threshold settings for the first selected digital trace."""

@@ -561,3 +561,70 @@ AttributeError: 'MainWindow' object has no attribute '_compute_trace_stats'
 - how to reproduce : pqwave tests/bridge.raw, plot v(r1), when split plot panel through Ctrl+Shift+E the x axis (time) of the old panel (which contains v(r1) trace) is stretched to 0~1000 (x0.001)
 - what expected : keep the old panel range as-is when split panel.
 
+### ✅ 97. Eye Diagram Properties settings doesn't work✅ **fixed** 
+- what is : none of parameters in Eye Diagram Properties settings works.
+- how to reproduce : pqwave tests/eyediagram_demo.raw, plot v(eyd), click to select v(eye) and press Ctrl+I to plot eye diagram of it. now change the parameters in Edit > Settings > Eye Diagram settings makes no change in the eye diagram.
+
+### ✅ 98. X / Y label texts change when eye diagram is re-activated✅ **fixed**  
+- what is : plot an eye diagram, click on other plot widgets to activate them, now when click on eye diagram to activate it again its x lable text changes from 'UI' to 'time' and y label text changes from "Amplitude" to "Y1".
+
+### ✅ 99. eye diagram not recovered correctly from project file✅ **fixed**   
+- what is : eye diagram cannot be recovered correctly from a saved project file
+- how to reproduce : (1) pqwave tests/eyediagram_demo.raw, (2) plot v(eye), (3) Ctrl+click then Ctrl+I to plot its eye diagram in a new panel; (4) close original panel (leave only the eye plot panel); (5) save project to tests/eyediagram_demo.json; (6) close pqwave; (7) pqwave tests/eyediagram_demo.json, the plot panel is an ordinary plot panel and v(eye) is rendered as original analog voltage trace.
+- reference : tests/eyediagram_demo.json
+
+### ✅ 100. plot panel layout changes when restored eye diagrom from project file✅ **fixed**  
+- what is : save a project consists of a normal analog trarce plot and a eye diagram plot in 1x2 layout. when restore from project file plot panel layout changes to 2x1 (stack) layout, and the ordinary analog trace plot doesn't hold its original x range
+
+### ✅ 101. cursors doesn't work in eye diagram✅ **fixed**   
+- what is : in eye diagrams when trigger X / Y / cross-hair cursors in tool bar the cursors don't appear.
+
+### ✅ 102. cannot autorange X axis or Y axis seperately✅ **fixed**   
+- what is : cannot autorange X or Y axis seperately. when autorange X or autorange Y it leads to zoom-to-fit (autorange both X and Y)
+
+### ✅ 103. export to image doesn't work when user input suffix-less filename✅ **fixed**   
+- what is : when export to image if the user input a filename without suffix the file is not generated at all.
+- wht expected : if the user doesn't include the suffix in a filename add it automatically with respect to the file type selected.
+
+### ✅ 104. PlotWidget.plot_context_menu induced TypeError✅ **fixed**   
+- what is : TypeError when launch pqwave.  File "/home/wing/Apps/pqwave.git/pqwave/main.py", line 572, in main
+    window = MainWindow(initial_files=initial_files, xschem_ba_port=args.xschem_ba_port)
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 124, in __init__
+    self._connect_signals()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 257, in _connect_signals
+    self._rebind_panel_signals(initial_panel)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/wing/Apps/pqwave.git/pqwave/ui/main_window.py", line 325, in _rebind_panel_signals
+    panel.plot_widget.plot_context_menu.connect(self._on_plot_context_menu)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: decorated slot has no signature compatible with PlotWidget.plot_context_menu[object]
+
+### ✅ 105. difficult to trigger trace legend context menu✅ **fixed**   
+- what is : it's very difficult to distinguish trace legend context menu from plot context menu and the trial to trigger trace legend context menu fail frequently.
+
+### ✅ 106. plot context menu pops up accidentially✅ **fixed**  
+- what is : the plot context menu pops up every time after click a trace context menu item.
+
+### ✅ 107. trace plot context doesn't work in split panels✅ **fixed**  
+- what is : in split plot panels right click trace legend doesn't trigger context menu.
+
+### ✅ 108. no 'Group Into BUS' item in trace legend context menu✅ **fixed**   
+- what is : no 'Group Into BUS' item in trace legend context menu
+- what expected : a 'Group Into BUS' item in trace legend context menu which is wired to Ctrl+B
+
+### ✅ 109. 'Expand Members' and 'Ungroup' in trace legend context menu doesn't work✅ **fixed**  
+- what is : nothing happens when click 'Expand Members' and 'Ungroup' in a bus trace legend context menu.
+
+### ✅ 110. bus trace remains after being Ungroup✅ **fixed**  
+- what is : a bus trace remains after being Ungroup
+- what expected : a bus trace should vanishi after being ungroup, no render, no legend, not selectable nor operatible.
+
+### ✅ 111. threshold preview improvement✅ **fixed** 
+- what is : when close threshold settings dialog the threshold preview disappears
+- what expected : threshold preview is controlled totally by check box. close threshold settings dialog doesn't lead to previe appear or disappear.
+
+### ✅ 112. threshold preview improvement✅ **fixed**  
+- what is : uncheck 'show preview in plot' checkbox in a following settings diagram doesn't remove the threshold preview.
+- how to re-produce : (1) check 'show preview in plot' checkbox; (2) close settings dialog; (3) open settings dialog again; (4) uncheck 'show preview in plot' checkbox doesn't remove the threshold preview lines.
+- what expected : uncheck the 'show preview in plot' checkbox always remove the threshold preview.

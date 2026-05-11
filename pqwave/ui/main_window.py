@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         self.color_manager = None
         self._bound_plot_widget: Optional[PlotWidget] = None
         self._bound_axis_manager: Optional[AxisManager] = None
+        self._bound_trace_manager = None
         self._cursor_sync_in_progress = False
         self._restoring_state = False
 
@@ -172,6 +173,7 @@ class MainWindow(QMainWindow):
             'save_current_state': self.save_current_state,
             'save_project_as': self._save_project_as,
             'save_as_data_file': self.save_as_data_file,
+            'export_plot_image': self.export_plot_image,
             'convert_raw_data': self.convert_raw_data,
             'edit_trace_properties': self.edit_trace_properties,
             'show_settings': self.show_settings,
@@ -311,6 +313,16 @@ class MainWindow(QMainWindow):
         panel.plot_widget.axis_log_mode_changed.connect(self._on_axis_log_mode_changed)
         panel.plot_widget.mark_clicked.connect(self._on_mark_clicked)
         panel.plot_widget.title_changed.connect(self._on_plot_title_changed)
+        # Set callbacks for context menus (avoids signal connection issues)
+        panel.plot_widget._context_menu_callback = self._on_plot_context_menu
+
+        # Connect trace manager context menu
+        try:
+            panel.trace_manager.trace_context_menu_requested.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        panel.trace_manager.trace_context_menu_requested.connect(
+            self._on_trace_context_menu)
 
         # Connect new axis manager signals
         panel.axis_manager.axis_log_mode_changed.connect(
@@ -321,6 +333,7 @@ class MainWindow(QMainWindow):
 
         self._bound_plot_widget = panel.plot_widget
         self._bound_axis_manager = panel.axis_manager
+        self._bound_trace_manager = panel.trace_manager
 
     def _on_panel_activated(self, panel_id):
         """Handle active panel change: initialize new panel and rebind signals."""
@@ -1397,6 +1410,47 @@ class MainWindow(QMainWindow):
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
 
+    def export_plot_image(self) -> None:
+        """Export the active panel's plot to an image file (PNG, JPG, SVG, etc.)."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        pw = panel.plot_widget
+        plot_item = pw.plotItem
+
+        from PyQt6.QtWidgets import QFileDialog
+        import re
+        path, sel_filter = QFileDialog.getSaveFileName(
+            self, "Export Plot to Image", "",
+            "PNG (*.png);;JPEG (*.jpg *.jpeg);;SVG (*.svg);;BMP (*.bmp);;TIFF (*.tiff)")
+        if not path:
+            return
+
+        # Auto-append extension from the selected filter if missing
+        ext_map = {'svg': '.svg', 'png': '.png', 'jpg': '.jpg',
+                   'jpeg': '.jpg', 'bmp': '.bmp', 'tiff': '.tiff'}
+        has_ext = any(path.lower().endswith(ext) for ext in ext_map)
+        if not has_ext:
+            m = re.search(r'\*\.(\w+)', sel_filter)
+            if m:
+                path += '.' + m.group(1)
+
+        try:
+            if path.lower().endswith('.svg'):
+                from pyqtgraph.exporters import SVGExporter
+                exp = SVGExporter(plot_item)
+                exp.export(path)
+            else:
+                from pyqtgraph.exporters import ImageExporter
+                exp = ImageExporter(plot_item)
+                exp.export(path)
+            logger.info(f"Plot exported to {path}")
+        except Exception as e:
+            logger.exception("Export failed")
+            QMessageBox.critical(
+                self, "Export Failed",
+                f"Failed to export plot:\n{e}")
+
     def _save_vcd_traces_as_raw(self, path, traces, target_format, x_var_name, x_var_data):
         """Write VCD-only traces to a raw-format file via write_raw_file."""
         import numpy as np
@@ -1516,13 +1570,15 @@ class MainWindow(QMainWindow):
 
         # Connect list selection change to update all fields
         list_widget.currentRowChanged.connect(
-            lambda row, d=dialog, lw=list_widget: self._update_trace_properties(row, lw, d))
+            lambda row, lw=list_widget: self._update_trace_properties(row, lw))
 
         # Create buttons
         button_layout = QHBoxLayout()
         apply_btn = QPushButton("Apply")
+        # clicked signal passes a bool; absorb it as _ so lw stays the list_widget
         apply_btn.clicked.connect(
-            lambda d=dialog, lw=list_widget: self._apply_trace_properties(lw.currentRow(), lw, d))
+            lambda _, lw=list_widget: self._apply_trace_properties(
+                lw.currentRow(), lw))
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(dialog.close)
         button_layout.addWidget(apply_btn)
@@ -1531,17 +1587,20 @@ class MainWindow(QMainWindow):
 
         dialog.setLayout(layout)
         dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.Window)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        # Keep a hard reference so the dialog object captured by the lambdas
+        # below does not get invalidated (WA_DeleteOnClose can cause this).
+        self._trace_props_dialog = dialog
 
         # Select first trace if available
         if traces:
             list_widget.setCurrentRow(0)
-            self._update_trace_properties(0, list_widget, dialog)
+            self._update_trace_properties(0, list_widget)
 
         dialog.show()
 
-    def _update_trace_properties(self, row, list_widget, dialog):
+    def _update_trace_properties(self, row, list_widget):
         """Update trace properties fields with current trace values"""
+        dialog = self._trace_props_dialog
         if 0 <= row < len(self.trace_manager.traces):
             var, plot_item, y_axis = self.trace_manager.traces[row]
             # Update alias field
@@ -1584,8 +1643,9 @@ class MainWindow(QMainWindow):
                         dialog.height_combo.setCurrentIndex(i)
                         break
 
-    def _apply_trace_properties(self, row, list_widget, dialog):
+    def _apply_trace_properties(self, row, list_widget):
         """Apply trace properties (alias, color, line width)"""
+        dialog = self._trace_props_dialog
 
         if 0 <= row < len(self.trace_manager.traces):
             var, plot_item, y_axis = self.trace_manager.traces[row]
@@ -1669,6 +1729,7 @@ class MainWindow(QMainWindow):
             # Connect signals
             self._settings_widget.viewbox_theme_changed.connect(self._on_viewbox_theme_changed)
             self._settings_widget.font_changed.connect(self._on_font_changed)
+            self._settings_widget.eye_diagram_changed.connect(self._on_eye_diagram_settings_changed)
             self._settings_widget.destroyed.connect(lambda: setattr(self, '_settings_widget', None))
 
         # Show and raise the widget
@@ -1848,6 +1909,102 @@ class MainWindow(QMainWindow):
             self.mark_panel = None
 
     @pyqtSlot(float, float, float, float, float)
+    def _on_plot_context_menu(self) -> None:
+        """Show context menu when right-clicking the plot area."""
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QCursor
+        # Suppress if a trace context menu just closed (avoids spurious
+        # re-trigger from plot-item removal during ungroup/expand).
+        if getattr(self, '_suppress_plot_menu_until', 0) > time.monotonic():
+            return
+        menu = QMenu(self)
+        menu.addAction("Export Plot to Image...", self.export_plot_image)
+        menu.addSeparator()
+        menu.addAction("Toggle Grid", self.toggle_grids)
+        a = menu.addAction("Auto-range X-axis")
+        a.triggered.connect(self.auto_range_x)
+        a = menu.addAction("Auto-range Y-axis")
+        a.triggered.connect(self.auto_range_y)
+        menu.addAction("Zoom to Fit", self.zoom_to_fit)
+        menu.exec(QCursor.pos())
+
+    def _find_panel_with_trace(self, trace_name: str):
+        """Return the Panel containing *trace_name*, or None."""
+        for p in self.panel_grid.panels.values():
+            if any(t.name == trace_name for t in p.trace_manager._state_traces):
+                return p
+        return None
+
+    def _on_trace_context_menu(self, trace_name: str) -> None:
+        """Show context menu when right-clicking a trace legend item."""
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QCursor
+
+        panel = self._find_panel_with_trace(trace_name)
+        if panel is None:
+            return
+        menu = QMenu(self)
+
+        # Find the trace to determine its type
+        tm = panel.trace_manager
+        trace = next((t for t in tm._state_traces if t.name == trace_name), None)
+        ttype = trace.trace_type if trace else 'analog'
+        trace_idx = tm._state_traces.index(trace) if trace else -1
+
+        if ttype == 'analog':
+            a = menu.addAction("Mark as Digital...")
+            a.triggered.connect(
+                lambda _, idx=trace_idx, _tm=tm: _tm.type_manager.toggle(
+                    _tm._state_traces[idx], idx))
+            menu.addSeparator()
+            a = menu.addAction("Eye Diagram")
+            a.triggered.connect(self._show_eye_diagram)
+        elif ttype == 'digital':
+            a = menu.addAction("Show as Analog")
+            a.triggered.connect(
+                lambda _, idx=trace_idx, _tm=tm: _tm.type_manager.toggle(
+                    _tm._state_traces[idx], idx))
+            a = menu.addAction("Threshold Settings...")
+            a.triggered.connect(self._show_threshold_settings)
+            a = menu.addAction("Group Into Bus")
+            a.triggered.connect(
+                lambda _, _tm=tm: _tm.group_selected_as_bus())
+            menu.addSeparator()
+            a = menu.addAction("Eye Diagram")
+            a.triggered.connect(self._show_eye_diagram)
+        elif ttype == 'bus':
+            fmt_menu = menu.addMenu("Display Format")
+            for fmt in ('hex', 'bin', 'dec'):
+                a = fmt_menu.addAction(fmt)
+                a.triggered.connect(
+                    lambda _, f=fmt: self._set_bus_display_format(
+                        trace_name, f))
+            menu.addSeparator()
+            expanded = trace.metadata.get('bus_expanded', False) if trace else False
+            a = menu.addAction("Collapse Members" if expanded else "Expand Members")
+            a.triggered.connect(
+                lambda _, _tm=tm: _tm.toggle_bus_expand(trace_name))
+            a = menu.addAction("Ungroup Bus")
+            a.triggered.connect(
+                lambda _, _tm=tm: _tm.ungroup_bus(trace_name))
+
+        self._trace_menu_active = True
+        menu.exec(QCursor.pos())
+        self._trace_menu_active = False
+        # Suppress spurious plot menu for 300ms after trace menu closes.
+        self._suppress_plot_menu_until = time.monotonic() + 0.3
+
+    def _set_bus_display_format(self, trace_name: str, fmt: str) -> None:
+        """Update bus display format metadata and trigger re-render."""
+        panel = self._find_panel_with_trace(trace_name)
+        if panel is None:
+            return
+        trace = next((t for t in self.state.traces if t.name == trace_name), None)
+        if trace is not None:
+            trace.metadata['bus_display_format'] = fmt
+            panel.trace_manager.recreate_trace_plot_item(
+                self.state.traces.index(trace))
+
     def _on_mark_clicked(self, x_vb, y1_vb, x_linear, y1_linear, y2_linear):
         """Handle mark placement from plot widget click.
 
@@ -2761,11 +2918,17 @@ class MainWindow(QMainWindow):
         saved_to_current: dict[int, str] = {}
 
         # Ensure panel count matches: create extras if needed
+        saved_layout = data.get('panel_layout', [])
         while len(current_order) < len(saved_order):
             last_pid = current_order[-1] if current_order else None
             if last_pid is None:
                 break
-            new_panel = self.panel_grid.split_panel(last_pid, orientation="vertical")
+            split_idx = len(current_order) - 1
+            if split_idx < len(saved_layout):
+                orientation = saved_layout[split_idx]
+            else:
+                orientation = "vertical"
+            new_panel = self.panel_grid.split_panel(last_pid, orientation=orientation)
             if new_panel is None:
                 break
             current_order = list(self.state.panel_order)
@@ -2795,6 +2958,10 @@ class MainWindow(QMainWindow):
                         ps.current_x_var = pdata['current_x_var']
                     if 'domain' in pdata:
                         ps.domain = pdata['domain']
+                    if 'is_eye_diagram' in pdata:
+                        ps.is_eye_diagram = pdata['is_eye_diagram']
+                        ps.eye_diagram_trace_name = pdata.get(
+                            'eye_diagram_trace_name', '')
 
         # Restore active panel by position
         if saved_active and saved_active in saved_order:
@@ -2831,9 +2998,18 @@ class MainWindow(QMainWindow):
             panel.axis_manager._initialize_axes()
             self._update_trace_manager_log_modes()
 
-            x_var = pdata.get('current_x_var', 'time')
-            self.state.current_x_var = x_var
-            self._restore_traces_from_data(pdata.get('traces', []), x_var)
+            # Eye diagram panels: skip trace plotting; render eye instead.
+            if pdata.get('is_eye_diagram'):
+                trace_name = pdata.get('eye_diagram_trace_name', '')
+                y_data = self._load_eye_trace_data(trace_name)
+                if y_data is not None:
+                    panel.axis_manager.set_axis_log_mode(AxisId.X, False)
+                    panel.axis_manager.set_axis_log_mode(AxisId.Y1, False)
+                    self._render_eye_diagram(panel, y_data, trace_name)
+            else:
+                x_var = pdata.get('current_x_var', 'time')
+                self.state.current_x_var = x_var
+                self._restore_traces_from_data(pdata.get('traces', []), x_var)
 
         # Restore the active panel for subsequent title/grid/legend setup
         if _prev_active_id and _prev_active_id in self.state.panels:
@@ -2981,6 +3157,7 @@ class MainWindow(QMainWindow):
         data = self.state.to_per_file_dict()
         data['source_files'] = [sf.to_dict() for sf in self.state.source_files]
         data['version'] = 2
+        data['panel_layout'] = self.panel_grid.get_layout_splits()
 
         try:
             with open(path, 'w', encoding='utf-8') as f:
@@ -3220,30 +3397,36 @@ class MainWindow(QMainWindow):
         new_panel.axis_manager.set_axis_log_mode(AxisId.X, False)
         new_panel.axis_manager.set_axis_log_mode(AxisId.Y1, False)
 
-        # Read eye diagram config from global settings
+        # Store for re-rendering when settings change
+        self._eye_diagram_y_data = trace.y_data
+        self._eye_diagram_trace_name = trace.name
+        self._eye_diagram_panel_id = new_panel.panel_id
+
+        # Mark the panel as an eye diagram panel for project save/load
+        pstate = self.state.panels.get(new_panel.panel_id)
+        if pstate is not None:
+            pstate.is_eye_diagram = True
+            pstate.eye_diagram_trace_name = trace.name
+
+        ok = self._render_eye_diagram(new_panel, trace.y_data, trace.name)
+        if not ok:
+            self.panel_grid.close_panel(new_panel.panel_id)
+
+    def _render_eye_diagram(self, panel, y_data: np.ndarray, trace_name: str) -> bool:
+        """Render eye diagram into *panel*.  Returns False if data is unusable."""
         eye_cfg = self.state.eye_diagram_config
 
-        y_data = trace.y_data
         if len(y_data) < eye_cfg.window_size:
-            QMessageBox.information(
-                self, "Insufficient Data",
-                f"Trace has {len(y_data)} samples, need at least "
-                f"{eye_cfg.window_size} for the configured window size.")
-            self.panel_grid.close_panel(new_panel.panel_id)
-            return
+            return False
 
         y_clean = y_data[np.isfinite(y_data)]
         if len(y_clean) == 0:
-            QMessageBox.information(
-                self, "Invalid Data",
-                "Trace contains no finite values.")
-            self.panel_grid.close_panel(new_panel.panel_id)
-            return
+            return False
         y_min, y_max = float(y_clean.min()), float(y_clean.max())
         yamp = y_max - y_min or 1.0
         ybounds = (y_min - 0.05 * yamp, y_max + 0.05 * yamp)
 
-        pw = new_panel.plot_widget
+        pw = panel.plot_widget
         try:
             if eye_cfg.mode == "overlay":
                 render_overlay(pw, y_data, eye_cfg.window_size, eye_cfg.offset)
@@ -3251,11 +3434,53 @@ class MainWindow(QMainWindow):
                 render_persistence(pw, y_data, eye_cfg.window_size,
                                    eye_cfg.offset, eye_cfg.fuzz, ybounds)
         except Exception:
-            self.panel_grid.close_panel(new_panel.panel_id)
-            raise
+            logger.exception("Failed to render eye diagram")
+            return False
+
+        # Restore cursor lines removed by clear() during rendering
+        pw.ensure_cursors_in_plot()
 
         n_windows = max(1, (len(y_data) - eye_cfg.offset) // eye_cfg.window_size)
-        pw.set_plot_title(f"Eye: {trace.name}  |  {n_windows} windows")
+        pw.set_plot_title(f"Eye: {trace_name}  |  {n_windows} windows")
+
+        # Persist axis labels so they survive panel re-activation
+        pstate = self.state.panels.get(panel.panel_id)
+        if pstate is not None:
+            pstate.axis_configs[AxisId.X].label = (
+                'Sample' if eye_cfg.mode == 'overlay' else 'UI')
+            pstate.axis_configs[AxisId.Y1].label = 'Amplitude'
+        return True
+
+    def _on_eye_diagram_settings_changed(self) -> None:
+        """Re-render the eye diagram when settings change in the Settings dialog."""
+        y_data = getattr(self, '_eye_diagram_y_data', None)
+        panel_id = getattr(self, '_eye_diagram_panel_id', None)
+        trace_name = getattr(self, '_eye_diagram_trace_name', '')
+        if y_data is None or panel_id is None:
+            return
+        panel = self.panel_grid.get_panel(panel_id)
+        if panel is None:
+            return
+        self._render_eye_diagram(panel, y_data, trace_name)
+
+    def _load_eye_trace_data(self, trace_name: str):
+        """Evaluate *trace_name* against any panel's raw file.
+        Returns y_data as ndarray, or None on failure.
+        """
+        if not trace_name:
+            return None
+        # Search all panels for a raw_file that contains the trace.
+        for p in self.panel_grid.panels.values():
+            tm = p.trace_manager
+            if tm.raw_file is None:
+                continue
+            try:
+                data = tm.raw_file.get_variable_data(trace_name)
+                if data is not None and len(data) > 0:
+                    return data
+            except Exception:
+                continue
+        return None
 
     def _show_threshold_settings(self) -> None:
         """Show threshold settings for the first selected digital trace."""

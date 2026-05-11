@@ -118,6 +118,13 @@ class MenuManager:
         file_menu.addAction(save_as_action)
         file_menu.addSeparator()
 
+        export_img_action = QAction("Export Plot to Image...", self.parent)
+        export_img_action.triggered.connect(
+            self.callbacks.get("export_plot_image", lambda: None)
+        )
+        file_menu.addAction(export_img_action)
+        file_menu.addSeparator()
+
         open_file_action = QAction("Open File...", self.parent)
         open_file_action.triggered.connect(self.callbacks.get("open_file", lambda: None))
         self._set_action_shortcut(open_file_action, "open_file")

@@ -11,12 +11,6 @@ from typing import List, Tuple
 import numpy as np
 
 
-# Digital signal display colors
-DIGITAL_HIGH_COLOR = (0, 200, 0)
-DIGITAL_LOW_COLOR = (0, 80, 0)
-DIGITAL_UNKNOWN_COLOR = (180, 180, 0)
-DIGITAL_TRANSITION_COLOR = (100, 100, 100)
-
 # Predefined color palette (RGB tuples with values 0-255)
 DEFAULT_COLOR_PALETTE: List[Tuple[int, int, int]] = [
     (255, 0, 0),      # Red

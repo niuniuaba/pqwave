@@ -580,12 +580,13 @@ class PlotWidget(pg.PlotWidget):
         so only the target axis is adjusted.
         """
         vb = self.plotItem.vb
-        # pyqtgraph's vb.autoRange() calls setRange() with BOTH axes computed
-        # from item bounding rects.  When we have a fixed Y1 range set, we must
-        # save it before any autoRange and restore it afterwards, otherwise X
-        # or Y2 auto-range would collapse the Y1 range back to trace-data-fit.
-        need_restore_y = (axis != 'Y1' and self._digital_y1_range is not None)
+        # pyqtgraph's vb.autoRange() always updates both axes regardless of
+        # enableAutoRange flags, so we must save the non-target axis range
+        # before autoRange and restore it afterwards.
+        need_restore_y = (axis != 'Y1')
+        need_restore_x = (axis != 'X')
         saved_y = vb.viewRange()[1] if need_restore_y else None
+        saved_x = vb.viewRange()[0] if need_restore_x else None
 
         if axis == 'X':
             items = [it for it in vb.addedItems
@@ -619,7 +620,10 @@ class PlotWidget(pg.PlotWidget):
             y2vb.enableAutoRange(y=True)
             y2vb.autoRange(padding=0.05, items=items)
 
-        if need_restore_y:
+        if need_restore_x and saved_x is not None:
+            vb.enableAutoRange(x=False, y=False)
+            vb.setXRange(saved_x[0], saved_x[1], padding=0)
+        if need_restore_y and saved_y is not None:
             vb.enableAutoRange(x=False, y=False)
             vb.setYRange(saved_y[0], saved_y[1], padding=0)
 
@@ -806,6 +810,17 @@ class PlotWidget(pg.PlotWidget):
         )
 
         # Y2 cursor line will be created when Y2 axis is enabled
+
+    def ensure_cursors_in_plot(self) -> None:
+        """Re-add cursor lines to the plotItem after a clear().
+        Safe to call multiple times — duplicates are skipped.
+        """
+        for attr in ('cross_hair_vline', 'cross_hair_hline',
+                     'cursor_xa_line', 'cursor_xb_line',
+                     'cursor_yA_line', 'cursor_yB_line', 'cursor_y2_line'):
+            line = getattr(self, attr, None)
+            if line is not None and line not in self.plotItem.items:
+                self.plotItem.addItem(line)
 
     def _on_cursor_dragged(self, cursor_name: str, line: pg.InfiniteLine) -> None:
         """Called when a cursor is dragged by the user.
@@ -1022,7 +1037,13 @@ class PlotWidget(pg.PlotWidget):
         Left-clicking near a cursor line selects it for keyboard movement.
         When cross-hair is visible, left-click inside the viewbox also
         places a measurement mark.
+        Right-click emits plot_context_menu for the context menu.
         """
+        if event.button() == Qt.MouseButton.RightButton:
+            if hasattr(self, '_context_menu_callback'):
+                self._context_menu_callback()
+            return
+
         # Always check for cursor line clicks first (selection)
         if event.button() == Qt.MouseButton.LeftButton:
             self._check_cursor_click(event.scenePos())

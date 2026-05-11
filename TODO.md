@@ -1,4 +1,6 @@
 ## TODO.md
+### v0.3.0
+
 ###   v0.2.5 enhance analysis capability
 - ✅ 18.1 measurement (.meas / .measure)✅ 
   - 在 vector combo, func combo那一行插入一个Measure comb，里面封装好spice中的.meas命令的函数（上升/下降时间、过冲、下冲、周期、频率、占空比、RMS、THD、SINAD、等），具体函数请参考./meas.md；Measure combo的行为类似Func combo的行为：按函数名alphabet排列，提供显示函数描述的tip messages，Ctrl+left click多选，Shit+left click连续选择，等。
@@ -23,20 +25,20 @@
 
 - ✅ 18.6 multiple plot panel✅   
 
-- 18.7 visualize mixed signal simulation Results
+- ✅ 18.7 visualize mixed signal simulation Results✅  
   - ✅ 支持数字波形（时序图风格）✅   
-  - 支持数字波形（bit波形）的analog显示   
-  - 支持eye diagram
+  - ✅ 支持数字波形（bit波形）的analog显示 ✅     
+  - ✅ 支持eye diagram✅   
   - ✅ 支持总线信号（bus signal）显示 ✅   
 
 - ✅ 18.7.1 open vcd file in command line ✅  
   - pqwave finename.vcd to open a vcd file.
 
-- 18.7.2 open a mixed signal case from command line
+- ✅ 18.7.2 open a mixed signal case from command line✅  
   - senario : user do a ngspice mixed signal simulation and write raw files and vcd files. there could be single or mutiple raw / vcd files in a simulation. and file names could be aribitary. now they want view waves of simulation in pqwave. the current situation: pqwave doesn't support opening multiple files in command line, or through File > Open Raw File; or File > Open VCD File, or File > Load VCD Data. 
   - solution : (1) to support open multiple files in command line, files can be any mix of raw and vcd, and position doesn't matter. (2) to support open multiple files through File > Open File : merge 'Open Raw File' and 'Load VCD' and 'Open VCD File' to a single 'Open File', to support open any mix of raw and vcd
 
-- 18.7.3 open / load a mixed signal (actually it applys to pure vcd and pure analog too) case from json.
+- ✅ 18.7.3 open / load a mixed signal (actually it applys to pure vcd and pure analog too) case from json.✅   
   - senario : user save a state after they doing some wave viewing and analysis described in 18.7.2. they want to do more viewing / analysis of the case, but not from scratch.
   - solution : pqwave filename.json to open/load all relevant files (raw and vcd) and recover to the state which described in the json.  
 
