@@ -464,6 +464,7 @@ class PlotWidget(pg.PlotWidget):
             self.cursor_y2_line = pg.InfiniteLine(angle=0, movable=True, pen=pg.mkPen('magenta', width=2))
             self.cursor_y2_line.setVisible(False)
             self.y2_viewbox.addItem(self.cursor_y2_line)
+            self.cursor_y2_line.setZValue(100)
             self.cursor_y2_line.sigPositionChanged.connect(
                 lambda line: self.cursor_y2_changed.emit(line.value())
             )
@@ -776,11 +777,14 @@ class PlotWidget(pg.PlotWidget):
         self.cross_hair_hline.setVisible(False)
         self.plotItem.addItem(self.cross_hair_vline)
         self.plotItem.addItem(self.cross_hair_hline)
+        self.cross_hair_vline.setZValue(100)
+        self.cross_hair_hline.setZValue(100)
 
         # XA cursor line (draggable, vertical, cyan solid)
         self.cursor_xa_line = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('cyan', width=2))
         self.cursor_xa_line.setVisible(False)
         self.plotItem.addItem(self.cursor_xa_line)
+        self.cursor_xa_line.setZValue(100)
         self.cursor_xa_line.sigPositionChanged.connect(
             lambda line: self._on_cursor_dragged('xa', line)
         )
@@ -789,6 +793,7 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_xb_line = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('orange', width=2, style=Qt.PenStyle.DashLine))
         self.cursor_xb_line.setVisible(False)
         self.plotItem.addItem(self.cursor_xb_line)
+        self.cursor_xb_line.setZValue(100)
         self.cursor_xb_line.sigPositionChanged.connect(
             lambda line: self._on_cursor_dragged('xb', line)
         )
@@ -797,6 +802,7 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_yA_line = pg.InfiniteLine(angle=0, movable=True, pen=pg.mkPen('yellow', width=2))
         self.cursor_yA_line.setVisible(False)
         self.plotItem.addItem(self.cursor_yA_line)
+        self.cursor_yA_line.setZValue(100)
         self.cursor_yA_line.sigPositionChanged.connect(
             lambda line: self._on_cursor_dragged('yA', line)
         )
@@ -805,6 +811,7 @@ class PlotWidget(pg.PlotWidget):
         self.cursor_yB_line = pg.InfiniteLine(angle=0, movable=True, pen=pg.mkPen('lime', width=2, style=Qt.PenStyle.DashLine))
         self.cursor_yB_line.setVisible(False)
         self.plotItem.addItem(self.cursor_yB_line)
+        self.cursor_yB_line.setZValue(100)
         self.cursor_yB_line.sigPositionChanged.connect(
             lambda line: self._on_cursor_dragged('yB', line)
         )

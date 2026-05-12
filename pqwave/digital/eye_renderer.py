@@ -110,12 +110,12 @@ def _add_metrics_overlay(plot_widget: pg.PlotWidget, metrics: dict) -> None:
     v_mid = metrics['v_mid']
     half_h = metrics['eye_height'] / 2.0
 
-    pen = pg.mkPen('cyan', width=1, style=QtCore.Qt.PenStyle.DashLine)
+    pen = pg.mkPen('cyan', width=2, style=QtCore.Qt.PenStyle.DashLine)
     for y in (v_mid + half_h, v_mid - half_h):
         line = pg.InfiniteLine(pos=y, angle=0, pen=pen)
         plot_widget.addItem(line)
 
-    opt_pen = pg.mkPen('red', width=1, style=QtCore.Qt.PenStyle.DotLine)
+    opt_pen = pg.mkPen('red', width=2, style=QtCore.Qt.PenStyle.DotLine)
     opt_line = pg.InfiniteLine(pos=opt_t, angle=90, pen=opt_pen)
     plot_widget.addItem(opt_line)
 

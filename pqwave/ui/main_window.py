@@ -21,8 +21,9 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox,
-    QDialog, QCheckBox, QDialogButtonBox, QLabel, QApplication
+    QDialog, QCheckBox, QDialogButtonBox, QLabel, QApplication, QSplitter,
 )
+from PyQt6.QtCore import Qt as QtCore_Qt
 from PyQt6.QtCore import QTimer, pyqtSlot
 from PyQt6.QtGui import QColor, QFont
 
@@ -145,25 +146,692 @@ class MainWindow(QMainWindow):
 
         self.color_manager = ColorManager()
 
-        # Create panel grid (starts with one default panel)
         self.panel_grid = PanelGrid(self.state, self.color_manager)
-
-        # Create control panel
         self.control_panel = ControlPanel()
 
-        # Create menu manager with callbacks and keybinding manager
         self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
         self.menu_manager = MenuManager(self, callbacks, keybinding_manager=self.keybinding_manager)
 
-        main_layout.addWidget(self.panel_grid, 1)
-        main_layout.addWidget(self.control_panel)
+        # Upper area: panel + control
+        upper = QWidget()
+        upper_layout = QVBoxLayout()
+        upper_layout.setContentsMargins(0, 0, 0, 0)
+        upper_layout.setSpacing(10)
+        upper_layout.addWidget(self.panel_grid, 1)
+        upper_layout.addWidget(self.control_panel)
+        upper.setLayout(upper_layout)
+
+        # Chat panel (resizable, starts hidden)
+        from pqwave.ui.chat_panel import ChatPanel
+        from pqwave.ui.repl import ReplExecutor
+
+        self.chat_panel = ChatPanel()
+        from pqwave.session.api import SessionAPI
+        self._repl = ReplExecutor(session=SessionAPI(state=self.state))
+        self._ai_translator = None
+        self._connect_chat_panel()
+
+        self.chat_panel.visibility_changed.connect(
+            lambda visible: setattr(self.state, 'chat_panel_visible', visible)
+        )
+
+        # QSplitter: upper (plots + controls) | chat panel (resizable)
+        self._main_splitter = QSplitter(QtCore_Qt.Orientation.Vertical)
+        self._main_splitter.addWidget(upper)
+        self._main_splitter.addWidget(self.chat_panel)
+        self._main_splitter.setStretchFactor(0, 1)
+        self._main_splitter.setStretchFactor(1, 0)
+        self._main_splitter.setChildrenCollapsible(False)
+        self.chat_panel.splitter = self._main_splitter
+
+        main_layout.addWidget(self._main_splitter, 1)
 
         central_widget.setLayout(main_layout)
 
         self._update_trace_manager_log_modes()
 
         self._install_keyboard_shortcuts()
+
+    def _connect_chat_panel(self):
+        """Wire chat panel command_submitted to REPL and AI translator."""
+        self.chat_panel.command_submitted.connect(self._handle_chat_input)
+
+        # Wire SessionAPI mutations → TraceManager for live plot updates
+        self._repl._session.set_mutation_callback(self._on_session_mutation)
+
+        self._refresh_completions()
+        self.chat_panel.append_output(
+            "pqwave REPL — type /ai for AI mode, /help for commands, "
+            "/clear to reset\n"
+        )
+
+    def _refresh_completions(self):
+        """Update autocomplete items: slash commands + API commands + signals + functions."""
+        from pqwave.session.api import get_command_registry
+        from pqwave.llm.templates import _FUNC_MAP
+
+        items = [
+            "/ai", "/python", "/clear", "/help", "/backend", "/test-backend",
+            "/remember", "/font", "/promote",
+        ]
+        for name, entry in get_command_registry().items():
+            items.append(name)
+        try:
+            items.extend(self._repl.signals())
+        except Exception:
+            logger.warning("Failed to get signals for autocomplete", exc_info=True)
+        items.extend(_FUNC_MAP.keys())
+        self.chat_panel.set_completions(sorted(set(items)))
+
+    def _on_session_mutation(self, action: str, **kwargs):
+        """Sync SessionAPI mutations to the GUI."""
+        tm = self.trace_manager
+        pw = self.plot_widget
+
+        if action == "show":
+            if tm is None:
+                return
+            expr = str(kwargs.get("expr", ""))
+            axis = str(kwargs.get("axis", "Y1"))
+            from pqwave.models.trace import AxisAssignment
+            axis_enum = AxisAssignment.Y1 if axis.upper() == "Y1" else AxisAssignment.Y2
+            x_var = self.state.current_x_var or "time"
+            already_plotted = any(v == expr for v, _, _ in tm.traces)
+            result = tm.add_trace(expr, str(x_var), axis_enum)
+            if result is None and not already_plotted:
+                all_sigs = []
+                try:
+                    all_sigs = self._repl.signals()
+                except Exception:
+                    pass
+                suggestion = self._fuzzy_signal_match(expr, all_sigs)
+                msg = f"Signal not found: {expr}"
+                if suggestion:
+                    msg += f"\nDid you mean: {suggestion}?"
+                self.chat_panel.append_output(msg)
+
+        elif action == "hide":
+            if tm is None:
+                return
+            tm.remove_trace_by_variable_name(str(kwargs.get("expr", "")))
+
+        elif action == "load":
+            path = str(kwargs.get("path", ""))
+            import os
+            if os.path.exists(path):
+                ext = os.path.splitext(path)[1].lower()
+                if ext.endswith(".vcd"):
+                    self._load_vcd(path, vcd_only=(self.raw_file is None))
+                else:
+                    self._load_raw_file(path)
+                self._refresh_completions()
+
+        elif action == "range":
+            if pw is None:
+                return
+            from pqwave.measure.measure_engine import _parse_value
+            xmin = kwargs.get("xmin")
+            xmax = kwargs.get("xmax")
+            ymin = kwargs.get("ymin")
+            ymax = kwargs.get("ymax")
+
+            def _to_float(v):
+                if v is None:
+                    return None
+                if isinstance(v, (int, float)):
+                    return float(v)
+                try:
+                    return _parse_value(str(v))
+                except (ValueError, AttributeError):
+                    return float(v)
+
+            if xmin is not None or xmax is not None:
+                cur = pw.getAxis("bottom").range
+                lo = _to_float(xmin) if xmin is not None else cur[0]
+                hi = _to_float(xmax) if xmax is not None else cur[1]
+                pw.setXRange(lo, hi, padding=0)
+            if ymin is not None or ymax is not None:
+                cur = pw.getAxis("left").range
+                lo = _to_float(ymin) if ymin is not None else cur[0]
+                hi = _to_float(ymax) if ymax is not None else cur[1]
+                pw.setYRange(lo, hi, padding=0)
+
+        elif action == "log_x":
+            on = bool(kwargs.get("on", True))
+            from pqwave.models.state import AxisId
+            config = self.state.get_axis_config(AxisId.X)
+            if config.log_mode != on:
+                self._toggle_log_axis(AxisId.X)
+
+        elif action == "log_y":
+            on = bool(kwargs.get("on", True))
+            from pqwave.models.state import AxisId
+            config = self.state.get_axis_config(AxisId.Y1)
+            if config.log_mode != on:
+                self._toggle_log_axis(AxisId.Y1)
+
+        # ---- Cursor operations ----
+
+        elif action == "cursor_xa":
+            pw.set_cursor_xa_visible(True, kwargs.get("value"))
+
+        elif action == "cursor_xb":
+            pw.set_cursor_xb_visible(True, kwargs.get("value"))
+
+        elif action == "cursor_ya":
+            pw.set_cursor_yA_visible(True, kwargs.get("value"))
+
+        elif action == "cursor_yb":
+            pw.set_cursor_yB_visible(True, kwargs.get("value"))
+
+        elif action == "cursor_delta":
+            if pw:
+                deltas = pw.get_cursor_deltas()
+                self.chat_panel.append_result(deltas)
+
+        elif action == "cursor":
+            if pw:
+                pos = pw.get_cursor_positions()
+                deltas = pw.get_cursor_deltas()
+                self.chat_panel.append_result({**pos, **deltas})
+
+        # ---- View toggles ----
+
+        elif action == "grid":
+            on = kwargs.get("on")
+            if on is None:
+                self.toggle_grids()
+            elif on and not self.state.grid_visible:
+                self.toggle_grids()
+            elif not on and self.state.grid_visible:
+                self.toggle_grids()
+
+        elif action == "legend":
+            on = kwargs.get("on")
+            if on is None:
+                self.set_legend_visible(not self.state.legend_visible)
+            else:
+                self.set_legend_visible(on)
+
+        elif action == "cross_hair":
+            on = kwargs.get("on")
+            if on is not None:
+                pw.set_cross_hair_visible(on)
+            else:
+                self.toggle_cross_hair()
+
+        elif action == "zoom_fit":
+            self.zoom_to_fit()
+
+        elif action == "auto_range_x":
+            self.auto_range_x()
+
+        elif action == "auto_range_y":
+            self.auto_range_y()
+
+        elif action == "title":
+            text = kwargs.get("text", "")
+            self.plot_widget.setTitle(text)
+
+        # ---- Bus / Digital ----
+
+        elif action == "bus":
+            signals = kwargs.get("signals", [])
+            tm = self.trace_manager
+            if tm and signals:
+                # Multi-select matching traces (select_trace deselects others)
+                signal_set = set(signals)
+                tm.deselect_all()
+                for i, trace in enumerate(tm._state_traces):
+                    if trace.expression in signal_set:
+                        trace.selected = True
+                tm.group_selected_as_bus()
+
+        elif action == "expand":
+            name = kwargs.get("name", "")
+            if self.trace_manager:
+                self.trace_manager.expand_bus(bus_trace_name=name)
+
+        elif action == "collapse":
+            name = kwargs.get("name", "")
+            if self.trace_manager:
+                self.trace_manager.collapse_bus(bus_trace_name=name)
+
+        elif action == "set_trace":
+            self._set_trace_properties(
+                name=str(kwargs.get("name", "")),
+                height=kwargs.get("height"),
+                width=kwargs.get("width"),
+                color=kwargs.get("color"),
+                alias=kwargs.get("alias"),
+            )
+
+        elif action == "digital":
+            sig = kwargs.get("sig", "")
+            on = kwargs.get("on", True)
+            tm = self.trace_manager
+            if tm:
+                # Select the trace by name, then toggle its type
+                for i, (var, _, _) in enumerate(tm.traces):
+                    if var == sig:
+                        tm.select_trace(i)
+                        tm.toggle_trace_type()
+                        break
+
+        # ---- Cursor visibility ----
+
+        elif action == "cursor_xa_visible":
+            on = kwargs.get("on", True)
+            if on is None:
+                on = not pw.cursor_xa_visible
+            pw.set_cursor_xa_visible(on)
+
+        elif action == "cursor_xb_visible":
+            on = kwargs.get("on", True)
+            if on is None:
+                on = not pw.cursor_xb_visible
+            pw.set_cursor_xb_visible(on)
+
+        elif action == "cursor_ya_visible":
+            on = kwargs.get("on", True)
+            if on is None:
+                on = not pw.cursor_yA_visible
+            pw.set_cursor_yA_visible(on)
+
+        elif action == "cursor_yb_visible":
+            on = kwargs.get("on", True)
+            if on is None:
+                on = not pw.cursor_yB_visible
+            pw.set_cursor_yB_visible(on)
+
+        # ---- Eye diagram ----
+
+        elif action == "eye":
+            sig = str(kwargs.get("sig", ""))
+            period = kwargs.get("period")
+            if period:
+                from pqwave.measure.measure_engine import _parse_value
+                t_period = _parse_value(str(period))
+                self.state.eye_diagram_config.period = t_period
+            # Show the signal if not already a trace, then select it
+            tm = self.trace_manager
+            if tm and sig:
+                # Add the trace if not present
+                found = False
+                for i, (var, _, _) in enumerate(tm.traces):
+                    if var == sig:
+                        tm.deselect_all()
+                        tm._state_traces[i].selected = True
+                        found = True
+                        break
+                if not found:
+                    self._on_session_mutation("show", expr=sig)
+                    for i, (var, _, _) in enumerate(tm.traces):
+                        if var == sig:
+                            tm.deselect_all()
+                            tm._state_traces[i].selected = True
+                            found = True
+                            break
+                if found:
+                    self._show_eye_diagram()
+
+        # ---- Reload ----
+
+        elif action == "reload":
+            if self.raw_file_path:
+                self._load_raw_file(self.raw_file_path)
+
+        # ---- Export ----
+
+        elif action == "export_plot":
+            path = str(kwargs.get("path", ""))
+            panel = self.panel_grid.get_active_panel()
+            if panel and path:
+                import pyqtgraph.exporters as exp
+                pw = panel.plot_widget
+                plot_item = pw.plotItem
+                exporter = exp.ImageExporter(plot_item)
+                exporter.export(path)
+
+        # ---- Theme ----
+
+        elif action == "theme":
+            name = str(kwargs.get("name", "")).lower()
+            from pqwave.models.state import ViewboxTheme
+            if name in ("dark", "light"):
+                self.state.viewbox_theme = ViewboxTheme(name)
+                self.plot_widget.set_viewbox_theme(self.state.viewbox_theme)
+
+        # ---- X-axis variable ----
+
+        elif action == "change_x":
+            var = str(kwargs.get("var", ""))
+            tm = self.trace_manager
+            if var and tm:
+                self.state.current_x_var = var
+                for i in range(len(tm.traces)):
+                    tm.recreate_trace_plot_item(i)
+
+        # ---- Zoom ----
+
+        elif action == "zoom_in":
+            self.zoom_in()
+
+        elif action == "zoom_out":
+            self.zoom_out()
+
+        # ---- Panel management ----
+
+        elif action == "split_horizontal":
+            panel = self.panel_grid.get_active_panel()
+            if panel:
+                self.panel_grid.split_panel(panel.panel_id, "horizontal")
+
+        elif action == "split_vertical":
+            panel = self.panel_grid.get_active_panel()
+            if panel:
+                self.panel_grid.split_panel(panel.panel_id, "vertical")
+
+        elif action == "close_panel":
+            self._close_active_panel()
+
+    def _get_ai_translator(self):
+        """Lazy-init the AI translator on first AI mode use."""
+        if self._ai_translator is None:
+            from pqwave.llm.translator import AITranslator
+            self._ai_translator = AITranslator()
+        return self._ai_translator
+
+    def _handle_chat_input(self, text: str):
+        """Route chat input to Python REPL or AI translator based on mode."""
+        if text.startswith("/"):
+            self._handle_meta(text)
+            return
+
+        if self.chat_panel.mode == "ai":
+            translator = self._get_ai_translator()
+            if not translator.is_configured:
+                self.chat_panel.append_output(
+                    "No AI backend configured. "
+                    "Run pqwave --setup-llm or click the gear icon.\n"
+                )
+                return
+
+            self.chat_panel.append_output("-- Translating...\n")
+            try:
+                code = translator.translate(text)
+                timing = translator.last_timing
+                if timing:
+                    ms = timing.get("elapsed_ms", 0)
+                    backend = timing.get("backend", "?")
+                    pt = timing.get("prompt_tokens")
+                    ct = timing.get("completion_tokens")
+                    if backend == "template":
+                        self.chat_panel.append_output(
+                            f"  [{backend}] {ms:.0f}ms → {code}\n"
+                        )
+                    else:
+                        if pt and ct:
+                            self.chat_panel.append_output(
+                                f"  [{backend}] {ms:.0f}ms, "
+                                f"{pt}+{ct} tok ({(pt+ct)/max(ms/1000,0.001):.0f} tok/s)"
+                                f" → {code}\n"
+                            )
+                        else:
+                            self.chat_panel.append_output(
+                                f"  [{backend}] {ms:.0f}ms → {code}\n"
+                            )
+                        # Show /remember hint for LLM translations
+                        n = translator.log_count()
+                        self.chat_panel.append_output(
+                            f"     [/remember to save ({n} pattern(s) pending)]\n"
+                        )
+                else:
+                    self.chat_panel.append_output(f"  -> {code}\n")
+                result = self._repl.run_sync(code)
+                if not result.get("ok"):
+                    self.chat_panel.append_output(
+                        f"  Error: {result.get('error')}\n"
+                    )
+                elif "result" in result and result["result"] is not None:
+                    self.chat_panel.append_result(result["result"])
+            except Exception as e:
+                self.chat_panel.append_output(f"  AI error: {e}\n")
+        else:
+            # Python mode: execute in background thread
+            thread = self._repl.execute(text)
+            thread.result_ready.connect(self.chat_panel.append_result)
+            thread.error_occurred.connect(
+                lambda err: self.chat_panel.append_output(f"Error: {err}\n")
+            )
+
+    def _handle_meta(self, text: str):
+        """Handle / slash commands."""
+        parts = text.split()
+        cmd = parts[0].lower() if parts else ""
+
+        if cmd == "/ai":
+            model = self._get_ai_translator().model_name
+            self.chat_panel.set_ai_mode(model_name=model)
+        elif cmd == "/python":
+            self.chat_panel.set_python_mode()
+        elif cmd == "/clear":
+            self.chat_panel.output.clear()
+        elif cmd == "/help":
+            from pqwave.session.api import get_command_registry
+            registry = get_command_registry()
+            lines = ["Available commands:", ""]
+            for name, entry in sorted(registry.items()):
+                lines.append(f"  {entry['signature']}")
+                lines.append(f"    {entry['help']}")
+            lines.append("")
+            lines.append("Slash commands: /ai, /python, /clear, /help,")
+            lines.append("  /backend template on|off, /backend llm on|off,")
+            lines.append("  /test-backend, /remember, /promote, /font [8-24],")
+            lines.append("  /open <filepath>")
+            self.chat_panel.append_output("\n".join(lines) + "\n")
+
+        elif cmd == "/backend":
+            translator = self._get_ai_translator()
+            sub = parts[1].lower() if len(parts) > 1 else ""
+            state = parts[2].lower() if len(parts) > 2 else ""
+            on = state in ("on", "true", "1", "enable")
+
+            if sub == "template":
+                translator.template_enabled = on
+                self.chat_panel.append_output(
+                    f"-- Template engine: {'ON' if on else 'OFF'}\n"
+                )
+            elif sub == "llm":
+                translator.llm_enabled = on
+                if on:
+                    from pqwave.llm.backends import get_active_profile_name, get_profile
+                    name = get_active_profile_name()
+                    profile = get_profile(name) if name else {}
+                    model = (profile or {}).get("model", "?")
+                    self.chat_panel.append_output(
+                        f"-- LLM backend: ON (profile: {name}, model: {model})\n"
+                    )
+                else:
+                    self.chat_panel.append_output("-- LLM backend: OFF\n")
+            else:
+                from pqwave.llm.backends import get_active_profile_name, get_profile
+                name = get_active_profile_name()
+                profile = get_profile(name) if name else {}
+                model = (profile or {}).get("model", "?")
+                self.chat_panel.append_output(
+                    "-- Usage: /backend template on|off  or  "
+                    "/backend llm on|off\n"
+                    f"-- Template: {'ON' if translator.template_enabled else 'OFF'}"
+                    f", LLM: {'ON' if translator.llm_enabled else 'OFF'}"
+                )
+                if name:
+                    self.chat_panel.append_output(
+                        f" (profile: {name}, model: {model})\n"
+                    )
+                else:
+                    self.chat_panel.append_output("\n")
+
+        elif cmd == "/open":
+            path = " ".join(parts[1:])
+            if path:
+                self._on_session_mutation("load", path=path)
+                self.chat_panel.append_output(f"-- Opening: {path}\n")
+            else:
+                self.chat_panel.append_output("-- Usage: /open <filepath>\n")
+
+        elif cmd == "/test-backend":
+            translator = self._get_ai_translator()
+            self.chat_panel.append_output("-- Testing LLM connection...\n")
+            try:
+                resp = translator.test_llm()
+                self.chat_panel.append_output(
+                    f"-- OK: {resp[:200]}\n"
+                )
+            except Exception as e:
+                self.chat_panel.append_output(f"-- FAILED: {e}\n")
+
+        elif cmd == "/promote":
+            # Copy user templates to project-level templates.yaml
+            import yaml
+            from pqwave.llm.templates import TemplateEngine
+            engine = TemplateEngine()
+            user_path = engine._user_path()
+            proj_path = engine._project_path()
+            try:
+                with open(user_path, "r", encoding="utf-8") as f:
+                    user_data = yaml.safe_load(f) or {}
+            except FileNotFoundError:
+                self.chat_panel.append_output("-- No user templates to promote.\n")
+                return
+            except Exception as e:
+                logger.warning("Failed to read user templates: %s", e, exc_info=True)
+                self.chat_panel.append_output(
+                    f"-- Cannot read user templates: {e}\n")
+                return
+            user_tmpls = user_data.get("templates", [])
+            if not user_tmpls:
+                self.chat_panel.append_output("-- No user templates to promote.\n")
+                return
+            # If project YAML is corrupt, don't overwrite it
+            if os.path.exists(proj_path):
+                try:
+                    with open(proj_path, "r", encoding="utf-8") as f:
+                        yaml.safe_load(f)
+                except Exception as e:
+                    self.chat_panel.append_output(
+                        f"-- Project templates file is corrupt: {e}\n"
+                        f"-- Fix or remove {proj_path} first.\n")
+                    return
+            new_count = 0
+            for t in user_tmpls:
+                if self._write_template_yaml(proj_path, t):
+                    new_count += 1
+            self.chat_panel.append_output(
+                f"-- Promoted {new_count} template(s) to project-level.\n"
+                f"-- File: {proj_path}\n"
+            )
+
+        elif cmd == "/remember":
+            translator = self._get_ai_translator()
+            sub = parts[1].lower() if len(parts) > 1 else ""
+
+            if sub == "last":
+                tmpl = translator.remember_last()
+                if tmpl is None:
+                    self.chat_panel.append_output(
+                        "-- Nothing to remember. Use LLM first.\n"
+                    )
+                else:
+                    self._save_learned_template(tmpl["match"], tmpl["code"])
+                    self.chat_panel.append_output(
+                        "-- Remembered.\n"
+                    )
+            else:
+                templates = translator.remember_all()
+                if not templates:
+                    self.chat_panel.append_output(
+                        "-- Nothing new to remember.\n"
+                    )
+                else:
+                    for tmpl in templates:
+                        self._save_learned_template(tmpl["match"], tmpl["code"])
+                    self.chat_panel.append_output(
+                        f"-- Remembered {len(templates)} pattern(s).\n"
+                    )
+
+        elif cmd == "/font":
+            if len(parts) > 1:
+                try:
+                    size = int(parts[1])
+                    self.chat_panel.set_font_size(size)
+                    self.chat_panel.append_output(
+                        f"-- Font size: {self.chat_panel._font_size}pt\n"
+                    )
+                except ValueError:
+                    self.chat_panel.append_output(
+                        "-- Usage: /font <size>  (8–24)\n"
+                    )
+            else:
+                self.chat_panel.append_output(
+                    f"-- Font size: {self.chat_panel._font_size}pt\n"
+                )
+
+        else:
+            self.chat_panel.append_output(f"Unknown command: {text}\n")
+
+    def _save_learned_template(self, pattern: str, code: str):
+        """Save to user templates. Also save to project templates if in a git repo."""
+        import os, yaml
+        from pqwave.llm.templates import TemplateEngine
+        engine = TemplateEngine()
+        entry = {"match": pattern, "code": code}
+
+        # Always save to user file
+        path = engine.ensure_user_file()
+        self._write_template_yaml(path, entry)
+
+        # Also save to project file if running from a git repo
+        proj_path = engine._project_path()
+        if self._is_in_git_repo(os.path.dirname(proj_path)):
+            self._write_template_yaml(proj_path, entry)
+
+    @staticmethod
+    def _is_in_git_repo(path: str) -> bool:
+        """Check if *path* is inside a git repository."""
+        import subprocess
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=path, capture_output=True, check=True,
+            )
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+
+    @staticmethod
+    def _write_template_yaml(path, entry):
+        import os, yaml
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            data = {}
+        except Exception as e:
+            logger.warning("Failed to read templates from %s: %s", path, e,
+                           exc_info=True)
+            return
+        if "templates" not in data or not data["templates"]:
+            data["templates"] = []
+        # Don't duplicate
+        if entry["match"] not in (t.get("match", "") for t in data["templates"]):
+            data["templates"].insert(0, entry)
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+            return True
+        return False
 
     def _create_menu_callbacks(self):
         """Create callback dictionary for menu manager."""
@@ -203,6 +871,8 @@ class MainWindow(QMainWindow):
             'show_functions_help': self._show_functions_help,
             'show_measures_help': self._show_measures_help,
             'show_vector_selection_help': self._show_vector_selection_help,
+            'show_repl_help': self._show_repl_help,
+            'show_api_help': self._show_api_help,
             'split_horizontal': self._split_panel_horizontal,
             'split_vertical': self._split_panel_vertical,
             'close_panel': self._close_active_panel,
@@ -1062,7 +1732,11 @@ class MainWindow(QMainWindow):
         logger.info(
             f"Loaded VCD: {filename} ({len(names)} signals, timescale={vcd.timescale:.0e}s)")
 
+        # Sync VCD signal names into ApplicationState so SessionAPI.signals() sees them
+        self.state.vcd_signal_names = sorted(names)
+
         self._update_variable_combo()
+        self._refresh_completions()
 
         # Track source file
         from pqwave.models.state import SourceFile
@@ -1665,10 +2339,8 @@ class MainWindow(QMainWindow):
 
             # Update alias if provided
             if new_alias and new_alias != var:
-                # Update plot item name
+                # Update plot item name (legend)
                 plot_item.opts['name'] = new_alias
-                # Update trace manager traces list
-                self.trace_manager.traces[row] = (new_alias, plot_item, y_axis)
                 # Update Trace object name if found
                 if trace_obj:
                     trace_obj.name = new_alias
@@ -1717,6 +2389,80 @@ class MainWindow(QMainWindow):
 
             self.trace_manager._refresh_legend()
 
+    def _set_trace_properties(self, name: str, height: float = None,
+                               width: int = None, color: tuple = None,
+                               alias: str = None) -> bool:
+        """Set trace properties by name. Returns True if trace was found."""
+        tm = self.trace_manager
+        if tm is None:
+            return False
+        import pyqtgraph as pg
+        from PyQt6.QtGui import QColor
+
+        # Find the trace by expression or alias
+        row = next((i for i, (v, _, _) in enumerate(tm.traces) if v == name), None)
+        trace_obj = None
+        if row is None:
+            # Not found by expression — try alias match in state.traces
+            trace_obj = next((t for t in self.state.traces if t.name == name), None)
+            if trace_obj is None:
+                return False
+            row = next((i for i, (v, _, _) in enumerate(tm.traces)
+                        if v == trace_obj.expression), None)
+            if row is None:
+                return False
+        var, plot_item, y_axis = tm.traces[row]
+
+        if trace_obj is None:
+            trace_obj = next((t for t in self.state.traces if t.name == var), None)
+        bus_bot = (trace_obj.metadata.get('_bus_bot_item')
+                   if trace_obj else None)
+
+        if alias is not None and alias != var:
+            plot_item.opts['name'] = alias
+            # Keep original expression in tm.traces for name-based lookups
+            if trace_obj:
+                trace_obj.name = alias
+
+        if color is not None:
+            qcolor = QColor(*color)
+            pen = plot_item.opts['pen']
+            new_pen = pg.mkPen(color=qcolor, width=pen.width())
+            if hasattr(plot_item, 'setPen'):
+                plot_item.setPen(new_pen)
+            else:
+                plot_item.opts['pen'] = new_pen
+                plot_item.update()
+            if bus_bot is not None:
+                bus_bot.setPen(new_pen)
+            if trace_obj:
+                trace_obj.color = color
+
+        # Apply width BEFORE height (height may trigger recreate_all_digital
+        # which reads trace_obj.line_width)
+        if width is not None:
+            pen = plot_item.opts['pen']
+            new_pen = pg.mkPen(color=pen.color(), width=width)
+            if hasattr(plot_item, 'setPen'):
+                plot_item.setPen(new_pen)
+            else:
+                plot_item.opts['pen'] = new_pen
+                plot_item.update()
+            if bus_bot is not None:
+                bus_bot.setPen(new_pen)
+            if trace_obj:
+                trace_obj.line_width = width
+
+        if (height is not None and trace_obj
+                and trace_obj.trace_type in ('digital', 'bus')):
+            old_h = trace_obj.metadata.get('digital_height', 1.0)
+            if abs(height - old_h) > 0.01:
+                trace_obj.metadata['digital_height'] = height
+                tm.recreate_all_digital()
+
+        tm._refresh_legend()
+        return True
+
     def show_settings(self):
         """Show application settings widget."""
         # Create settings widget if it doesn't exist or was closed
@@ -1752,7 +2498,19 @@ class MainWindow(QMainWindow):
         """Handle font settings changes from settings widget."""
         self.plot_widget.apply_fonts(self.state)
         self._apply_ui_font()
+        self._apply_repl_settings()
         self._save_global_prefs()
+
+    def _apply_repl_settings(self) -> None:
+        """Apply REPL font and color settings to the chat panel."""
+        rf = self.state.repl_font
+        if hasattr(self, 'chat_panel'):
+            self.chat_panel.apply_settings(
+                font_family=rf.family,
+                font_size=rf.size or 11,
+                fg_color=rf.color,
+                bg_color=self.state.repl_bg,
+            )
 
     def _apply_ui_font(self):
         """Apply UI font configuration to the application."""
@@ -2852,8 +3610,11 @@ class MainWindow(QMainWindow):
                 'label_font': self.state.label_font.to_dict(),
                 'tick_font': self.state.tick_font.to_dict(),
                 'ui_font': self.state.ui_font.to_dict(),
+                'repl_font': self.state.repl_font.to_dict(),
+                'repl_bg': self.state.repl_bg,
                 'toolbar_visible': self.state.toolbar_visible,
                 'status_bar_visible': self.state.status_bar_visible,
+                'chat_panel_visible': self.state.chat_panel_visible,
             }
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -2889,14 +3650,20 @@ class MainWindow(QMainWindow):
         self.state.label_font = FontConfig.from_dict(data.get('label_font', {}))
         self.state.tick_font = FontConfig.from_dict(data.get('tick_font', {}))
         self.state.ui_font = FontConfig.from_dict(data.get('ui_font', {}))
+        self.state.repl_font = FontConfig.from_dict(data.get('repl_font', {}))
+        self.state.repl_bg = data.get('repl_bg', '')
         self.plot_widget.apply_fonts(self.state)
         self._apply_ui_font()
+        self._apply_repl_settings()
 
         # UI toggles
         self.state.toolbar_visible = data.get('toolbar_visible', True)
         self.state.status_bar_visible = data.get('status_bar_visible', True)
+        self.state.chat_panel_visible = data.get('chat_panel_visible', False)
         self.set_toolbar_visible(self.state.toolbar_visible)
         self.set_statusbar_visible(self.state.status_bar_visible)
+        if self.state.chat_panel_visible and hasattr(self, 'chat_panel'):
+            self.chat_panel.setVisible(True)
 
     def _restore_panels_from_dict(self, data: dict) -> None:
         """Restore state from new per-panel format.
@@ -3244,6 +4011,12 @@ class MainWindow(QMainWindow):
                 sc = QShortcut(QKeySequence(ks), self)
                 sc.activated.connect(callback)
 
+        # ---- chat panel toggle (global) ----
+        ks = seq('toggle_chat_panel')
+        if ks and hasattr(self, 'chat_panel'):
+            sc = QShortcut(QKeySequence(ks), self)
+            sc.activated.connect(self.chat_panel.toggle)
+
         # ---- digital signal operations (global) ----
         digital_map = {
             'toggle_digital_analog': self._toggle_digital_analog,
@@ -3312,6 +4085,117 @@ class MainWindow(QMainWindow):
             "separated by spaces and can be edited before adding."
         )
         QMessageBox.information(self, "Help — Select Vectors", msg)
+
+    def _show_repl_help(self) -> None:
+        """Show REPL usage help."""
+        msg = (
+            "pqwave REPL — Chat Panel Usage\n\n"
+            "Modes:\n"
+            "  python>  Python mode — type API commands directly\n"
+            "  ai>   AI mode — natural language, translated to commands\n\n"
+            "Switching:\n"
+            "  /ai, /python    Switch modes\n"
+            "  Ctrl+`          Toggle chat panel\n\n"
+            "Slash Commands:\n"
+            "  /clear          Clear output\n"
+            "  /help           List all commands\n"
+            "  /backend        Show backend status\n"
+            "  /backend template on|off\n"
+            "  /backend llm on|off\n"
+            "  /test-backend   Test LLM connection\n"
+            "  /remember       Save LLM translations as templates\n"
+            "  /font 8-24      Change font size\n"
+            "  /open <path>    Open a file\n\n"
+            "Autocomplete:\n"
+            "  Tab             Complete current word\n"
+            "  Auto-suggest    After 2+ chars (300ms debounce)\n"
+            "  Up/Down/Enter   Navigate popup\n\n"
+            "AI mode tips:\n"
+            "  Template engine catches common patterns (instant, free)\n"
+            "  LLM fallback for edge cases\n"
+            "  /remember to save successful LLM translations\n"
+        )
+        self._show_scrollable_help("Help — REPL", msg)
+
+    def _show_api_help(self) -> None:
+        """Show API command reference."""
+        from pqwave.session.api import get_command_registry
+
+        registry = get_command_registry()
+        lines = ["pqwave Session API — Command Reference\n"]
+        by_category: dict[str, list[str]] = {}
+        for name, entry in sorted(registry.items()):
+            sig = entry["signature"]
+            help_text = entry["help"]
+            if "cursor" in name:
+                cat = "Cursor"
+            elif name in ("show", "hide", "signals", "show_all", "show_matching", "bus", "expand", "collapse", "digital"):
+                cat = "Trace & Bus"
+            elif name in ("measure", "measure_script", "fft", "fft_config", "power", "eye"):
+                cat = "Analyze"
+            elif name in ("load", "reload", "export_csv", "export_plot", "change_x"):
+                cat = "File & Data"
+            elif name in ("grid", "legend", "cross_hair", "zoom_fit", "zoom_in", "zoom_out", "auto_range_x", "auto_range_y", "title", "theme", "range", "log_x", "log_y"):
+                cat = "View"
+            elif name in ("split_horizontal", "split_vertical", "close_panel"):
+                cat = "Panel"
+            else:
+                cat = "Other"
+            by_category.setdefault(cat, []).append(f"  {sig}\n    {help_text}\n")
+
+        cat_order = ["Trace & Bus", "Analyze", "Cursor", "View", "File & Data", "Panel", "Other"]
+        for cat in cat_order:
+            if cat in by_category:
+                lines.append(f"\n{cat}:")
+                lines.extend(by_category[cat])
+
+        self._show_scrollable_help("Help — API", "".join(lines))
+
+    @staticmethod
+    def _fuzzy_signal_match(expr: str, signals: list[str]) -> str | None:
+        """Return the best fuzzy match for *expr* among *signals*, or None."""
+        if not signals:
+            return None
+        q = expr.strip().strip('"\'').lower()
+        # 1. Case-insensitive exact match
+        for s in signals:
+            if s.lower() == q:
+                return s
+        # 2. Case-insensitive prefix match (shortest first)
+        prefix_matches = [s for s in signals if s.lower().startswith(q)]
+        if len(prefix_matches) == 1:
+            return prefix_matches[0]
+        # 3. Case-insensitive substring match
+        substring_matches = [s for s in signals if q in s.lower()]
+        if len(substring_matches) == 1:
+            return substring_matches[0]
+        return None
+
+    def _show_scrollable_help(self, title: str, text: str) -> None:
+        """Show help text in a scrollable dialog."""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QPlainTextEdit,
+                                      QDialogButtonBox)
+        from PyQt6.QtGui import QFont
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(650, 550)
+
+        layout = QVBoxLayout(dlg)
+
+        edit = QPlainTextEdit()
+        edit.setReadOnly(True)
+        edit.setPlainText(text)
+        font = QFont("monospace", 10)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        edit.setFont(font)
+        edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(edit, 1)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn_box.rejected.connect(dlg.reject)
+        layout.addWidget(btn_box)
+
+        dlg.exec()
 
     def _compute_trace_stats(self) -> None:
         """Compute statistics for selected traces over the visible X range."""

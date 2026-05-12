@@ -33,6 +33,7 @@ class MenuManager:
                       'toggle_x_cursor_a', 'toggle_x_cursor_b',
                       'toggle_y_cursor_A', 'toggle_y_cursor_B',
                       'show_keybindings', 'show_functions_help',
+                      'show_repl_help', 'show_api_help',
                       'split_horizontal', 'split_vertical', 'close_panel'
             keybinding_manager: Optional KeyBindingManager instance.
         """
@@ -379,6 +380,20 @@ class MenuManager:
             self.callbacks.get("show_vector_selection_help", lambda: None)
         )
         help_menu.addAction(vectors_help_action)
+
+        help_menu.addSeparator()
+
+        repl_help_action = QAction("REPL", self.parent)
+        repl_help_action.triggered.connect(
+            self.callbacks.get("show_repl_help", lambda: None)
+        )
+        help_menu.addAction(repl_help_action)
+
+        api_help_action = QAction("API", self.parent)
+        api_help_action.triggered.connect(
+            self.callbacks.get("show_api_help", lambda: None)
+        )
+        help_menu.addAction(api_help_action)
 
         self.menubar.addMenu(help_menu)
 

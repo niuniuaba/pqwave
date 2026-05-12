@@ -628,3 +628,22 @@ TypeError: decorated slot has no signature compatible with PlotWidget.plot_conte
 - what is : uncheck 'show preview in plot' checkbox in a following settings diagram doesn't remove the threshold preview.
 - how to re-produce : (1) check 'show preview in plot' checkbox; (2) close settings dialog; (3) open settings dialog again; (4) uncheck 'show preview in plot' checkbox doesn't remove the threshold preview lines.
 - what expected : uncheck the 'show preview in plot' checkbox always remove the threshold preview.
+
+### v0.3.0
+### ✅ 114. help documents for REPL and API✅ **fixed**   
+- what is : information of REPL and API are not documented yet
+- what expected : HELP > REPL and HELP > API items.
+
+### ✅ 115. can't modify multiple trace attributes on one click✅ **fixed**   
+- what is : can't modify multiple trace attributes once time.
+- how to re-produce : pqwave tests/mixed_signal.vcd; plot any vcd vector; Edit > Edit Trace Properties , change 'height' and 'line width' values then click 'Apply', only height changed and linewidth keep unchanged. have to click 'Apply' one more time to take line width effects.
+
+### ✅ 116. Edit bus trace properties causes redraw of its member traces.✅ **fixed**   
+- what is : when group traces to bus the bus is rendered and member traces hidden. but when edit bus trace properties the hidden member traces appear.
+- what expected : edit bus properties shouldn't trigger member traces' visibility because it's not users' intention.
+
+###✅  117. can't set REPL porperties✅ **fixed**    
+- what is : there is no way to set REPL properties (backgroud/foreground color, font family, font size, others)
+- what expected : a REPL properteis group in Edit > Settings to set REPL properties.
+
+### 118. 

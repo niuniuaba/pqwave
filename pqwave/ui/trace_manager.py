@@ -788,25 +788,47 @@ class TraceManager(QtCore.QObject):
             return
 
         expanded = bus_trace.metadata.get('bus_expanded', False)
-        member_exprs = set(bus_trace.bus_signals)
-
         if expanded:
-            for i, t in enumerate(self._state_traces):
-                if t.expression in member_exprs:
-                    t.metadata['_bus_member_hidden'] = True
-                    t.visible = False
-                    if i < len(self.traces):
-                        self.traces[i][1].setVisible(False)
-            bus_trace.metadata['bus_expanded'] = False
+            self.collapse_bus(bus_trace)
         else:
-            for i, t in enumerate(self._state_traces):
-                if t.expression in member_exprs:
-                    t.metadata.pop('_bus_member_hidden', None)
-                    t.visible = True
-                    if i < len(self.traces):
-                        self.traces[i][1].setVisible(True)
-            bus_trace.metadata['bus_expanded'] = True
+            self.expand_bus(bus_trace)
 
+    def expand_bus(self, bus_trace: Trace = None, bus_trace_name: str = None) -> None:
+        """Show member traces of a bus (unconditionally)."""
+        if bus_trace is None:
+            bus_trace = next(
+                (t for t in self._state_traces if t.name == bus_trace_name), None)
+        if bus_trace is None or bus_trace.trace_type != 'bus':
+            return
+        if bus_trace.bus_signals is None:
+            return
+        member_exprs = set(bus_trace.bus_signals)
+        for i, t in enumerate(self._state_traces):
+            if t.expression in member_exprs:
+                t.metadata.pop('_bus_member_hidden', None)
+                t.visible = True
+                if i < len(self.traces):
+                    self.traces[i][1].setVisible(True)
+        bus_trace.metadata['bus_expanded'] = True
+        self._refresh_legend()
+
+    def collapse_bus(self, bus_trace: Trace = None, bus_trace_name: str = None) -> None:
+        """Hide member traces of a bus (unconditionally)."""
+        if bus_trace is None:
+            bus_trace = next(
+                (t for t in self._state_traces if t.name == bus_trace_name), None)
+        if bus_trace is None or bus_trace.trace_type != 'bus':
+            return
+        if bus_trace.bus_signals is None:
+            return
+        member_exprs = set(bus_trace.bus_signals)
+        for i, t in enumerate(self._state_traces):
+            if t.expression in member_exprs:
+                t.metadata['_bus_member_hidden'] = True
+                t.visible = False
+                if i < len(self.traces):
+                    self.traces[i][1].setVisible(False)
+        bus_trace.metadata['bus_expanded'] = False
         self._refresh_legend()
 
     def ungroup_bus(self, bus_trace_name: str) -> None:
@@ -1317,7 +1339,7 @@ class TraceManager(QtCore.QObject):
             x = np.asarray(trace.x_data, dtype=np.float64)
             y = np.asarray(trace.y_data, dtype=np.float64)
             if len(x) == 0:
-                return _StaticCurveItem([], [], pen=pg.mkPen(color=trace.color, width=1))
+                return _StaticCurveItem([], [], pen=pg.mkPen(color=trace.color, width=trace.line_width))
             if len(x) >= 2:
                 x_bounds = np.empty(len(x) + 1, dtype=np.float64)
                 x_bounds[0] = x[0] - (x[1] - x[0]) / 2.0
@@ -1329,7 +1351,7 @@ class TraceManager(QtCore.QObject):
 
         y_vals = y_vals * trace_height + y_off
 
-        pen = pg.mkPen(color=trace.color, width=1)
+        pen = pg.mkPen(color=trace.color, width=trace.line_width)
         plot_item = _StaticCurveItem(x_bounds, y_vals, pen=pen, stepMode='center')
         self._add_to_viewbox(plot_item, trace.y_axis)
         self.logger.debug(
@@ -1440,8 +1462,7 @@ class TraceManager(QtCore.QObject):
         x_bot = np.array(bot_t, dtype=np.float64)
         y_bot = np.array(bot_v, dtype=np.float64)
 
-        BUS_COLOR = (0, 180, 255)
-        pen = pg.mkPen(color=BUS_COLOR, width=1.0)
+        pen = pg.mkPen(color=trace.color, width=trace.line_width)
         top_item = _StaticCurveItem(x_top, y_top, pen=pen, symbol=None,
                                     skipFiniteCheck=True)
         bot_item = _StaticCurveItem(x_bot, y_bot, pen=pen, symbol=None,
@@ -1524,7 +1545,7 @@ class TraceManager(QtCore.QObject):
 
     def _create_analog_plot_item(self, trace: Trace) -> pg.PlotCurveItem:
         """Create a PlotCurveItem for the trace with pre-downsampled data."""
-        pen = pg.mkPen(color=trace.color, width=1)
+        pen = pg.mkPen(color=trace.color, width=trace.line_width)
 
         y_log = self.y1_log if trace.y_axis == AxisAssignment.Y1 else self.y2_log
         is_fft = self._is_fft_expression(trace.expression)
@@ -1596,6 +1617,9 @@ class TraceManager(QtCore.QObject):
                 if bvb is not None:
                     bvb.removeItem(bot)
             new_item = self._create_plot_item(t)
+            # Restore visibility for hidden bus member traces
+            if not t.visible:
+                new_item.setVisible(False)
             self.traces[i] = (var, new_item, y_axis)
         self._refresh_legend()
         self._auto_range_y_axis(AxisAssignment.Y1)

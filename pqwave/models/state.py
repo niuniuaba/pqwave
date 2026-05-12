@@ -277,6 +277,9 @@ class ApplicationState:
         self.datasets: List[Dataset] = []
         self.current_dataset_idx: int = 0
 
+        # VCD signal names loaded via GUI (not stored as Dataset)
+        self.vcd_signal_names: List[str] = []
+
         # Source files loaded into this session
         self.source_files: List[SourceFile] = []
 
@@ -290,6 +293,7 @@ class ApplicationState:
         self.legend_visible: bool = True
         self.status_bar_visible: bool = True
         self.toolbar_visible: bool = True
+        self.chat_panel_visible: bool = False
         self.plot_title: str = ''
         self.viewbox_theme: ViewboxTheme = ViewboxTheme.DARK
 
@@ -298,6 +302,10 @@ class ApplicationState:
         self.label_font: FontConfig = FontConfig()
         self.tick_font: FontConfig = FontConfig()
         self.ui_font: FontConfig = FontConfig()
+
+        # REPL (chat panel) appearance
+        self.repl_font: FontConfig = FontConfig(family="monospace", size=11)
+        self.repl_bg: str = ""  # empty = use default dark bg
 
         self.fft_config: FftConfig = FftConfig()
         self.eye_diagram_config: EyeDiagramConfig = EyeDiagramConfig()
@@ -418,6 +426,7 @@ class ApplicationState:
     def clear_datasets(self) -> None:
         """Clear all datasets and associated traces from all panels."""
         self.datasets.clear()
+        self.vcd_signal_names.clear()
         for panel_state in self.panels.values():
             panel_state.traces.clear()
         self.current_dataset_idx = 0

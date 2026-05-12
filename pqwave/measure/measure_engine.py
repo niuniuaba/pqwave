@@ -34,6 +34,7 @@ _METRIC_SUFFIXES: dict[str, float] = {
     "f": 1e-15, "p": 1e-12, "n": 1e-9, "u": 1e-6,
     "m": 1e-3, "k": 1e3, "meg": 1e6, "g": 1e9, "t": 1e12,
     "mil": 25.4e-6,
+    "ms": 1e-3, "us": 1e-6, "ns": 1e-9, "ps": 1e-12,
 }
 
 

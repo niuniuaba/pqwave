@@ -73,6 +73,9 @@ class KeyBindingManager:
         'split_vertical':          ('Ctrl+Shift+E', 'Split Panel Vertically'),
         'close_panel':             ('Ctrl+Shift+W', 'Close Active Panel'),
 
+        # === Chat panel ===
+        'toggle_chat_panel':       ('Ctrl+`',       'Toggle Chat Panel'),
+
         # === Digital signal operations ===
         'toggle_digital_analog':   ('Ctrl+D',       'Toggle Digital/Analog View'),
         'group_bus':               ('Ctrl+B',       'Group Selected as Bus'),

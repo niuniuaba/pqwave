@@ -1,0 +1,19 @@
+templates:
+- code: bus(['q1', 'q2', 'q3', 'q4'])
+  match: ^group\ q1\~q4\ to\ bus$
+- code: show("{sig}")
+  match: show\((?P<sig>\\S+)\)
+- code: cursor_xa_visible(on=True)
+  match: ^trigger\ Xa\ cursor$
+- code: digital("{sig}", on=False)
+  match: 将(?P<sig>\\S+)设为模拟信号
+- code: digital("{sig}", on=True)
+  match: 将(?P<sig>\\S+)设为数字信号
+- code: expand("{sig}")
+  match: 展开(?P<sig>\\S+)
+- code: bus({'q1','q2','q3','q4'})
+  match: ^group\ q\*$
+- code: bus({"{arg1}","{arg2}","{arg3}","{arg4}"}, name="{arg5}")
+  match: group\ (?P<arg1>\\S+)\~(?P<arg4>\\S+)\ to\ bus
+- code: signals()
+  match: ^list\ all\ vectors$

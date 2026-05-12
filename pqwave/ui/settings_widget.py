@@ -299,6 +299,49 @@ class SettingsWidget(QWidget):
             self._eye_offset_spin, self._eye_fuzz_cb,
         ]
 
+        # REPL (chat panel) appearance
+        repl_group = QGroupBox("REPL Appearance")
+        repl_layout = QGridLayout()
+
+        repl_layout.addWidget(QLabel("Font:"), 0, 0)
+        self.repl_family_combo = QFontComboBox()
+        self.repl_family_combo.setEditable(False)
+        self.repl_family_combo.insertItem(0, "Default")
+        self.repl_family_combo.currentIndexChanged.connect(
+            lambda: self._on_repl_changed())
+        repl_layout.addWidget(self.repl_family_combo, 0, 1)
+
+        self.repl_size_spin = QSpinBox()
+        self.repl_size_spin.setRange(0, 48)
+        self.repl_size_spin.setSuffix(" pt")
+        self.repl_size_spin.setSpecialValueText("Default")
+        self.repl_size_spin.valueChanged.connect(
+            lambda v: self._on_repl_changed())
+        repl_layout.addWidget(self.repl_size_spin, 0, 2)
+
+        # Foreground color
+        repl_layout.addWidget(QLabel("Text:"), 1, 0)
+        self.repl_fg_btn = QPushButton()
+        self.repl_fg_btn.setFixedSize(28, 28)
+        self.repl_fg_btn.setToolTip("Text color")
+        self.repl_fg_btn.clicked.connect(self._pick_repl_fg)
+        repl_layout.addWidget(self.repl_fg_btn, 1, 1)
+
+        # Background color
+        repl_layout.addWidget(QLabel("Background:"), 1, 2)
+        self.repl_bg_btn = QPushButton()
+        self.repl_bg_btn.setFixedSize(28, 28)
+        self.repl_bg_btn.setToolTip("Background color")
+        self.repl_bg_btn.clicked.connect(self._pick_repl_bg)
+        repl_layout.addWidget(self.repl_bg_btn, 1, 3)
+
+        reset_repl_btn = QPushButton("Reset")
+        reset_repl_btn.clicked.connect(self._reset_repl)
+        repl_layout.addWidget(reset_repl_btn, 1, 4)
+
+        repl_group.setLayout(repl_layout)
+        content_layout.addWidget(repl_group)
+
         content_layout.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
@@ -451,6 +494,21 @@ class SettingsWidget(QWidget):
             spin.setValue(fc.size)
             spin.blockSignals(False)
             self._update_color_button(key)
+
+        # Load REPL settings
+        rf = self.state.repl_font
+        self.repl_family_combo.blockSignals(True)
+        if rf.family and rf.family != "monospace":
+            idx = self.repl_family_combo.findText(rf.family)
+            if idx >= 0:
+                self.repl_family_combo.setCurrentIndex(idx)
+        else:
+            self.repl_family_combo.setCurrentIndex(0)
+        self.repl_family_combo.blockSignals(False)
+        self.repl_size_spin.blockSignals(True)
+        self.repl_size_spin.setValue(rf.size)
+        self.repl_size_spin.blockSignals(False)
+        self._update_repl_color_buttons()
 
         # Load FFT settings
         fft = self.state.fft_config
@@ -668,6 +726,12 @@ class SettingsWidget(QWidget):
             combo = self.font_family_combos[key]
             fc.family = "" if combo.currentIndex() == 0 else combo.currentFont().family()
             fc.size = self.font_size_spinboxes[key].value()
+        # REPL font
+        self.state.repl_font.family = (
+            "" if self.repl_family_combo.currentIndex() == 0
+            else self.repl_family_combo.currentFont().family()
+        )
+        self.state.repl_font.size = self.repl_size_spin.value()
 
     def _pick_font_color(self, key: str):
         """Open QColorDialog and update the font color."""
@@ -704,3 +768,57 @@ class SettingsWidget(QWidget):
             )
         else:
             btn.setStyleSheet("")
+
+    # --- REPL settings handlers ---
+
+    def _on_repl_changed(self):
+        """Handle any REPL control change."""
+        self._save_fonts_to_state()
+        self.font_changed.emit()
+
+    def _pick_repl_fg(self):
+        """Pick REPL text (foreground) color."""
+        current = QColor(self.state.repl_font.color) if self.state.repl_font.color else QColor()
+        color = QColorDialog.getColor(current, self, "Select REPL Text Color")
+        if color.isValid():
+            self.state.repl_font.color = color.name()
+            self._update_repl_color_buttons()
+            self.font_changed.emit()
+
+    def _pick_repl_bg(self):
+        """Pick REPL background color."""
+        current = QColor(self.state.repl_bg) if self.state.repl_bg else QColor()
+        color = QColorDialog.getColor(current, self, "Select REPL Background Color")
+        if color.isValid():
+            self.state.repl_bg = color.name()
+            self._update_repl_color_buttons()
+            self.font_changed.emit()
+
+    def _reset_repl(self):
+        """Reset REPL settings to defaults."""
+        self.state.repl_font = FontConfig(family="monospace", size=11)
+        self.state.repl_bg = ""
+        self.repl_family_combo.blockSignals(True)
+        self.repl_family_combo.setCurrentIndex(0)
+        self.repl_family_combo.blockSignals(False)
+        self.repl_size_spin.blockSignals(True)
+        self.repl_size_spin.setValue(0)
+        self.repl_size_spin.blockSignals(False)
+        self._update_repl_color_buttons()
+        self.font_changed.emit()
+
+    def _update_repl_color_buttons(self):
+        """Update REPL color button backgrounds."""
+        fc = self.state.repl_font
+        if fc.color:
+            self.repl_fg_btn.setStyleSheet(
+                f"background-color: {fc.color}; border: 1px solid #888; border-radius: 2px;"
+            )
+        else:
+            self.repl_fg_btn.setStyleSheet("")
+        if self.state.repl_bg:
+            self.repl_bg_btn.setStyleSheet(
+                f"background-color: {self.state.repl_bg}; border: 1px solid #888; border-radius: 2px;"
+            )
+        else:
+            self.repl_bg_btn.setStyleSheet("")

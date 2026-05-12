@@ -36,6 +36,16 @@ except ImportError:
     main = None
     HAS_MAIN = False
 
+# Import SessionAPI from session module
+try:
+    from .session.api import SessionAPI, api_command, get_command_registry
+    HAS_SESSION = True
+except ImportError:
+    SessionAPI = None
+    api_command = None
+    get_command_registry = None
+    HAS_SESSION = False
+
 # Define __all__ based on what's available
 __all__ = ['__version__', '__author__']
 if HAS_RAWFILE:
@@ -46,3 +56,5 @@ if HAS_MAINWINDOW:
     __all__.append('MainWindow')
 if HAS_MAIN:
     __all__.append('main')
+if HAS_SESSION:
+    __all__.extend(['SessionAPI', 'api_command', 'get_command_registry'])

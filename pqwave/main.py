@@ -359,6 +359,42 @@ def _run_convert() -> int:
     return 0
 
 
+def _run_exec() -> int:
+    """Handle --exec <code>: execute Python code headless and print JSON result."""
+    idx = sys.argv.index('--exec') + 1
+    if idx >= len(sys.argv):
+        print("Error: --exec requires a code argument", file=sys.stderr)
+        return 1
+    code = sys.argv[idx]
+    from pqwave.session.api import SessionAPI
+    result = SessionAPI.run_headless(code)
+    print(result)
+    return 0
+
+
+def _run_help_commands() -> int:
+    """Handle --help-commands: list all registered session API commands."""
+    from pqwave.session.api import get_command_registry
+    registry = get_command_registry()
+    if not registry:
+        print("No commands registered.")
+        return 0
+    for name, entry in sorted(registry.items()):
+        print(f"  {entry['signature']}")
+        print(f"    {entry['help']}\n")
+    return 0
+
+
+def _run_setup_llm() -> int:
+    """Handle --setup-llm: open the LLM backend setup wizard."""
+    from PyQt6.QtWidgets import QApplication
+    from pqwave.llm.setup import show_setup_dialog
+
+    app = QApplication(sys.argv)
+    show_setup_dialog()
+    return 0
+
+
 def main():
     """Main entry point for pqwave."""
     # Handle --extract before argparse (uses non-standard flags like -ltspice)
@@ -369,10 +405,23 @@ def main():
     if '--convert' in sys.argv:
         return _run_convert()
 
+    # Handle --exec before argparse (headless code execution)
+    if '--exec' in sys.argv:
+        return _run_exec()
+
+    # Handle --help-commands before argparse (lists session API commands)
+    if '--help-commands' in sys.argv:
+        return _run_help_commands()
+
+    # Handle --setup-llm before argparse (opens LLM setup wizard)
+    if '--setup-llm' in sys.argv:
+        return _run_setup_llm()
+
     parser = argparse.ArgumentParser(
         description="pqwave - SPICE Waveform Viewer",
         usage=(
             "pqwave [-h] [options] [files ...]\n"
+            "       or: pqwave --exec <code>\n"
             "       or: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <output>\n"
             "       or: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>"
         ),
@@ -416,6 +465,21 @@ def main():
         "--convert",
         action="store_true",
         help="Convert raw format: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>"
+    )
+    parser.add_argument(
+        "--exec",
+        action="store_true",
+        help="Execute Python code headless: pqwave --exec '<code>'"
+    )
+    parser.add_argument(
+        "--help-commands",
+        action="store_true",
+        help="List all registered session API commands"
+    )
+    parser.add_argument(
+        "--setup-llm",
+        action="store_true",
+        help="Open the LLM backend setup wizard"
     )
     parser.add_argument(
         "--version", "-v",
@@ -552,6 +616,23 @@ def main():
         )
         if reply == QMessageBox.StandardButton.Close:
             return 0
+
+    # Script launcher: single .py file executes before GUI
+    py_scripts = [f for f in args.files if f.lower().endswith('.py')]
+    if len(py_scripts) == 1 and len(args.files) == 1:
+        logger.info(f"Running script: {py_scripts[0]}")
+        from pqwave.session.api import SessionAPI
+        session = SessionAPI()
+        ns = {"session": session}
+        try:
+            with open(py_scripts[0], "r", encoding="utf-8") as fh:
+                exec(fh.read(), ns)
+        except Exception as e:
+            logger.error(f"Script error: {e}")
+            print(f"Script error: {e}", file=sys.stderr)
+            return 1
+        logger.info("Script executed, launching GUI with resulting state")
+        args.files.remove(py_scripts[0])
 
     # Validate: .json must be the only file argument
     json_files = [f for f in args.files if f.lower().endswith('.json')]
