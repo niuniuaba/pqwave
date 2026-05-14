@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QDialog, QCheckBox, QDialogButtonBox, QLabel, QApplication, QSplitter,
 )
 from PyQt6.QtCore import Qt as QtCore_Qt
-from PyQt6.QtCore import QTimer, pyqtSlot
+from PyQt6.QtCore import QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QColor, QFont
 
 from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme, FontConfig, AxisConfig
@@ -59,6 +59,11 @@ logger = get_logger(__name__)
 
 class MainWindow(QMainWindow):
     """Main application window orchestrating all UI components."""
+
+    # Cross-thread mutation signal: forwards SessionAPI mutation events
+    # from background threads (REPL Python mode, XschemServer) to the
+    # main thread so Qt GUI operations are always thread-safe.
+    _mutation_signal = pyqtSignal(str, object)
 
     def __init__(self, initial_file=None, xschem_ba_port=2021,
                  initial_files=None):
@@ -197,8 +202,11 @@ class MainWindow(QMainWindow):
         """Wire chat panel command_submitted to REPL and AI translator."""
         self.chat_panel.command_submitted.connect(self._handle_chat_input)
 
-        # Wire SessionAPI mutations → TraceManager for live plot updates
-        self._repl._session.set_mutation_callback(self._on_session_mutation)
+        # Wire SessionAPI mutations → TraceManager for live plot updates.
+        # Use the signal bridge so mutations from any thread (REPL background
+        # thread, XschemServer network thread) always land on the main thread.
+        self._mutation_signal.connect(self._on_mutation_from_signal)
+        self._repl._session.set_mutation_callback(self._on_mutation_bridge)
 
         self._refresh_completions()
         self.chat_panel.append_output(
@@ -224,12 +232,26 @@ class MainWindow(QMainWindow):
         items.extend(_FUNC_MAP.keys())
         self.chat_panel.set_completions(sorted(set(items)))
 
+    def _on_mutation_bridge(self, action: str, **kwargs):
+        """Bridge SessionAPI mutation events from any thread to the main thread.
+
+        Called directly by the SessionAPI's mutation callback (may be on a
+        background thread). Emits to our class-level signal — since MainWindow
+        lives on the main thread, the connected slot auto-executes there.
+        """
+        self._mutation_signal.emit(action, kwargs)
+
+    @pyqtSlot(str, object)
+    def _on_mutation_from_signal(self, action: str, kwargs: dict):
+        """Slot connected to _mutation_signal, always runs on the main thread."""
+        self._on_session_mutation(action, **kwargs)
+
     def _on_session_mutation(self, action: str, **kwargs):
         """Sync SessionAPI mutations to the GUI."""
         tm = self.trace_manager
         pw = self.plot_widget
 
-        if action == "show":
+        if action == "add":
             if tm is None:
                 return
             expr = str(kwargs.get("expr", ""))
@@ -251,10 +273,37 @@ class MainWindow(QMainWindow):
                     msg += f"\nDid you mean: {suggestion}?"
                 self.chat_panel.append_output(msg)
 
-        elif action == "hide":
+        elif action == "remove":
             if tm is None:
                 return
             tm.remove_trace_by_variable_name(str(kwargs.get("expr", "")))
+
+        elif action == "remove_all":
+            if tm is None:
+                return
+            tm.clear_traces()
+
+        elif action == "show_trace":
+            if tm is None:
+                return
+            expr = str(kwargs.get("expr", ""))
+            tm.set_trace_visible(expr, True)
+
+        elif action == "hide_trace":
+            if tm is None:
+                return
+            expr = str(kwargs.get("expr", ""))
+            tm.set_trace_visible(expr, False)
+
+        elif action == "show_all_traces":
+            if tm is None:
+                return
+            tm.set_all_traces_visible(True)
+
+        elif action == "hide_all_traces":
+            if tm is None:
+                return
+            tm.set_all_traces_visible(False)
 
         elif action == "load":
             path = str(kwargs.get("path", ""))
@@ -299,14 +348,12 @@ class MainWindow(QMainWindow):
 
         elif action == "log_x":
             on = bool(kwargs.get("on", True))
-            from pqwave.models.state import AxisId
             config = self.state.get_axis_config(AxisId.X)
             if config.log_mode != on:
                 self._toggle_log_axis(AxisId.X)
 
         elif action == "log_y":
             on = bool(kwargs.get("on", True))
-            from pqwave.models.state import AxisId
             config = self.state.get_axis_config(AxisId.Y1)
             if config.log_mode != on:
                 self._toggle_log_axis(AxisId.Y1)
@@ -314,15 +361,19 @@ class MainWindow(QMainWindow):
         # ---- Cursor operations ----
 
         elif action == "cursor_xa":
+            if pw is None: return
             pw.set_cursor_xa_visible(True, kwargs.get("value"))
 
         elif action == "cursor_xb":
+            if pw is None: return
             pw.set_cursor_xb_visible(True, kwargs.get("value"))
 
         elif action == "cursor_ya":
+            if pw is None: return
             pw.set_cursor_yA_visible(True, kwargs.get("value"))
 
         elif action == "cursor_yb":
+            if pw is None: return
             pw.set_cursor_yB_visible(True, kwargs.get("value"))
 
         elif action == "cursor_delta":
@@ -466,7 +517,7 @@ class MainWindow(QMainWindow):
                         found = True
                         break
                 if not found:
-                    self._on_session_mutation("show", expr=sig)
+                    self._on_session_mutation("add", expr=sig)
                     for i, (var, _, _) in enumerate(tm.traces):
                         if var == sig:
                             tm.deselect_all()
@@ -510,8 +561,8 @@ class MainWindow(QMainWindow):
             tm = self.trace_manager
             if var and tm:
                 self.state.current_x_var = var
-                for i in range(len(tm.traces)):
-                    tm.recreate_trace_plot_item(i)
+                self.axis_manager.set_axis_label(AxisId.X, var)
+                tm.update_x_variable(var)
 
         # ---- Zoom ----
 
@@ -597,6 +648,7 @@ class MainWindow(QMainWindow):
                 elif "result" in result and result["result"] is not None:
                     self.chat_panel.append_result(result["result"])
             except Exception as e:
+                logger.exception("AI translation error")
                 self.chat_panel.append_output(f"  AI error: {e}\n")
         else:
             # Python mode: execute in background thread
@@ -2746,6 +2798,12 @@ class MainWindow(QMainWindow):
             a.triggered.connect(
                 lambda _, _tm=tm: _tm.ungroup_bus(trace_name))
 
+        # Common action for all trace types
+        menu.addSeparator()
+        a = menu.addAction("Remove Trace")
+        remove_expr = trace.expression if trace else trace_name
+        a.triggered.connect(lambda: tm.remove_trace_by_variable_name(remove_expr))
+
         self._trace_menu_active = True
         menu.exec(QCursor.pos())
         self._trace_menu_active = False
@@ -4030,6 +4088,42 @@ class MainWindow(QMainWindow):
                 sc = QShortcut(QKeySequence(ks), self)
                 sc.activated.connect(callback)
 
+        # ---- trace operations (plot-contextual) ----
+        trace_map = {
+            'remove_trace':      self._remove_selected_trace,
+            'add_all_signals':   self._add_all_signals,
+            'remove_all_traces': self._remove_all_traces,
+        }
+        for action_name, callback in trace_map.items():
+            ks = seq(action_name)
+            if ks:
+                sc = QShortcut(QKeySequence(ks), ctx_widget)
+                sc.setContext(ctxt)
+                sc.activated.connect(callback)
+
+    def _remove_selected_trace(self) -> None:
+        """Remove the currently selected trace(s)."""
+        tm = self.trace_manager
+        if tm is not None:
+            tm.remove_selected_traces()
+
+    def _add_all_signals(self) -> None:
+        """Add all available signals to the active panel."""
+        if self._repl is not None:
+            result = self._repl._session.add_all()
+            shown = result.get("shown", [])
+            if shown:
+                self.chat_panel.append_output(
+                    f"Added {len(shown)} signal(s)\n")
+            else:
+                self.chat_panel.append_output(
+                    "No signals to add (file loaded?)\n")
+
+    def _remove_all_traces(self) -> None:
+        """Remove all traces from the active panel."""
+        if self._repl is not None:
+            self._repl._session.remove_all()
+
     def _toggle_log_axis(self, axis_id: AxisId) -> None:
         """Toggle log/linear mode for an axis."""
         config = self.state.get_axis_config(axis_id)
@@ -4088,68 +4182,15 @@ class MainWindow(QMainWindow):
 
     def _show_repl_help(self) -> None:
         """Show REPL usage help."""
-        msg = (
-            "pqwave REPL — Chat Panel Usage\n\n"
-            "Modes:\n"
-            "  python>  Python mode — type API commands directly\n"
-            "  ai>   AI mode — natural language, translated to commands\n\n"
-            "Switching:\n"
-            "  /ai, /python    Switch modes\n"
-            "  Ctrl+`          Toggle chat panel\n\n"
-            "Slash Commands:\n"
-            "  /clear          Clear output\n"
-            "  /help           List all commands\n"
-            "  /backend        Show backend status\n"
-            "  /backend template on|off\n"
-            "  /backend llm on|off\n"
-            "  /test-backend   Test LLM connection\n"
-            "  /remember       Save LLM translations as templates\n"
-            "  /font 8-24      Change font size\n"
-            "  /open <path>    Open a file\n\n"
-            "Autocomplete:\n"
-            "  Tab             Complete current word\n"
-            "  Auto-suggest    After 2+ chars (300ms debounce)\n"
-            "  Up/Down/Enter   Navigate popup\n\n"
-            "AI mode tips:\n"
-            "  Template engine catches common patterns (instant, free)\n"
-            "  LLM fallback for edge cases\n"
-            "  /remember to save successful LLM translations\n"
-        )
-        self._show_scrollable_help("Help — REPL", msg)
+        from pqwave.ui.repl_help_dialog import ReplHelpDialog
+        dialog = ReplHelpDialog(self)
+        dialog.exec()
 
     def _show_api_help(self) -> None:
         """Show API command reference."""
-        from pqwave.session.api import get_command_registry
-
-        registry = get_command_registry()
-        lines = ["pqwave Session API — Command Reference\n"]
-        by_category: dict[str, list[str]] = {}
-        for name, entry in sorted(registry.items()):
-            sig = entry["signature"]
-            help_text = entry["help"]
-            if "cursor" in name:
-                cat = "Cursor"
-            elif name in ("show", "hide", "signals", "show_all", "show_matching", "bus", "expand", "collapse", "digital"):
-                cat = "Trace & Bus"
-            elif name in ("measure", "measure_script", "fft", "fft_config", "power", "eye"):
-                cat = "Analyze"
-            elif name in ("load", "reload", "export_csv", "export_plot", "change_x"):
-                cat = "File & Data"
-            elif name in ("grid", "legend", "cross_hair", "zoom_fit", "zoom_in", "zoom_out", "auto_range_x", "auto_range_y", "title", "theme", "range", "log_x", "log_y"):
-                cat = "View"
-            elif name in ("split_horizontal", "split_vertical", "close_panel"):
-                cat = "Panel"
-            else:
-                cat = "Other"
-            by_category.setdefault(cat, []).append(f"  {sig}\n    {help_text}\n")
-
-        cat_order = ["Trace & Bus", "Analyze", "Cursor", "View", "File & Data", "Panel", "Other"]
-        for cat in cat_order:
-            if cat in by_category:
-                lines.append(f"\n{cat}:")
-                lines.extend(by_category[cat])
-
-        self._show_scrollable_help("Help — API", "".join(lines))
+        from pqwave.ui.api_help_dialog import ApiHelpDialog
+        dialog = ApiHelpDialog(self)
+        dialog.exec()
 
     @staticmethod
     def _fuzzy_signal_match(expr: str, signals: list[str]) -> str | None:

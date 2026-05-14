@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _BUILTIN_TEMPLATES = [
     # show / plot (specific patterns first)
     {"match": r"(?:plot|show|display|add)\s+(?P<sig>.+?)\s+(?:to|on)\s+(?P<axis>Y[12])",
-     "code": 'show("{sig}", axis="{axis}")'},
+     "code": 'add("{sig}", axis="{axis}")'},
 
     # eye diagram (before generic show — "eyediagram" has no space)
     {"match": r"\b(?:plot|show)\s+eye\s*(?:diagram\s+)?(?:of|for)\s+(?P<sig>\S+)\s+period\s+(?P<period>\S+)",
@@ -31,9 +31,9 @@ _BUILTIN_TEMPLATES = [
     {"match": r"\b(?:plot|show)\s+eye\s*(?:diagram\s+)?(?:of|for)\s+(?P<sig>\S+)",
      "code": 'eye("{sig}")'},
 
-    # X vs Y: "plot v(r1) vs v(r2)" → show both
+    # X vs Y: "plot v(r1) vs v(r2)" → add both
     {"match": r"\b(?:plot|show)\s+(?P<sig1>\S+)\s+(?:vs\.?|versus|against)\s+(?P<sig2>\S+)",
-     "code": 'show(["{sig1}", "{sig2}"])'},
+     "code": 'add(["{sig1}", "{sig2}"])'},
 
     # "set X as x axis" → change X variable
     {"match": r"\b(?:set|use|change)\s+(?P<sig>\S+)\s+(?:as|to)\s+(?:the\s+)?x\s*(?:axis|var(?:iable)?)?",
@@ -41,7 +41,7 @@ _BUILTIN_TEMPLATES = [
 
     # signals / info (allow words between command and target)
     {"match": r"\b(?:plot|show|display|add)\b.*\b(?:all\s+)?(?:signals|vectors|traces|waves)",
-     "code": 'show_all()'},
+     "code": 'add_all()'},
     {"match": r"\b(?:list|get|show)\b.*\b(?:signal|vector|trace|wave)\s*names",
      "code": 'signals()'},
     # "list all vectors", "list up vectors", "list all signals", etc.
@@ -60,19 +60,19 @@ _BUILTIN_TEMPLATES = [
 
     # comma-separated list → show([...])
     {"match": r"(?:plot|show|display|add)\s+(?P<sig>.+?,\s*.+)",
-     "code": 'show([{sig}])'},
+     "code": 'add([{sig}])'},
 
     # plot FUNC of sig → show("func(sig)") — must precede generic show
     {"match": r"\b(?:plot|show|display|add)\s+(?P<func>FUNC_RE)\s+of\s+(?P<sig>\S+)",
-     "code": 'show("{func}({sig})")'},
+     "code": 'add("{func}({sig})")'},
 
-    # generic show (sig = non-whitespace, since signal names have no spaces)
+    # generic add (sig = non-whitespace, since signal names have no spaces)
     {"match": r"\b(?:plot|show|display|add)\s+(?P<sig>\S+)",
-     "code": 'show("{sig}")'},
+     "code": 'add("{sig}")'},
 
     # hide / remove
     {"match": r"\b(?:hide|remove|delete)\s+(?P<sig>\S+)",
-     "code": 'hide("{sig}")'},
+     "code": 'remove("{sig}")'},
 
     # measure with from/to (most specific first — non-greedy func captures multi-word names)
     {"match": r"measure\s+(?P<func>.+?)\s+of\s+(?P<sig>\S+)\s+(?:from|within\s+range\s+of)\s+(?P<from>.+?)\s+to\s+(?P<to>.+)",
@@ -222,19 +222,19 @@ _BUILTIN_TEMPLATES = [
     {"match": r"\bclose\s+(?:the\s+)?(?:active\s+)?panel",
      "code": 'close_panel()'},
 
-    # ---- Chinese: show / plot ----
+    # ---- Chinese: add / plot ----
     {"match": r"(?:绘制|显示|添加|画)\s*(?P<sig>.+?)\s*(?:到|在)\s*(?P<axis>Y[12])",
-     "code": 'show("{sig}", axis="{axis}")'},
+     "code": 'add("{sig}", axis="{axis}")'},
     {"match": r"(?:显示\s*)?(?:所有|全部)\s*(?:信号|波形)",
      "code": 'signals()'},
     {"match": r"(?:显示\s*)?(?:信息|状态)",
      "code": 'info()'},
     {"match": r"(?:绘制|显示|添加|画)\s*(?P<sig>.+)",
-     "code": 'show("{sig}")'},
+     "code": 'add("{sig}")'},
 
-    # ---- Chinese: hide / remove ----
+    # ---- Chinese: remove / delete ----
     {"match": r"(?:隐藏|删除|移除)\s*(?P<sig>.+)",
-     "code": 'hide("{sig}")'},
+     "code": 'remove("{sig}")'},
 
     # ---- Chinese: measure with from/to ----
     {"match": r"测量\s*(?P<sig>\S+)\s*的\s*(?P<func>.+?)\s*从\s*(?P<from>\S+)\s*到\s*(?P<to>\S+)",

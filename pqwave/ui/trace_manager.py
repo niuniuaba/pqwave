@@ -872,6 +872,34 @@ class TraceManager(QtCore.QObject):
 
         self._refresh_legend()
 
+    def set_trace_visible(self, expr: str, visible: bool) -> None:
+        """Set a trace's visibility by name or expression."""
+        for i, t in enumerate(self._state_traces):
+            if t.name == expr or t.expression == expr:
+                t.visible = visible
+                if i < len(self.traces):
+                    self.traces[i][1].setVisible(visible)
+                    bot = t.metadata.get('_bus_bot_item')
+                    if bot is not None:
+                        bot.setVisible(visible)
+                self._refresh_legend()
+                return
+
+    def set_all_traces_visible(self, visible: bool) -> None:
+        """Set visibility for all traces."""
+        changed = False
+        for i, t in enumerate(self._state_traces):
+            if t.visible != visible:
+                t.visible = visible
+                if i < len(self.traces):
+                    self.traces[i][1].setVisible(visible)
+                    bot = t.metadata.get('_bus_bot_item')
+                    if bot is not None:
+                        bot.setVisible(visible)
+                changed = True
+        if changed:
+            self._refresh_legend()
+
     def show_threshold_dialog(self) -> None:
         """Open threshold settings for the first selected digital trace."""
         for idx, trace in self.get_selected_traces():
@@ -894,6 +922,16 @@ class TraceManager(QtCore.QObject):
     def get_selected_traces(self) -> list[tuple[int, Trace]]:
         """Return (index, Trace) pairs for all selected traces."""
         return [(i, t) for i, t in enumerate(self._state_traces) if t.selected]
+
+    def remove_selected_traces(self) -> int:
+        """Remove all selected traces. Returns the number removed."""
+        selected = self.get_selected_traces()
+        names = [t.expression for _, t in selected]
+        count = 0
+        for name in names:
+            if self.remove_trace_by_variable_name(name):
+                count += 1
+        return count
 
     def _show_stats_for_traces(self, targets: list[tuple[int, Trace]]) -> None:
         """Compute visible-range statistics for *targets* and show the dialog."""

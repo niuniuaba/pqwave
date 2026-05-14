@@ -59,10 +59,6 @@ class SessionAPI:
         """Set a callback invoked after state mutations (for GUI sync)."""
         self._on_mutation = cb
 
-    def _mutated(self):
-        if self._on_mutation:
-            self._on_mutation()
-
     @property
     def state(self):
         return self._state
@@ -134,7 +130,6 @@ class SessionAPI:
             info = self._load_raw(abs_path)
 
         self._state.source_files.append(SourceFile(path=abs_path, file_type=ext.lstrip(".")))
-        self._mutated()
         return info
 
     def _load_raw(self, path: str) -> dict:
@@ -146,7 +141,7 @@ class SessionAPI:
         for ds_idx in range(len(raw.datasets)):
             dataset = Dataset(raw, ds_idx)
             self._state.add_dataset(dataset)
-            signals.extend(dataset.get_variable_names())
+            signals.extend(dataset.get_variable_names(include_derived=True))
             if not self._state.active_panel_id:
                 self._state.register_panel("panel_0")
 
@@ -190,7 +185,7 @@ class SessionAPI:
         names = []
         ds = self._state.current_dataset
         if ds is not None:
-            names.extend(ds.get_variable_names())
+            names.extend(ds.get_variable_names(include_derived=True))
         for name in self._state.vcd_signal_names:
             if name not in names:
                 names.append(name)
@@ -222,7 +217,7 @@ class SessionAPI:
         candidates = [f"{prefix}{i}" for i in range(start, end + 1)]
         return [c for c in candidates if c in known_signals]
 
-    def show(self, expr, axis: str = "Y1") -> str | list[str]:
+    def add(self, expr, axis: str = "Y1") -> str | list[str]:
         """Add one or more traces to the active panel.
 
         In GUI mode (callback set), delegates to the callback so TraceManager
@@ -235,7 +230,7 @@ class SessionAPI:
         from pqwave.models.trace import Trace, AxisAssignment
 
         if isinstance(expr, list):
-            return [self.show(e, axis) for e in expr]
+            return [self.add(e, axis) for e in expr]
 
         # Expand glob patterns: q* → show_matching("q*")
         # Only when * or ? looks like a glob, not a math operator:
@@ -245,7 +240,7 @@ class SessionAPI:
             result = self.show_matching(expr)
             return result.get("shown", [])
 
-        # Expand range notation: q1~q4 → show(["q1","q2","q3","q4"])
+        # Expand range notation: q1~q4 → add(["q1","q2","q3","q4"])
         if '~' in expr:
             expanded = self._expand_range(expr, self.signals())
             if expanded is not None:
@@ -254,11 +249,19 @@ class SessionAPI:
                         f"No signals match range '{expr}'. "
                         f"Available: {', '.join(self.signals()[:20])}"
                     )
-                return self.show(expanded, axis)
+                return self.add(expanded, axis)
+
+        # Auto-convert complex signals to magnitude for sensible default
+        try:
+            _, test_y = self._resolve_signal(expr)
+            if np.iscomplexobj(test_y):
+                expr = f"mag({expr})"
+        except (KeyError, TypeError):
+            pass
 
         if self._on_mutation:
             # GUI mode: tell the callback to add a trace via TraceManager
-            self._on_mutation("show", expr=expr, axis=axis)
+            self._on_mutation("add", expr=expr, axis=axis)
             return expr
 
         # Headless mode: create Trace model directly
@@ -278,10 +281,21 @@ class SessionAPI:
         self._state.add_trace(trace)
         return expr
 
-    def hide(self, trace_identifier) -> str:
+    def show(self, expr) -> str:
+        """Show a hidden trace (make it visible)."""
+        if self._on_mutation:
+            self._on_mutation("show_trace", expr=expr)
+            return f"Showing trace: {expr}"
+        for t in self._state.traces:
+            if t.name == expr or t.expression == expr:
+                t.visible = True
+                return f"Showing trace: {expr}"
+        raise ValueError(f"Trace not found: {expr!r}")
+
+    def remove(self, trace_identifier) -> str:
         """Remove a trace by name or index."""
         if self._on_mutation:
-            self._on_mutation("hide", expr=trace_identifier)
+            self._on_mutation("remove", expr=trace_identifier)
             return f"Removed trace: {trace_identifier}"
 
         if isinstance(trace_identifier, int):
@@ -293,6 +307,34 @@ class SessionAPI:
                     self._state.remove_trace(i)
                     return f"Removed trace: {trace_identifier}"
         raise ValueError(f"Trace not found: {trace_identifier!r}")
+
+    def hide(self, expr) -> str:
+        """Hide a trace (make it invisible)."""
+        if self._on_mutation:
+            self._on_mutation("hide_trace", expr=expr)
+            return f"Hiding trace: {expr}"
+        for t in self._state.traces:
+            if t.name == expr or t.expression == expr:
+                t.visible = False
+                return f"Hiding trace: {expr}"
+        raise ValueError(f"Trace not found: {expr!r}")
+
+    def remove_all(self) -> str:
+        """Remove all traces from the active panel."""
+        if self._on_mutation:
+            self._on_mutation("remove_all")
+            return "Removed all traces"
+        self._state.clear_traces()
+        return "Removed all traces"
+
+    def hide_all(self) -> str:
+        """Make all traces invisible."""
+        if self._on_mutation:
+            self._on_mutation("hide_all_traces")
+            return "Hiding all traces"
+        for t in self._state.traces:
+            t.visible = False
+        return "Hiding all traces"
 
     # ---- Measurement ----
 
@@ -340,7 +382,7 @@ class SessionAPI:
         if self._on_mutation:
             # Build fft() expression for TraceManager to handle
             expr = f"fft({signal})"
-            self._on_mutation("show", expr=expr, axis="Y1")
+            self._on_mutation("add", expr=expr, axis="Y1")
             return {"signal": signal}
 
         x_data, y_data = self._resolve_signal(signal)
@@ -578,9 +620,9 @@ class SessionAPI:
             self._on_mutation("title", text=text)
         return {"title": text}
 
-    # ---- Show all / wildcard ----
+    # ---- Add all / wildcard ----
 
-    def show_all(self) -> dict:
+    def add_all(self) -> dict:
         """Plot all available signals."""
         sigs = self.signals()
         shown = []
@@ -588,11 +630,20 @@ class SessionAPI:
             if sig.lower() in ("time", "frequency", "freq"):
                 continue
             try:
-                self.show(sig)
+                self.add(sig)
                 shown.append(sig)
             except Exception:
-                logger.warning("show_all: failed to show %s", sig, exc_info=True)
+                logger.warning("add_all: failed to add %s", sig, exc_info=True)
         return {"shown": shown}
+
+    def show_all(self) -> str:
+        """Make all traces visible."""
+        if self._on_mutation:
+            self._on_mutation("show_all_traces")
+            return "Showing all traces"
+        for t in self._state.traces:
+            t.visible = True
+        return "Showing all traces"
 
     def show_matching(self, pattern: str) -> dict:
         """Plot all signals matching a glob pattern (e.g., 'v(q*)')."""
@@ -602,10 +653,10 @@ class SessionAPI:
         for sig in sigs:
             if fnmatch.fnmatch(sig, pattern):
                 try:
-                    self.show(sig)
+                    self.add(sig)
                     shown.append(sig)
                 except Exception:
-                    logger.warning("show_matching: failed to show %s", sig, exc_info=True)
+                    logger.warning("show_matching: failed to add %s", sig, exc_info=True)
         return {"pattern": pattern, "shown": shown}
 
     # ---- Bus / Digital ----
@@ -614,9 +665,9 @@ class SessionAPI:
         # Show signals first so they become traces before grouping
         for sig in signals:
             try:
-                self.show(sig)
+                self.add(sig)
             except Exception:
-                logger.warning("bus: failed to show %s", sig, exc_info=True)
+                logger.warning("bus: failed to add %s", sig, exc_info=True)
         if self._on_mutation:
             self._on_mutation("bus", signals=signals, name=name)
         return {"bus": name, "signals": signals}
@@ -765,16 +816,52 @@ def _cmd_measure_script(session: SessionAPI, text: str):
     return session.measure_script(text)
 
 
-@api_command("show", "show(expr, axis='Y1')",
+@api_command("add", "add(expr, axis='Y1')",
              "Add a trace to the active panel")
-def _cmd_show(session: SessionAPI, expr, axis: str = "Y1"):
-    return session.show(expr, axis)
+def _cmd_add(session: SessionAPI, expr, axis: str = "Y1"):
+    return session.add(expr, axis)
 
 
-@api_command("hide", "hide(trace_identifier)",
+@api_command("show", "show(expr)",
+             "Show a hidden trace (make it visible)")
+def _cmd_show(session: SessionAPI, expr):
+    return session.show(expr)
+
+
+@api_command("add_all", "add_all()",
+             "Add all available signals to the active panel")
+def _cmd_add_all(session: SessionAPI):
+    return session.add_all()
+
+
+@api_command("show_all", "show_all()",
+             "Make all traces visible")
+def _cmd_show_all(session: SessionAPI):
+    return session.show_all()
+
+
+@api_command("remove", "remove(trace_identifier)",
              "Remove a trace by name or index")
-def _cmd_hide(session: SessionAPI, trace_identifier):
-    return session.hide(trace_identifier)
+def _cmd_remove(session: SessionAPI, trace_identifier):
+    return session.remove(trace_identifier)
+
+
+@api_command("remove_all", "remove_all()",
+             "Remove all traces from the active panel")
+def _cmd_remove_all(session: SessionAPI):
+    return session.remove_all()
+
+
+@api_command("hide", "hide(expr)",
+             "Hide a trace (make it invisible)")
+def _cmd_hide(session: SessionAPI, expr):
+    return session.hide(expr)
+
+
+@api_command("hide_all", "hide_all()",
+             "Make all traces invisible")
+def _cmd_hide_all(session: SessionAPI):
+    return session.hide_all()
 
 
 @api_command("fft", "fft(signal, window='hann', from_=None, to=None)",
@@ -802,11 +889,6 @@ def _cmd_load(session: SessionAPI, path: str):
 def _cmd_signals(session: SessionAPI):
     return session.signals()
 
-
-@api_command("show_all", "show_all()",
-             "Plot all available signals")
-def _cmd_show_all(session: SessionAPI):
-    return session.show_all()
 
 @api_command("show_matching", "show_matching(pattern)",
              "Plot signals matching a glob pattern (e.g., 'v(q*)')")

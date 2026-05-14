@@ -1,4 +1,6 @@
 templates:
+- code: hide_all()
+  match: ^hide\ all\ traces$
 - code: bus(['q1', 'q2', 'q3', 'q4'])
   match: ^group\ q1\~q4\ to\ bus$
 - code: show("{sig}")

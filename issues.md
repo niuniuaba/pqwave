@@ -646,4 +646,68 @@ TypeError: decorated slot has no signature compatible with PlotWidget.plot_conte
 - what is : there is no way to set REPL properties (backgroud/foreground color, font family, font size, others)
 - what expected : a REPL properteis group in Edit > Settings to set REPL properties.
 
-### 118. 
+### ✅ 118. plot widget doesn't respond to API command change_x() ✅ **fixed**
+- waht is : plot widget doesn't respond to change_x() command
+- how to reproduce : (1) pqwave tests/bridge.raw; (2) python > change_x("v(r2)"), x axis doesn't change to "v(r2)" (remains "time").
+- root cause: `_on_session_mutation` handler for `change_x` called `tm.recreate_trace_plot_item(i)` for each trace, which re-creates visual items from existing `trace.x_data` without reading the new X variable's data from the raw file. The `recreate_trace_plot_item` method does not update the underlying `x_data`.
+- fix: Replaced the loop with `tm.update_x_variable(var)` (same method the normal UI path uses at line 3153), and added `self.axis_manager.set_axis_label(AxisId.X, var)` to update the axis label. `update_x_variable` reads the new X variable data from the raw file, updates each trace's `x_data`, applies log transforms, downsamples, and redraws.
+- files changed:
+  - `pqwave/ui/main_window.py` — change_x mutation handler now calls update_x_variable() instead of recreate_trace_plot_item()
+
+### ✅ 119. show() command causes segmentation fault ✅ **fixed**
+- what is : execute python command `show()` cause segmentation fault (core dumped)
+- how to re-produce : refer to tests/show.log
+- root cause: REPL Python mode executes code in a background `QThread`. The `show()` API fires the mutation callback from that background thread, and the mutation handler (`_on_session_mutation`) creates pyqtgraph items (thread-unsafe Qt operations). This causes "QBasicTimer::start: Timers cannot be started from another thread" and eventual segfault.
+- fix: Replaced the direct mutation callback with a thread-safe `pyqtSignal` bridge. `_on_mutation_bridge` emits the mutation signal from any thread, and `_on_mutation_from_signal` (a `@pyqtSlot`) executes `_on_session_mutation` on the main thread via Qt's auto connection type (direct on same thread, queued from different thread). All mutation events now land on the main thread regardless of caller thread.
+- files changed:
+  - `pqwave/ui/main_window.py` — added `_mutation_signal = pyqtSignal(str, object)`, `_on_mutation_bridge()`, `_on_mutation_from_signal()` 
+
+### ✅ 120. show_all() command causes segmentation fault ✅ **fixed**
+- what is : execute python command `show_all()` cause segmentation fault (core dumped)
+- how to re-produce : refer to tests/show_all.log 
+- root cause: Same as #119 — `show_all()` calls `self.show(sig)` for each signal in a loop from the REPL background thread, each firing the mutation callback from the wrong thread.
+- fix: Same as #119 — the thread-safe mutation signal bridge ensures all mutation callbacks execute on the main thread, regardless of caller thread.
+
+### ✅ 121. API rename: add/remove/show/hide ✅ **fixed**
+- what is : `show()`/`hide()` naming was confusing — `show()` added traces while legend click toggled visibility. Separate lifecycle from presentation.
+- what changed:
+
+  | Old name | New name | Behavior |
+  |----------|----------|----------|
+  | `show(expr)` | `add(expr)` | Add trace to plot (lifecycle) |
+  | `show_all()` | `add_all()` | Add all signals |
+  | `hide(identifier)` | `remove(identifier)` | Remove trace from plot |
+  | `hide_all()` | `remove_all()` | Remove all traces |
+  | _(new)_ | `show(expr)` | Make existing trace visible |
+  | _(new)_ | `hide(expr)` | Make existing trace invisible |
+
+  Old names kept as backward-compat aliases where unambiguous: `show_all()`→`add_all()`, `hide_all()`→`remove_all()`.  
+  `show()`/`hide()` for add/remove are repurposed for visibility toggle (no alias — would conflict).
+
+- files changed:
+  - `pqwave/session/api.py` — `SessionAPI.add()`, `show()` (toggle), `remove()`, `hide()` (toggle), `add_all()`, `remove_all()`; updated commands and internal calls
+  - `pqwave/ui/main_window.py` — mutation actions `"add"`/`"remove"`/`"remove_all"`/`"show_trace"`/`"hide_trace"`
+  - `pqwave/ui/trace_manager.py` — new `set_trace_visible(expr, visible)` method
+  - `pqwave/llm/templates.py` — all templates emit `add()`/`remove()` instead of `show()`/`hide()`
+
+### ✅ 122. extend trace operations ✅ **fixed**
+- what is : no context menu items and keybindings for add(), add_all(), remove(), and remove_all()
+- what expected : (1) trace context menu > remove to remove selected traces (single or multiple); (2) keybinding to remove selected trace (single or multiple); (3) keybinding to add_all(); (4) keybinding to remove_all()
+- fix:
+  - Added "Remove Trace" context menu item (bottom of all trace type menus)
+  - Added `remove_selected_traces()` to `TraceManager`
+  - Added keybindings: `Delete` (remove trace), `Ctrl+Shift+A` (add_all), `Ctrl+Shift+K` (remove_all)
+  - Added callback methods `_remove_selected_trace`, `_add_all_signals`, `_remove_all_traces`
+- files changed:
+  - `pqwave/ui/trace_manager.py` — new `remove_selected_traces()` method
+  - `pqwave/ui/main_window.py` — "Remove Trace" context menu item, new keybinding callbacks
+  - `pqwave/ui/keybinding_manager.py` — new defaults: remove_trace, add_all_signals, remove_all_traces
+
+### ✅ 123. improve Help > REPL and HELP > API ✅ **fixed**
+- what is : Help > REPL and HELP > API differ from other help items in style and hard to read.
+- what expected : Help > REPL should be alike Help > Keybindings; and Help > API should be alike HELP > Functions and HELP > Measures
+- fix: Created proper filterable QTreeWidget dialogs for both REPL and API help, matching the style of FunctionsHelpDialog/MeasuresHelpDialog.
+- files changed:
+  - `pqwave/ui/repl_help_dialog.py` (new) — `ReplHelpDialog` with categorized REPL commands and filter
+  - `pqwave/ui/api_help_dialog.py` (new) — `ApiHelpDialog` with categorized API commands and filter
+  - `pqwave/ui/main_window.py` — `_show_repl_help()` and `_show_api_help()` now use the new dialogs

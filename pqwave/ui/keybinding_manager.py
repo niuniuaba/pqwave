@@ -81,6 +81,11 @@ class KeyBindingManager:
         'group_bus':               ('Ctrl+B',       'Group Selected as Bus'),
         'eye_diagram':             ('Ctrl+I',       'Show Eye Diagram'),
         'threshold_settings':      ('Ctrl+T',       'Threshold Settings'),
+
+        # === Trace operations ===
+        'remove_trace':            ('Delete',       'Remove Selected Trace'),
+        'add_all_signals':         ('Ctrl+Shift+A', 'Add All Signals'),
+        'remove_all_traces':       ('Ctrl+Shift+K', 'Remove All Traces'),
     }
 
     def __init__(self):
