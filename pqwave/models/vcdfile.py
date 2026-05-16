@@ -4,6 +4,7 @@ Provides VcdFile and VcdSignal classes that mirror the original API
 while delegating all parsing to the established vcdvcd package.
 """
 
+import functools
 import logging
 import numpy as np
 from typing import Dict, List, Tuple, Optional
@@ -145,3 +146,91 @@ class VcdFile:
                 if last_t > max_t:
                     max_t = last_t
         return max_t
+
+    @functools.cached_property
+    def datasets(self) -> list:
+        """Return a list of dataset dicts compatible with RawFile.datasets.
+
+        VCD signals are resampled to a common uniform time grid so they
+        can be consumed by the Dataset class. Result is cached: the full
+        resampling pipeline runs only once.
+        """
+        from pqwave.digital.vcd_time_aligner import vcd_to_step_arrays, align_vcd_to_raw
+
+        names = self.get_signal_names()
+        if not names:
+            return []
+
+        # Collect all signal time/value arrays and find global time range
+        sig_arrays = {}
+        t_min = float("inf")
+        t_max = -float("inf")
+        max_pts = 0
+        for name in names:
+            t, v = self.get_signal_data(name)
+            if len(t) < 1:
+                continue
+            step_t, step_v = vcd_to_step_arrays(t, v)
+            sig_arrays[name] = (step_t, step_v)
+            t_min = min(t_min, step_t[0])
+            t_max = max(t_max, step_t[-1])
+            max_pts = max(max_pts, len(step_t))
+
+        if not sig_arrays:
+            return []
+
+        # Uniform time grid (cap at 100k points to bound memory)
+        n_pts = min(max(1600, max_pts), 100000)
+        uniform_t = np.linspace(t_min, t_max, n_pts, dtype=np.float64)
+
+        # Build variables list and data matrix (column 0 = time)
+        variables = [{"name": "time", "index": 0, "type": "real"}]
+        columns = [uniform_t]
+
+        for idx, name in enumerate(names):
+            if name not in sig_arrays:
+                continue
+            t_step, v_step = sig_arrays[name]
+            aligned = align_vcd_to_raw(uniform_t, t_step, v_step)
+            variables.append({"name": name, "index": idx + 1, "type": "real"})
+            columns.append(aligned)
+
+        data = np.column_stack(columns)
+
+        return [{
+            "title": self.filename,
+            "date": self.date,
+            "plotname": "VCD",
+            "flags": "real",
+            "variables": variables,
+            "data": data,
+        }]
+
+    def get_variable_names(self, dataset_idx: int = 0) -> List[str]:
+        """Adapter: return signal names (RawFile compatibility)."""
+        return self.get_signal_names()
+
+    def get_variable_data(self, name: str, dataset_idx: int = 0) -> Optional[np.ndarray]:
+        """Adapter: return aligned signal data from the cached dataset (RawFile compatibility)."""
+        ds_list = self.datasets
+        if not ds_list or dataset_idx >= len(ds_list):
+            return None
+        ds = ds_list[dataset_idx]
+        variables = ds.get("variables", [])
+        data = ds.get("data")
+        if data is None:
+            return None
+        for var in variables:
+            if var["name"] == name:
+                return data[:, var["index"]]
+        return None
+
+    def get_num_points(self, dataset_idx: int = 0) -> int:
+        """Adapter: return point count from the cached datasets grid (RawFile compatibility)."""
+        ds_list = self.datasets
+        if not ds_list or dataset_idx >= len(ds_list):
+            return 0
+        data = ds_list[dataset_idx].get("data")
+        if data is not None:
+            return len(data)
+        return 0

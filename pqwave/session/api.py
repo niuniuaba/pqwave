@@ -389,11 +389,14 @@ class SessionAPI:
         x_min = _parse_value(from_) if from_ else None
         x_max = _parse_value(to) if to else None
 
-        freq, mag, phase = compute_fft(
-            y_data, x_data, window=window,
-            xmin=x_min, xmax=x_max
-        )
-        return {"freq": freq, "mag": mag, "phase": phase}
+        fft_kwargs = {"window": window}
+        if x_min is not None or x_max is not None:
+            fft_kwargs["x_range_mode"] = "manual"
+            fft_kwargs["x_range_start"] = x_min if x_min is not None else 0.0
+            fft_kwargs["x_range_end"] = x_max if x_max is not None else float(x_data[-1])
+
+        freq, mag = compute_fft(y_data, x_data, **fft_kwargs)
+        return {"freq": freq, "mag": mag}
 
     def power(self, v_signal: str, i_signal: str, from_: str = None,
               to: str = None, v_threshold: float = None) -> dict:
