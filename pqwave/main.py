@@ -621,9 +621,15 @@ def main():
     py_scripts = [f for f in args.files if f.lower().endswith('.py')]
     if len(py_scripts) == 1 and len(args.files) == 1:
         logger.info(f"Running script: {py_scripts[0]}")
-        from pqwave.session.api import SessionAPI
+        from pqwave.session.api import SessionAPI, get_command_registry
+        from functools import partial
+        import builtins as _blt
+        _builtin_names = set(dir(_blt))
         session = SessionAPI()
-        ns = {"session": session}
+        ns = {"session": session, "np": __import__("numpy")}
+        for name, entry in get_command_registry().items():
+            if name not in _builtin_names:
+                ns[name] = partial(entry["fn"], session)
         try:
             with open(py_scripts[0], "r", encoding="utf-8") as fh:
                 exec(fh.read(), ns)

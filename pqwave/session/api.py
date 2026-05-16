@@ -755,6 +755,103 @@ class SessionAPI:
     def export_plot(self, path: str, width: int = 1200, height: int = 800) -> dict:
         if self._on_mutation:
             self._on_mutation("export_plot", path=path, width=width, height=height)
+            return {"export_plot": path}
+
+        # Headless fallback: render traces with matplotlib
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return {"export_plot": None,
+                    "error": "matplotlib is required for headless export. Install it with: pip install matplotlib"}
+
+        from pqwave.models.state import ViewboxTheme, AxisId
+        from pqwave.models.trace import AxisAssignment
+
+        traces = self._state.traces
+        axis_configs = self._state.axis_configs
+        visible = [t for t in traces if t.visible]
+        if not visible:
+            return {"export_plot": None, "warning": "No visible traces to export"}
+
+        theme = getattr(self._state, "viewbox_theme", None)
+        is_dark = theme == ViewboxTheme.DARK if theme else True
+
+        fig, ax = plt.subplots(figsize=(width / 100, height / 100))
+
+        def _style_axis(axis, ylabel):
+            if is_dark:
+                axis.set_facecolor("#1a1a1a")
+                axis.tick_params(colors="#cccccc")
+                for spine in axis.spines.values():
+                    spine.set_color("#555555")
+                axis.title.set_color("#cccccc")
+                axis.xaxis.label.set_color("#cccccc")
+                axis.yaxis.label.set_color("#cccccc")
+            axis.set_ylabel(ylabel)
+
+        _style_axis(ax, AxisId.Y1.value)
+
+        y1_traces = [t for t in visible if t.y_axis == AxisAssignment.Y1]
+        y2_traces = [t for t in visible if t.y_axis == AxisAssignment.Y2]
+
+        ax2 = None
+        if y2_traces:
+            ax2 = ax.twinx()
+            _style_axis(ax2, AxisId.Y2.value)
+
+        for trace in y1_traces:
+            r, g, b = trace.color
+            ax.plot(trace.x_data, trace.y_data, color=f"#{r:02x}{g:02x}{b:02x}",
+                    linewidth=trace.line_width, label=trace.name)
+
+        for trace in y2_traces:
+            r, g, b = trace.color
+            c = f"#{r:02x}{g:02x}{b:02x}"
+            (ax2 if ax2 else ax).plot(trace.x_data, trace.y_data, color=c,
+                    linewidth=trace.line_width, label=trace.name)
+
+        if is_dark:
+            fig.patch.set_facecolor("#1a1a1a")
+
+        x_cfg = axis_configs.get(AxisId.X)
+        if x_cfg and x_cfg.log_mode:
+            ax.set_xscale("log")
+        y1_cfg = axis_configs.get(AxisId.Y1)
+        if y1_cfg and y1_cfg.log_mode:
+            ax.set_yscale("log")
+        y2_cfg = axis_configs.get(AxisId.Y2)
+        if y2_cfg and y2_cfg.log_mode and ax2:
+            ax2.set_yscale("log")
+
+        if x_cfg and x_cfg.range and not x_cfg.auto_range:
+            r = x_cfg.range
+            ax.set_xlim((10.0 ** r[0], 10.0 ** r[1]) if x_cfg.log_mode else r)
+        if y1_cfg and y1_cfg.range and not y1_cfg.auto_range:
+            r = y1_cfg.range
+            ax.set_ylim((10.0 ** r[0], 10.0 ** r[1]) if y1_cfg.log_mode else r)
+        if y2_cfg and y2_cfg.range and not y2_cfg.auto_range and ax2:
+            r = y2_cfg.range
+            ax2.set_ylim((10.0 ** r[0], 10.0 ** r[1]) if y2_cfg.log_mode else r)
+
+        x_label = self._state.current_x_var or "X"
+        ax.set_xlabel(x_label)
+
+        lines, labels = ax.get_legend_handles_labels()
+        if ax2:
+            l2, lab2 = ax2.get_legend_handles_labels()
+            lines.extend(l2)
+            labels.extend(lab2)
+        if lines:
+            ax.legend(lines, labels, loc="upper right",
+                      facecolor="#2a2a2a" if is_dark else "#ffffff",
+                      edgecolor="#555555" if is_dark else "#cccccc",
+                      labelcolor="#cccccc" if is_dark else "#000000")
+
+        fig.tight_layout()
+        fig.savefig(path, dpi=100, facecolor=fig.get_facecolor())
+        plt.close(fig)
         return {"export_plot": path}
 
     # ---- Theme ----

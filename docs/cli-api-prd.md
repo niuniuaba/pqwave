@@ -67,8 +67,10 @@ The `SessionAPI` class is the single entry point for all programmatic interactio
 |---------|-----------|-------------|
 | `load` | `load(path: str)` | Load raw/vcd/json file into session |
 | `signals` | `signals()` | List available signal names |
-| `show` | `show(expr: str \| list[str])` | Add trace(s) to active panel |
-| `hide` | `hide(trace_id: str)` | Remove a trace |
+| `add` | `add(expr: str \| list[str], axis="Y1")` | Add trace(s) to active panel |
+| `show` | `show(expr: str)` | Make a hidden trace visible |
+| `remove` | `remove(trace_id: str)` | Remove a trace by name or index |
+| `hide` | `hide(expr: str)` | Hide a trace without removing |
 | `measure` | `measure(expr: str, **kwargs)` | Evaluate scalar measurement |
 | `measure_script` | `measure_script(text: str)` | Batch execute .meas script |
 | `fft` | `fft(signal: str, window="hann", **kwargs)` | Compute and display FFT |
@@ -198,7 +200,7 @@ def cmd_bode(session, signal, fmin, fmax, points=100):
 |---|-----------|-------------|
 | SC-1 | A user can run `pqwave --exec 'load("file.raw"); print(measure("avg(vout)"))'` and get a JSON result without a GUI | Manual smoke test |
 | SC-2 | Pressing Ctrl+` opens/closes the chat panel with smooth animation | Manual visual test |
-| SC-3 | Typing `show("vout")` in the REPL adds a trace to the plot in <200ms | Manual timing |
+| SC-3 | Typing `add("vout")` in the REPL adds a trace to the plot in <200ms | Manual timing |
 | SC-4 | Switching to `/ai` and typing `measure rise time of vout` generates executable Python and returns a correct measurement | Manual test with configured backend |
 | SC-5 | `pqwave script.py` opens the GUI with all traces pre-loaded from script | Manual smoke test |
 | SC-6 | Configuring AI backend via setup wizard survives restart | Read `~/.pqwave/llm_config.json` after wizard |
