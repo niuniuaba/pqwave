@@ -4342,6 +4342,13 @@ class MainWindow(QMainWindow):
         config = dlg.get_config()
         trace = state.traces[0]
         y_data = trace.y_data if trace.y_data is not None else np.array([])
+
+        # Filter to visible X-range if no explicit range given
+        if config.range is None and trace.x_data is not None and len(trace.x_data) == len(y_data):
+            x_range = panel.plot_widget.getViewBox().viewRange()[0]
+            mask = (trace.x_data >= x_range[0]) & (trace.x_data <= x_range[1])
+            y_data = y_data[mask]
+
         from pqwave.analysis.histogram import compute_histogram
         result = compute_histogram(
             y_data, bins=config.bins, range=config.range, norm=config.norm,
