@@ -57,11 +57,12 @@ class PlotWidget(pg.PlotWidget):
     mark_clicked = pyqtSignal(float, float, float, float, float)  # x_vb, y1_vb, x_linear, y1_linear, y2_linear
     title_changed = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, equal_aspect=False):
         """Initialize the enhanced plot widget.
 
         Args:
             parent: Parent QWidget
+            equal_aspect: If True, lock the viewbox aspect ratio to 1:1
         """
         # Create custom axis items with log mode change callbacks
         axis_items = {
@@ -154,6 +155,10 @@ class PlotWidget(pg.PlotWidget):
         self._orig_vb_scaleBy = vb.scaleBy
         vb.translateBy = self._throttled_vb_translateBy
         vb.scaleBy = self._throttled_vb_scaleBy
+
+        # Lock aspect ratio for Nyquist / polar plots
+        if equal_aspect:
+            self.getViewBox().setAspectLocked(True, ratio=1.0)
 
     # Public API for cursor control
 
