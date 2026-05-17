@@ -1724,15 +1724,23 @@ class TraceManager(QtCore.QObject):
         """Create envelope plot: mean line + sigma band fill.
 
         Returns:
-            List of plot items: [FillBetweenItem, mean_curve, upper_curve, nominal_curve]
+            List of plot items:
+            [upper_fill, lower_fill, mean_curve, upper_curve, lower_curve, nominal_curve]
         """
         from pyqtgraph import PlotCurveItem, FillBetweenItem
         from pqwave.analysis.multi_run import compute_cross_run_stats
         import numpy as np
 
+        if mc.active_count == 0:
+            return []
+
         # Build data matrix from active runs
         n_runs = mc.active_count
-        n_points = max(len(y_data_list[r]) for r in mc.active_runs if r < len(y_data_list))
+        valid_lens = [len(y_data_list[r]) for r in mc.active_runs
+                       if r < len(y_data_list)]
+        if not valid_lens:
+            return []
+        n_points = max(valid_lens)
         data_matrix = np.zeros((n_runs, n_points))
         for i, run_idx in enumerate(mc.active_runs):
             if i >= n_runs or run_idx >= len(y_data_list):
@@ -1746,8 +1754,11 @@ class TraceManager(QtCore.QObject):
         upper = mean + mc.envelope_sigma * std
         lower = mean - mc.envelope_sigma * std
 
-        # Use first run's x data as reference
-        x = np.array(x_data_list[0][:len(mean)], dtype=np.float64)
+        # Use first active run's x data as reference
+        first_run = mc.active_runs[0]
+        if first_run >= len(x_data_list) or len(x_data_list[first_run]) == 0:
+            return []
+        x = np.array(x_data_list[first_run][:len(mean)], dtype=np.float64)
 
         if self.x_log:
             x = np.log10(np.abs(x) + 1e-300)
@@ -1762,18 +1773,29 @@ class TraceManager(QtCore.QObject):
             pen=self._make_pen(color, 1.5, 255),
             symbol=None, skipFiniteCheck=True,
         )
-        # Upper band edge (dashed, faint)
+        # Upper band edge (faint)
         upper_curve = PlotCurveItem(
             x, upper,
             pen=self._make_pen(color, 0.5, 80),
             symbol=None, skipFiniteCheck=True,
         )
+        # Lower band edge (faint)
+        lower_curve = PlotCurveItem(
+            x, lower,
+            pen=self._make_pen(color, 0.5, 80),
+            symbol=None, skipFiniteCheck=True,
+        )
 
-        # Fill between mean and upper band
-        fill = FillBetweenItem(upper_curve, mean_curve, brush=(*color[:3], 30))
+        # Fill between upper and mean
+        upper_fill = FillBetweenItem(upper_curve, mean_curve, brush=(*color[:3], 30))
+        # Fill between mean and lower
+        lower_fill = FillBetweenItem(mean_curve, lower_curve, brush=(*color[:3], 30))
 
-        # Nominal overlay (distinct color)
-        nominal_y = np.array(y_data_list[mc.nominal_index][:len(mean)], dtype=np.float64)
+        # Nominal overlay (distinct color), with bounds check
+        nominal_idx = mc.nominal_index
+        if nominal_idx >= len(y_data_list):
+            nominal_idx = mc.active_runs[0]
+        nominal_y = np.array(y_data_list[nominal_idx][:len(mean)], dtype=np.float64)
         if self._y_log_for_signal(signal_name):
             nominal_y = np.log10(np.abs(nominal_y) + 1e-300)
         nominal_curve = PlotCurveItem(
@@ -1782,7 +1804,7 @@ class TraceManager(QtCore.QObject):
             symbol=None, skipFiniteCheck=True,
         )
 
-        return [fill, mean_curve, upper_curve, nominal_curve]
+        return [upper_fill, lower_fill, mean_curve, upper_curve, lower_curve, nominal_curve]
 
     def _make_pen(self, color, width, alpha):
         """Create a QPen from (r, g, b) color, width, and alpha."""
@@ -1792,7 +1814,15 @@ class TraceManager(QtCore.QObject):
 
     def _y_log_for_signal(self, signal_name):
         """Check if Y axis log mode is active for the given signal."""
-        # Check y1_log attribute on the TraceManager or its panel
+        if hasattr(self, 'y1_log') and hasattr(self, 'y2_log'):
+            # Check which Y axis the trace is assigned to
+            for var, item, y_axis in self.traces:
+                if var == signal_name:
+                    if y_axis == 'Y2':
+                        return self.y2_log
+                    return self.y1_log
+            # Fallback: return Y1 log mode if trace not found
+            return self.y1_log
         if hasattr(self, 'y1_log'):
             return self.y1_log
         return False

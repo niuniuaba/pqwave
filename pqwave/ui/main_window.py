@@ -34,6 +34,7 @@ from pqwave.models.dataset import Dataset
 from pqwave.models.trace import AxisAssignment
 from pqwave.ui.menu_manager import MenuManager
 from pqwave.ui.control_panel import ControlPanel
+from pqwave.ui.mc_control_bar import MCControlBar
 from pqwave.ui.plot_widget import PlotWidget
 from pqwave.ui.trace_manager import TraceManager, SelectableItemSample
 from pqwave.ui.settings_widget import SettingsWidget
@@ -153,6 +154,7 @@ class MainWindow(QMainWindow):
 
         self.panel_grid = PanelGrid(self.state, self.color_manager)
         self.control_panel = ControlPanel()
+        self.mc_control_bar = None  # Created when MC data is loaded
 
         self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
@@ -1159,6 +1161,20 @@ class MainWindow(QMainWindow):
             return
         idx = self.state.current_dataset_idx
         self.state.remove_dataset(idx)
+        # If MC collection references removed datasets, clear it
+        if self.state.mc_collection:
+            mc = self.state.mc_collection
+            valid = [r for r in mc.runs if r.dataset_idx != idx]
+            if len(valid) != len(mc.runs):
+                # Adjust remaining run dataset indices
+                for r in valid:
+                    if r.dataset_idx > idx:
+                        r.dataset_idx -= 1
+                mc.runs = valid
+            if not mc.runs:
+                self.state.mc_collection = None
+                if self.mc_control_bar is not None:
+                    self.mc_control_bar.setVisible(False)
         # Sync Qt items with surviving state traces for all panels
         for panel in self.panel_grid.panels.values():
             panel.trace_manager.rebuild_from_state()
@@ -1213,13 +1229,56 @@ class MainWindow(QMainWindow):
         self._update_dataset_combo()
         self._update_variable_combo()
 
-        if hasattr(self, 'mc_control_bar'):
-            self.mc_control_bar.setVisible(True)
-            self.mc_control_bar.set_run_count(len(mc.runs))
-            self.mc_control_bar.set_nominal(mc.nominal_index)
-            self.mc_control_bar.set_display_mode(mc.display_mode)
+        # Create and wire MC control bar on first MC load
+        if self.mc_control_bar is None:
+            self.mc_control_bar = MCControlBar()
+            # Insert below the control panel in the upper layout
+            upper = self._main_splitter.widget(0)
+            if upper and upper.layout():
+                upper.layout().addWidget(self.mc_control_bar)
+            self.mc_control_bar.display_mode_changed.connect(self._on_mc_display_changed)
+            self.mc_control_bar.envelope_sigma_changed.connect(self._on_mc_sigma_changed)
+            self.mc_control_bar.nominal_changed.connect(self._on_mc_nominal_changed)
+            self.mc_control_bar.run_filter_changed.connect(self._on_mc_filter_changed)
+
+        self.mc_control_bar.setVisible(True)
+        self.mc_control_bar.set_run_count(len(mc.runs))
+        self.mc_control_bar.set_nominal(mc.nominal_index)
+        self.mc_control_bar.set_display_mode(mc.display_mode)
 
         self.statusBar().showMessage(f"MC: {len(mc.runs)} runs loaded", 5000)
+
+    def _on_mc_display_changed(self, mode: str):
+        """Handle MC control bar display mode change."""
+        if self.state.mc_collection:
+            self.state.mc_collection.display_mode = mode
+            for panel in self.panel_grid.panels.values():
+                panel.trace_manager.rebuild_from_state()
+
+    def _on_mc_sigma_changed(self, sigma: float):
+        """Handle MC control bar sigma change (envelope mode)."""
+        if self.state.mc_collection:
+            self.state.mc_collection.envelope_sigma = sigma
+            if self.state.mc_collection.display_mode == "envelope":
+                for panel in self.panel_grid.panels.values():
+                    panel.trace_manager.rebuild_from_state()
+
+    def _on_mc_nominal_changed(self, idx: int):
+        """Handle MC control bar nominal run change."""
+        if self.state.mc_collection:
+            self.state.mc_collection.nominal_index = idx
+            for panel in self.panel_grid.panels.values():
+                panel.trace_manager.rebuild_from_state()
+
+    def _on_mc_filter_changed(self, value):
+        """Handle MC control bar run filter change."""
+        if self.state.mc_collection:
+            if value == "all":
+                self.state.mc_collection.run_filter = None
+            else:
+                self.state.mc_collection.run_filter = value
+            for panel in self.panel_grid.panels.values():
+                panel.trace_manager.rebuild_from_state()
 
     def _connect_xschem_signals(self):
         """Connect xschem command handler signals."""
@@ -2991,16 +3050,18 @@ class MainWindow(QMainWindow):
                 dataset = Dataset(self.raw_file, i)
                 self.state.add_dataset(dataset)
 
-            # Set current dataset to first one
+            # Set current dataset to most recent (only if no dataset was active)
             if self.state.datasets:
-                self.state.current_dataset_idx = 0
-                # Set current X variable to first variable
-                var_names = self.raw_file.get_variable_names(0)
-                if var_names:
-                    self.state.current_x_var = var_names[0]
-                    logger.info(f"Auto-set X variable to: {self.state.current_x_var}")
-                    # Update X-axis label
-                    self.axis_manager.set_axis_label(AxisId.X, self.state.current_x_var)
+                if len(self.state.datasets) == len(self.raw_file.datasets):
+                    # First file loaded — set defaults
+                    self.state.current_dataset_idx = 0
+                    var_names = self.raw_file.get_variable_names(0)
+                    if var_names:
+                        self.state.current_x_var = var_names[0]
+                        logger.info(f"Auto-set X variable to: {self.state.current_x_var}")
+                        self.axis_manager.set_axis_label(AxisId.X, self.state.current_x_var)
+                # On append, keep current_dataset_idx unchanged and do not
+                # reset X variable — the user chose their context deliberately.
 
             # Update control panel
             self._update_dataset_combo()
@@ -4604,8 +4665,24 @@ class MainWindow(QMainWindow):
         """Handle MC Statistics menu action."""
         if not self.state.mc_collection:
             return
-        # TODO: Show cross-run statistics in trace analysis dialog
-        pass
+        from pqwave.analysis.multi_run import compute_cross_run_stats
+        mc = self.state.mc_collection
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        selected = panel.trace_manager.get_selected_traces()
+        if not selected:
+            self.statusBar().showMessage("No trace selected for MC statistics", 3000)
+            return
+        # Get first selected trace's data across all runs
+        signal_name = selected[0][0]
+        data = self._get_mc_signal_data(signal_name)
+        if data is None:
+            return
+        stats = compute_cross_run_stats(data)
+        from pqwave.ui.trace_analysis_dialog import TraceAnalysisDialog
+        dialog = TraceAnalysisDialog(self)
+        dialog.show_mc_stats(signal_name, stats, mc)
 
     def _on_mc_histogram(self):
         """Handle MC Histogram menu action."""
@@ -4615,8 +4692,13 @@ class MainWindow(QMainWindow):
         dialog = MCHistogramDialog(self)
         if dialog.exec():
             config = dialog.get_config()
-            # TODO: Compute and display histogram
-            pass
+            data = self._get_mc_signal_data(config["signal"])
+            if data is None:
+                return
+            from pqwave.analysis.multi_run import compute_run_measurements
+            values = compute_run_measurements(data, config["measure"])
+            self._show_mc_histogram_plot(config["signal"], config["measure"], values,
+                                          bins=config["bins"], range=config["range"])
 
     def _on_mc_yield(self):
         """Handle MC Yield menu action."""
@@ -4626,8 +4708,12 @@ class MainWindow(QMainWindow):
         dialog = MCYieldDialog(self)
         if dialog.exec():
             config = dialog.get_config()
-            # TODO: Compute and display yield
-            pass
+            data = self._get_mc_signal_data(config["signal"])
+            if data is None:
+                return
+            from pqwave.analysis.multi_run import compute_yield
+            result = compute_yield(data, config["low"], config["high"], config["measure"])
+            self._show_yield_result(config["signal"], config, result)
 
     def _on_mc_scatter(self):
         """Handle MC Scatter menu action."""
@@ -4637,22 +4723,152 @@ class MainWindow(QMainWindow):
         dialog = MCScatterDialog(self, self.state.mc_collection.parameters)
         if dialog.exec():
             config = dialog.get_config()
-            # TODO: Compute and display scatter plot
-            pass
+            data = self._get_mc_signal_data(config["signal"])
+            if data is None:
+                return
+            from pqwave.analysis.multi_run import compute_run_measurements
+            measurements = compute_run_measurements(data, config["measure"])
+            param_values = self.state.mc_collection.parameters.get(config["param"])
+            if param_values is None:
+                self.statusBar().showMessage(
+                    f"Parameter '{config['param']}' not annotated", 3000)
+                return
+            self._show_scatter_plot(config, measurements, param_values)
 
     def _on_mc_sensitivity(self):
         """Handle MC Sensitivity menu action."""
         if not self.state.mc_collection or not self.state.mc_collection.has_parameters:
+            self.statusBar().showMessage("No parameters annotated for sensitivity analysis", 3000)
             return
-        # TODO: Compute sensitivity and show result
-        pass
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        selected = panel.trace_manager.get_selected_traces()
+        if not selected:
+            self.statusBar().showMessage("No trace selected", 3000)
+            return
+        signal_name = selected[0][0]
+        data = self._get_mc_signal_data(signal_name)
+        if data is None:
+            return
+        from pqwave.analysis.multi_run import compute_run_measurements, compute_sensitivity
+        measurements = compute_run_measurements(data, "max")
+        sensitivity = compute_sensitivity(measurements, {
+            k: np.array(v) for k, v in self.state.mc_collection.parameters.items()
+        })
+        self._show_sensitivity_result(signal_name, sensitivity)
 
     def _on_mc_worst(self):
         """Handle Worst Cases menu action."""
         if not self.state.mc_collection:
             return
-        # TODO: Compute worst cases and show result
-        pass
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        selected = panel.trace_manager.get_selected_traces()
+        signal_name = selected[0][0] if selected else "v(out)"
+        data = self._get_mc_signal_data(signal_name)
+        if data is None:
+            return
+        from pqwave.analysis.multi_run import compute_worst_cases
+        mc = self.state.mc_collection
+        worst = compute_worst_cases(data, mc.nominal_index, n=5)
+        self._show_worst_cases_result(signal_name, worst, mc)
+
+    def _get_mc_signal_data(self, signal_name: str):
+        """Get 2D data array (n_runs, n_points) for an MC signal group."""
+        import numpy as np
+        mc = self.state.mc_collection
+        if mc is None or mc.active_count == 0:
+            return None
+        # Collect data from all active runs
+        run_data = []
+        for run_idx in mc.active_runs:
+            ds_idx, step_idx = mc.get_run_data_indices(run_idx)
+            if ds_idx < len(self.state.datasets):
+                ds = self.state.datasets[ds_idx]
+                var = ds.get_variable(signal_name)
+                if var is not None:
+                    y = var.y_data if hasattr(var, 'y_data') else np.array(var.data)
+                    run_data.append(y)
+        if not run_data:
+            return None
+        # Pad to equal length
+        n_points = max(len(y) for y in run_data)
+        data = np.zeros((len(run_data), n_points))
+        for i, y in enumerate(run_data):
+            data[i, :len(y)] = y
+        return data
+
+    def _show_mc_histogram_plot(self, signal, measure, values, bins=50, range=None):
+        """Show histogram of MC measurement values."""
+        from pqwave.analysis.histogram import compute_histogram
+        import numpy as np
+        if range and range[0] == range[1]:
+            range = None
+        hist = compute_histogram(values, bins=bins, norm="count", range=range)
+        # Create a new panel or use active panel for histogram display
+        panel_grid = self.panel_grid
+        panel_id = panel_grid.split_horizontal()
+        panel = panel_grid.panels.get(panel_id)
+        if panel is None:
+            return
+        from pyqtgraph import BarGraphItem
+        bar = BarGraphItem(x=hist["centers"], height=hist["counts"],
+                           width=hist["widths"], brush=(100, 150, 255, 150))
+        panel.plot_widget.addItem(bar)
+        panel.plot_widget.set_axis_label("X", f"{measure}({signal})")
+        panel.plot_widget.set_axis_label("Y1", "Count")
+        panel.plot_widget.autoRange()
+
+    def _show_yield_result(self, signal, config, result):
+        """Show yield result in status bar and as message."""
+        if isinstance(result, np.ndarray):
+            avg_yield = float(np.mean(result))
+            self.statusBar().showMessage(
+                f"Yield ({signal}): avg {avg_yield:.1f}% — "
+                f"range [{config['low']:.2g}, {config['high']:.2g}]", 8000)
+        else:
+            self.statusBar().showMessage(
+                f"Yield ({signal}): {result:.1f}% — "
+                f"range [{config['low']:.2g}, {config['high']:.2g}]", 8000)
+
+    def _show_scatter_plot(self, config, measurements, param_values):
+        """Show scatter plot of measurement vs parameter."""
+        panel_grid = self.panel_grid
+        panel_id = panel_grid.split_horizontal()
+        panel = panel_grid.panels.get(panel_id)
+        if panel is None:
+            return
+        from pyqtgraph import PlotCurveItem
+        curve = PlotCurveItem(param_values, measurements, pen=None,
+                               symbol='o', symbolSize=8, symbolBrush=(255, 80, 80))
+        panel.plot_widget.addItem(curve)
+        panel.plot_widget.set_axis_label("X", config["param"])
+        panel.plot_widget.set_axis_label("Y1", f"{config['measure']}({config['signal']})")
+        panel.plot_widget.autoRange()
+
+    def _show_sensitivity_result(self, signal, sensitivity):
+        """Show sensitivity ranking in a simple message box."""
+        lines = [f"Sensitivity of max({signal}):", ""]
+        for item in sensitivity:
+            lines.append(f"  {item['param']}: r = {item['r']:.4f} (p = {item['p']:.4f})")
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "MC Sensitivity", "\n".join(lines))
+
+    def _show_worst_cases_result(self, signal, worst, mc):
+        """Show worst-case runs in a simple message box."""
+        lines = [f"Worst cases for {signal}:", ""]
+        for item in worst:
+            run_idx = item["run_index"]
+            dev = item["deviation"]
+            params = mc.parameter_values_for_run(run_idx)
+            param_str = ", ".join(f"{k}={v:.3g}" for k, v in params.items())
+            lines.append(f"  Run {run_idx}: deviation={dev:.4g}")
+            if param_str:
+                lines.append(f"    params: {param_str}")
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "MC Worst Cases", "\n".join(lines))
 
     def _toggle_digital_analog(self) -> None:
         """Toggle selected traces between digital and analog view."""

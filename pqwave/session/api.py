@@ -222,34 +222,77 @@ class SessionAPI:
         return {"status": "ok"}
 
     def mc_group(self, signal: str, pattern: str | None = None) -> dict:
-        """Group traces into MC runs by naming pattern."""
+        """Group traces into MC runs by naming pattern.
+
+        In GUI mode, delegates to MainWindow which re-scans the active
+        dataset for traces matching the pattern. In headless mode, the
+        grouping intent is recorded on the MC collection but no data
+        reorganization occurs (call mc_load first).
+        """
         if self._on_mutation:
             self._on_mutation("mc_group", signal=signal, pattern=pattern)
             return {"status": "ok"}
-        return {"status": "ok"}
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded — use mc_load first"}
+        # In headless mode, record the grouping intent
+        if pattern:
+            mc.parameters["_grouping_pattern"] = [pattern]
+        return {"status": "ok", "signal": signal, "pattern": pattern}
 
     def mc_ungroup(self, signal: str) -> dict:
-        """Ungroup MC runs back to individual traces."""
+        """Ungroup MC runs back to individual traces.
+
+        In GUI mode, delegates to MainWindow which flattens the MC
+        collection and removes MC rendering from all panels.
+        In headless mode, clears the MC collection entirely.
+        """
         if self._on_mutation:
             self._on_mutation("mc_ungroup", signal=signal)
             return {"status": "ok"}
-        return {"status": "ok"}
+        self._state.mc_collection = None
+        return {"status": "ok", "signal": signal}
 
     def mc_stats(self, signal: str) -> dict:
         """Compute cross-run statistics for a signal group."""
         if self._on_mutation:
             self._on_mutation("mc_stats", signal=signal)
             return {"status": "ok"}
-        return {"status": "error", "message": "mc_stats requires GUI mode"}
+        data = self._mc_get_signal_data(signal)
+        if data is None:
+            return {"status": "error", "message": f"No MC data for signal {signal}"}
+        from pqwave.analysis.multi_run import compute_cross_run_stats
+        stats = compute_cross_run_stats(data)
+        return {"status": "ok", "mean": stats["mean"].tolist(),
+                "std": stats["std"].tolist(), "min": stats["min"].tolist(),
+                "max": stats["max"].tolist()}
 
     def mc_histogram(self, measurement: str, bins: int = 50,
                      range: tuple | None = None) -> dict:
-        """Compute histogram of a measurement across MC runs."""
+        """Compute histogram of a measurement across MC runs.
+
+        The measurement string must be of the form 'max(v(out))'
+        where the function is one of max/min/mean/rms/pk_pk and the
+        argument is a signal name.
+        """
         if self._on_mutation:
             self._on_mutation("mc_histogram", measurement=measurement,
                               bins=bins, range=range)
             return {"status": "ok"}
-        return {"status": "error", "message": "mc_histogram requires GUI mode"}
+        import re
+        m = re.match(r"(\w+)\((.*)\)", measurement)
+        if not m:
+            return {"status": "error", "message": "Measurement must be of form 'max(v(out))'"}
+        measure, signal = m.group(1), m.group(2)
+        data = self._mc_get_signal_data(signal)
+        if data is None:
+            return {"status": "error", "message": f"No MC data for signal {signal}"}
+        from pqwave.analysis.multi_run import compute_run_measurements
+        values = compute_run_measurements(data, measure)
+        from pqwave.analysis.histogram import compute_histogram
+        hist = compute_histogram(values, bins=bins, norm="count", range=range)
+        return {"status": "ok", "counts": hist["counts"].tolist(),
+                "centers": hist["centers"].tolist(), "edges": hist["edges"].tolist()}
 
     def mc_yield(self, signal: str, low: float, high: float,
                   condition: str | None = None) -> dict:
@@ -258,28 +301,109 @@ class SessionAPI:
             self._on_mutation("mc_yield", signal=signal, low=low,
                               high=high, condition=condition)
             return {"status": "ok"}
-        return {"status": "error", "message": "mc_yield requires GUI mode"}
+        data = self._mc_get_signal_data(signal)
+        if data is None:
+            return {"status": "error", "message": f"No MC data for signal {signal}"}
+        from pqwave.analysis.multi_run import compute_yield
+        result = compute_yield(data, low, high, condition)
+        if isinstance(result, float):
+            return {"status": "ok", "yield_pct": result}
+        return {"status": "ok", "yield_pct": result.tolist()}
 
     def mc_scatter(self, measurement: str, param: str) -> dict:
         """Scatter plot of measurement vs parameter across runs."""
         if self._on_mutation:
             self._on_mutation("mc_scatter", measurement=measurement, param=param)
             return {"status": "ok"}
-        return {"status": "error", "message": "mc_scatter requires GUI mode"}
+        import re
+        m = re.match(r"(\w+)\((.*)\)", measurement)
+        if not m:
+            return {"status": "error", "message": "Measurement must be of form 'max(v(out))'"}
+        measure, signal = m.group(1), m.group(2)
+        data = self._mc_get_signal_data(signal)
+        if data is None:
+            return {"status": "error", "message": f"No MC data for signal {signal}"}
+        mc = self._state.mc_collection
+        if mc is None or not mc.has_parameters or param not in mc.parameters:
+            return {"status": "error", "message": f"Parameter {param} not annotated"}
+        from pqwave.analysis.multi_run import compute_run_measurements
+        measurements = compute_run_measurements(data, measure)
+        param_vals = mc.parameters[param]
+        return {"status": "ok", "x": list(param_vals),
+                "y": measurements.tolist(), "param": param, "measure": measure}
 
     def mc_worst(self, n: int = 5, metric: str = "max_abs_diff") -> dict:
         """Return worst N runs by deviation from nominal."""
         if self._on_mutation:
             self._on_mutation("mc_worst", n=n, metric=metric)
             return {"status": "ok"}
-        return {"status": "error", "message": "mc_worst requires GUI mode"}
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        # Get data for first available signal
+        data = None
+        signal = "v(out)"
+        for ds in self._state.datasets:
+            for var_name in (signal,):
+                var = ds.get_variable(var_name) if hasattr(ds, 'get_variable') else None
+                if var is not None:
+                    import numpy as np
+                    y = var.y_data if hasattr(var, 'y_data') else np.array(var.data)
+                    data = np.array([y])  # single run data
+                    break
+        if data is None:
+            return {"status": "error", "message": "No trace data available"}
+        from pqwave.analysis.multi_run import compute_worst_cases
+        worst = compute_worst_cases(data, mc.nominal_index, n, metric)
+        return {"status": "ok", "worst": worst}
 
     def mc_sensitivity(self, measurement: str) -> dict:
         """Rank parameters by impact on measurement."""
         if self._on_mutation:
             self._on_mutation("mc_sensitivity", measurement=measurement)
             return {"status": "ok"}
-        return {"status": "error", "message": "mc_sensitivity requires GUI mode"}
+        mc = self._state.mc_collection
+        if mc is None or not mc.has_parameters:
+            return {"status": "error", "message": "No parameters annotated"}
+        import re
+        m = re.match(r"(\w+)\((.*)\)", measurement)
+        if not m:
+            return {"status": "error", "message": "Measurement must be of form 'max(v(out))'"}
+        measure, signal = m.group(1), m.group(2)
+        data = self._mc_get_signal_data(signal)
+        if data is None:
+            return {"status": "error", "message": f"No MC data for signal {signal}"}
+        from pqwave.analysis.multi_run import compute_run_measurements, compute_sensitivity
+        import numpy as np
+        measurements = compute_run_measurements(data, measure)
+        sensitivity = compute_sensitivity(measurements, {
+            k: np.array(v) for k, v in mc.parameters.items()
+        })
+        return {"status": "ok", "sensitivity": sensitivity}
+
+    def _mc_get_signal_data(self, signal: str):
+        """Get 2D data array (n_runs, n_points) for an MC signal from state."""
+        import numpy as np
+        mc = self._state.mc_collection
+        if mc is None or mc.active_count == 0:
+            return None
+        run_data = []
+        for run_idx in mc.active_runs:
+            ds_idx, step_idx = mc.get_run_data_indices(run_idx)
+            if ds_idx >= len(self._state.datasets):
+                continue
+            ds = self._state.datasets[ds_idx]
+            var = ds.get_variable(signal) if hasattr(ds, 'get_variable') else None
+            if var is not None:
+                y = var.y_data if hasattr(var, 'y_data') else np.array(var.data)
+                run_data.append(y)
+        if not run_data:
+            return None
+        n_points = max(len(y) for y in run_data)
+        data = np.zeros((len(run_data), n_points))
+        for i, y in enumerate(run_data):
+            data[i, :len(y)] = y
+        return data
 
     def load(self, path: str) -> dict:
         """Load a raw, vcd, or json project file into the session."""
