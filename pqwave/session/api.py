@@ -111,6 +111,26 @@ class SessionAPI:
 
     # ---- File I/O ----
 
+    def datasets(self) -> list:
+        """List all loaded datasets."""
+        return [
+            {
+                "idx": i,
+                "title": str(ds),
+            }
+            for i, ds in enumerate(self._state.datasets)
+        ]
+
+    def unload(self, idx: int) -> dict:
+        """Remove a dataset by index."""
+        if self._on_mutation:
+            self._on_mutation("unload", idx=idx)
+            return {"status": "ok"}
+        success = self._state.remove_dataset(idx)
+        if success:
+            return {"status": "ok"}
+        return {"status": "error", "message": f"Invalid dataset index: {idx}"}
+
     def load(self, path: str) -> dict:
         """Load a raw, vcd, or json project file into the session."""
         import os

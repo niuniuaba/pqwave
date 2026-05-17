@@ -126,6 +126,13 @@ class MenuManager:
         file_menu.addAction(export_img_action)
         file_menu.addSeparator()
 
+        open_mc_action = QAction("Open Monte Carlo...", self.parent)
+        open_mc_action.triggered.connect(
+            self.callbacks.get("open_monte_carlo", lambda: None)
+        )
+        file_menu.addAction(open_mc_action)
+        file_menu.addSeparator()
+
         open_file_action = QAction("Open File...", self.parent)
         open_file_action.triggered.connect(self.callbacks.get("open_file", lambda: None))
         self._set_action_shortcut(open_file_action, "open_file")
@@ -143,6 +150,13 @@ class MenuManager:
             self.callbacks.get("convert_raw_data", lambda: None)
         )
         file_menu.addAction(convert_raw_action)
+        file_menu.addSeparator()
+
+        close_dataset_action = QAction("Close Dataset", self.parent)
+        close_dataset_action.triggered.connect(
+            self.callbacks.get("close_dataset", lambda: None)
+        )
+        file_menu.addAction(close_dataset_action)
         file_menu.addSeparator()
 
         save_template_action = QAction("Save View Template...", self.parent)

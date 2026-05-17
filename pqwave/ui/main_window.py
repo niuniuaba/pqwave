@@ -940,6 +940,8 @@ class MainWindow(QMainWindow):
             'save_template': self._on_save_template,
             'load_template': self._on_load_template,
             'manage_templates': self._on_manage_templates,
+            'close_dataset': self._on_close_dataset,
+            'open_monte_carlo': self._on_open_monte_carlo,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -1144,6 +1146,33 @@ class MainWindow(QMainWindow):
         from pqwave.ui.template_manager_dialog import TemplateManagerDialog
         dlg = TemplateManagerDialog(self)
         dlg.exec()
+
+    def _on_close_dataset(self):
+        """Close the active dataset and its traces."""
+        if not self.state.datasets:
+            return
+        idx = self.state.current_dataset_idx
+        self.state.remove_dataset(idx)
+        # Sync Qt items with surviving state traces for all panels
+        for panel in self.panel_grid.panels.values():
+            panel.trace_manager.rebuild_from_state()
+        self._update_dataset_combo()
+        self._update_variable_combo()
+        self.auto_range_x()
+        self.auto_range_y()
+
+    def _on_open_monte_carlo(self):
+        """Open the MC configuration dialog."""
+        try:
+            from pqwave.ui.mc_open_dialog import MCOpenDialog
+        except ImportError:
+            QMessageBox.information(self, "Coming Soon",
+                                   "Monte Carlo support is coming soon.")
+            return
+        dialog = MCOpenDialog(self)
+        if dialog.exec():
+            config = dialog.get_config()
+            self._load_mc_data(config)
 
     def _connect_xschem_signals(self):
         """Connect xschem command handler signals."""
@@ -2902,24 +2931,15 @@ class MainWindow(QMainWindow):
     def _load_raw_file(self, filename):
         """Load raw file and update UI."""
         try:
-            # 1. Clear existing traces from plot widget BEFORE replacing raw_file.
-            #    This ensures Qt objects don't hold references to old data when
-            #    the old RawFile is garbage-collected and its temp files deleted.
-            self.trace_manager.clear_traces()
-            self.trace_manager.set_raw_file(None)
-
-            # 2. Parse the new file (does NOT touch self.raw_file yet)
+            # 1. Parse the new file (does NOT touch self.raw_file yet)
             new_raw_file = RawFile(filename)
 
-            # 3. Clear application state (releases old datasets)
-            self.state.clear_datasets()
-
-            # 4. Now safe to replace self.raw_file — old one has no remaining refs
+            # 2. Replace self.raw_file (old one stays alive via existing datasets)
             self.raw_file = new_raw_file
             # Update window registry mapping
             self._update_window_registry_raw_file(filename)
 
-            # 5. Populate UI with new data
+            # 3. Populate UI with new data (appends to existing)
             for i in range(len(self.raw_file.datasets)):
                 dataset = Dataset(self.raw_file, i)
                 self.state.add_dataset(dataset)

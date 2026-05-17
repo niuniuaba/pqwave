@@ -693,6 +693,72 @@ class TraceManager(QtCore.QObject):
         # Restore Y tick visibility (no traces → show ticks)
         self._update_y_tick_visibility()
 
+    def rebuild_from_state(self) -> None:
+        """Rebuild all Qt plot items from current ApplicationState traces.
+
+        Performs a soft clear of Qt items (viewboxes, legend) without
+        touching ApplicationState, then recreates plot items for every
+        trace still present in the panel's state.  Used after dataset
+        removal to keep the plot in sync with surviving traces.
+        """
+        # 1. Soft-clear: remove Qt items from viewboxes and legend
+        for var_name, plot_item, y_axis in self.traces:
+            # Remove from legend
+            if self.legend:
+                try:
+                    self.legend.removeItem(plot_item)
+                except Exception:
+                    pass
+            # Remove from viewbox
+            if y_axis == "Y2" and self.y2_viewbox:
+                try:
+                    self.y2_viewbox.removeItem(plot_item)
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.plot_widget.plotItem.vb.removeItem(plot_item)
+                except Exception:
+                    pass
+
+        # Remove bus bottom items
+        for t in self._state_traces:
+            bot = t.metadata.pop('_bus_bot_item', None)
+            if bot is not None:
+                vb = bot.getViewBox()
+                if vb is not None:
+                    try:
+                        vb.removeItem(bot)
+                    except Exception:
+                        pass
+
+        # Clear legend as backup
+        if self.legend:
+            try:
+                self.legend.clear()
+            except Exception:
+                pass
+
+        # Reset traces list
+        self.traces = []
+
+        # Remove phantom digital Y1 bounds
+        self._remove_digital_y1_bounds()
+
+        # 2. Rebuild from state traces
+        for trace in self._state_traces:
+            plot_item = self._create_plot_item(trace)
+            if not trace.visible:
+                plot_item.setVisible(False)
+
+            var_name = trace.expression or trace.name
+            y_axis_str = trace.y_axis.value
+            self.traces.append((var_name, plot_item, y_axis_str))
+
+        # 3. Refresh legend and tick visibility
+        self._refresh_legend()
+        self._update_y_tick_visibility()
+
     # --- Trace selection ---
 
     def _on_legend_sample_right_clicked(self, plot_item) -> None:
