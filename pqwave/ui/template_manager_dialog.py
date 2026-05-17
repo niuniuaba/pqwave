@@ -15,7 +15,7 @@ class TemplateManagerDialog(QDialog):
         self.setWindowTitle("Template Manager")
         self.setMinimumSize(400, 300)
         self._mgr = TemplateManager(get_template_dir())
-        self._selected_name = None
+        self.selected_name = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Saved Templates:"))
@@ -51,7 +51,7 @@ class TemplateManagerDialog(QDialog):
 
     def _on_load(self):
         if self._list.currentItem():
-            self._selected_name = self._list.currentItem().text()
+            self.selected_name = self._list.currentItem().text()
             self.accept()
 
     def _on_delete(self):

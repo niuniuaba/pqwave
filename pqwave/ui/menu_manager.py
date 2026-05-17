@@ -146,15 +146,18 @@ class MenuManager:
         file_menu.addSeparator()
 
         save_template_action = QAction("Save View Template...", self.parent)
-        save_template_action.triggered.connect(self.parent._on_save_template)
+        save_template_action.triggered.connect(
+            self.callbacks.get("save_template", lambda: None))
         file_menu.addAction(save_template_action)
 
         load_template_action = QAction("Load View Template...", self.parent)
-        load_template_action.triggered.connect(self.parent._on_load_template)
+        load_template_action.triggered.connect(
+            self.callbacks.get("load_template", lambda: None))
         file_menu.addAction(load_template_action)
 
         manage_templates_action = QAction("Manage Templates...", self.parent)
-        manage_templates_action.triggered.connect(self.parent._on_manage_templates)
+        manage_templates_action.triggered.connect(
+            self.callbacks.get("manage_templates", lambda: None))
         file_menu.addAction(manage_templates_action)
 
         self.menubar.addMenu(file_menu)

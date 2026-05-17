@@ -1118,7 +1118,7 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QDialog
         dlg = TemplateManagerDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            name = dlg._selected_name
+            name = dlg.selected_name
             if name:
                 result = self._session.load_template(name)
                 if result.get("success"):
