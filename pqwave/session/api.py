@@ -457,6 +457,41 @@ class SessionAPI:
             "centers": result["centers"].tolist(),
         }}
 
+    def nyquist(self, real: str, imag: str, freq: str | None = None) -> dict:
+        """Compute a Nyquist trace from real and imaginary vector data.
+
+        Args:
+            real: Name of the real-part variable.
+            imag: Name of the imaginary-part variable.
+            freq: Optional name of the frequency variable.
+
+        Returns:
+            dict with ``success`` flag and ``data`` containing
+            ``x`` and ``y`` arrays.
+        """
+        from pqwave.analysis.nyquist import compute_nyquist_trace
+
+        try:
+            _, real_data = self._resolve_signal(real)
+            _, imag_data = self._resolve_signal(imag)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+        freq_data = None
+        if freq:
+            try:
+                _, freq_data = self._resolve_signal(freq)
+            except Exception:
+                pass
+
+        result = compute_nyquist_trace(
+            real=real_data, imag=imag_data, freq=freq_data,
+        )
+        return {"success": True, "data": {
+            "x": result["x"].tolist(),
+            "y": result["y"].tolist(),
+        }}
+
     # ---- View control ----
 
     def range(self, xmin: float = None, xmax: float = None,
@@ -1135,6 +1170,12 @@ def _cmd_power(session: SessionAPI, v_signal: str, i_signal: str,
              "Compute histogram of a trace")
 def _cmd_histogram(session: SessionAPI, trace: str, **kwargs):
     return session.histogram(trace, **kwargs)
+
+
+@api_command("nyquist", "nyquist(real, imag, freq=None)",
+             "Render a Nyquist plot from real and imaginary vector data")
+def _cmd_nyquist(session: SessionAPI, real: str, imag: str, freq: str | None = None):
+    return session.nyquist(real, imag, freq)
 
 
 @api_command("load", "load(path)",

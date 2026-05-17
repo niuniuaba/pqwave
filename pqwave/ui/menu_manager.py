@@ -374,6 +374,12 @@ class MenuManager:
         analyze_menu.addAction(histogram_action)
         self.actions["histogram"] = histogram_action
 
+        nyquist_action = QAction("Nyquist Plot", self.parent)
+        nyquist_action.triggered.connect(
+            self.callbacks.get("nyquist", lambda: None))
+        analyze_menu.addAction(nyquist_action)
+        self.actions["nyquist"] = nyquist_action
+
         self.menubar.addMenu(analyze_menu)
 
         # Help menu

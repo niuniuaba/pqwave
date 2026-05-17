@@ -931,6 +931,7 @@ class MainWindow(QMainWindow):
             'compute_trace_stats': self._compute_trace_stats,
             'compute_power_analysis': self._compute_power_analysis,
             'histogram': self._show_histogram,
+            'nyquist': self._show_nyquist,
             'toggle_digital_analog': self._toggle_digital_analog,
             'group_bus': self._group_bus,
             'eye_diagram': self._show_eye_diagram,
@@ -4369,6 +4370,64 @@ class MainWindow(QMainWindow):
         )
         new_panel.plot_widget.addItem(bar_item)
         new_panel.plot_widget.autoRange()
+
+    def _show_nyquist(self) -> None:
+        """Compute and display Nyquist plot in a new split panel."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        if self.raw_file is None or self.state.current_dataset_idx is None:
+            self.statusBar().showMessage("No data loaded", 3000)
+            return
+
+        dataset_idx = self.state.current_dataset_idx
+        var_names = self.raw_file.get_variable_names(dataset_idx)
+
+        from pqwave.analysis.nyquist import detect_nyquist_vectors
+        auto_pair = detect_nyquist_vectors(var_names)
+
+        from pqwave.ui.nyquist_vector_dialog import NyquistVectorDialog
+        dlg = NyquistVectorDialog(var_names, self, auto_pair=auto_pair)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        real_var, imag_var = dlg.selected_pair()
+
+        real_data = self.raw_file.get_variable_data(real_var, dataset_idx)
+        imag_data = self.raw_file.get_variable_data(imag_var, dataset_idx)
+        if real_data is None or imag_data is None:
+            QMessageBox.warning(self, "Data Error",
+                                "Could not read vector data.")
+            return
+
+        from pqwave.analysis.nyquist import compute_nyquist_trace
+        result = compute_nyquist_trace(real=real_data, imag=imag_data)
+
+        if self.panel_grid.panel_count >= 4:
+            QMessageBox.information(
+                self, "Max Panels",
+                "Maximum 4 panels reached. Close a panel first.")
+            return
+
+        new_panel = self.panel_grid.split_panel(
+            self.panel_grid.active_panel_id, orientation="vertical")
+        if new_panel is None:
+            return
+
+        import pyqtgraph as pg
+
+        pw = new_panel.plot_widget
+
+        curve = pg.PlotCurveItem(
+            result["x"], result["y"],
+            pen=pg.mkPen("cyan", width=1),
+            skipFiniteCheck=True,
+        )
+        pw.addItem(curve)
+        pw.set_axis_label("X", "Real")
+        pw.set_axis_label("Y1", "Imaginary")
+        pw.getViewBox().setAspectLocked(True, ratio=1.0)
+        pw.autoRange()
 
     def _toggle_digital_analog(self) -> None:
         """Toggle selected traces between digital and analog view."""

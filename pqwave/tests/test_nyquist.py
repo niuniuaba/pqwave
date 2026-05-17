@@ -54,3 +54,10 @@ def test_equal_aspect_enabled(qapp):
     vb = pw.getViewBox()
     assert vb.state["aspectLocked"] == 1.0
     pw.close()
+
+
+def test_nyquist_command_registered():
+    from pqwave.session.api import get_command_registry
+    registry = get_command_registry()
+    assert "nyquist" in registry
+
