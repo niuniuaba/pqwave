@@ -7,6 +7,7 @@ Analysis package — computation engines for waveform analysis.
 Pure-numpy modules with no Qt dependencies, callable from both UI and CLI.
 """
 
+from pqwave.analysis.bode import compute_bode, detect_bode_vectors
 from pqwave.analysis.histogram import compute_histogram
 from pqwave.analysis.nyquist import (
     compute_nyquist_trace,
@@ -15,8 +16,10 @@ from pqwave.analysis.nyquist import (
 from pqwave.analysis.power_analyzer import power_analysis
 
 __all__ = [
+    "compute_bode",
     "compute_histogram",
     "compute_nyquist_trace",
+    "detect_bode_vectors",
     "detect_nyquist_vectors",
     "power_analysis",
 ]
