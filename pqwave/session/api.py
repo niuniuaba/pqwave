@@ -426,18 +426,16 @@ class SessionAPI:
                   range: list[float] | None = None, norm: str = "count") -> dict:
         """Compute histogram of a trace and return the bin data.
 
-        Args:
-            trace: Trace name or expression.
-            bins: Number of bins (default: Sturges' rule).
-            range: (lo, hi) bounds.
-            norm: Normalization mode — "count", "density", or "probability".
-
-        Returns:
-            dict with ``success``, optionally ``data`` containing
-            ``counts``, ``edges``, ``centers``.
+        In GUI mode, delegates to the main window for dialog + rendering.
+        In headless mode, returns computed bin data directly.
         """
+        if self._on_mutation:
+            kwargs = {"bins": bins, "range": range, "norm": norm}
+            self._on_mutation("histogram", trace=trace,
+                              **{k: v for k, v in kwargs.items() if v is not None})
+            return {"success": True, "trace": trace}
+
         from pqwave.analysis.histogram import compute_histogram
-        # find trace by name or expression in active panel
         found = None
         for t in self._state.traces:
             if t.name == trace or t.expression == trace:

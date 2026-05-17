@@ -4341,7 +4341,12 @@ class MainWindow(QMainWindow):
             return
 
         config = dlg.get_config()
-        trace = state.traces[0]
+        # Prefer selected traces; fall back to first trace
+        selected = panel.trace_manager.get_selected_traces()
+        if selected:
+            trace = selected[0][1]  # (index, Trace) tuple
+        else:
+            trace = state.traces[0]
         y_data = trace.y_data if trace.y_data is not None else np.array([])
 
         # Filter to visible X-range if no explicit range given

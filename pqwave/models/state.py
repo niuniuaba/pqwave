@@ -264,15 +264,7 @@ class HistogramConfig:
     norm: str = "count"
     range: Optional[Tuple[float, float]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"bins": self.bins, "norm": self.norm, "range": self.range}
 
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "HistogramConfig":
-        raw_range = data.get("range")
-        if raw_range is not None:
-            raw_range = (float(raw_range[0]), float(raw_range[1]))
-        return cls(bins=data.get("bins"), norm=data.get("norm", "count"), range=raw_range)
 
 
 class ApplicationState:

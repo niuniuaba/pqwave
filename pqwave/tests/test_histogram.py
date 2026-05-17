@@ -52,13 +52,10 @@ def test_histogram_config_defaults():
     assert cfg.range is None
 
 
-def test_histogram_config_to_from_dict():
+def test_histogram_config_fields():
     from pqwave.models.state import HistogramConfig
     cfg = HistogramConfig(bins=50, norm="density", range=(0, 5))
-    d = cfg.to_dict()
-    assert d["bins"] == 50
-    assert d["norm"] == "density"
-    restored = HistogramConfig.from_dict(d)
-    assert restored.bins == 50
-    assert restored.norm == "density"
-    assert restored.range == (0, 5)
+    assert cfg.bins == 50
+    assert cfg.norm == "density"
+    assert cfg.range == (0, 5)
+    # Transient config — no serialization (not persisted in project files)
