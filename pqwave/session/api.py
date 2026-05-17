@@ -131,6 +131,156 @@ class SessionAPI:
             return {"status": "ok"}
         return {"status": "error", "message": f"Invalid dataset index: {idx}"}
 
+    # ---- Monte Carlo ----
+
+    def mc_load(self, source: str, source_type: str = "stepped",
+                grouping_pattern: str | None = None) -> dict:
+        """Load file(s) as Monte Carlo run collection."""
+        if self._on_mutation:
+            self._on_mutation("mc_load", source=source, source_type=source_type,
+                              grouping_pattern=grouping_pattern)
+            return {"status": "ok"}
+        from pqwave.models.rawfile import RawFile
+        from pqwave.models.mc_collection import (
+            build_mc_from_stepped, build_mc_from_pattern, build_mc_from_multi_files
+        )
+        if source_type == "stepped":
+            raw = RawFile(source)
+            mc = build_mc_from_stepped(raw, source)
+        elif source_type == "multi":
+            paths = source if isinstance(source, list) else [source]
+            mc = build_mc_from_multi_files(paths)
+        elif source_type == "pattern":
+            raw = RawFile(source)
+            mc = build_mc_from_pattern(raw, source, grouping_pattern or "vout")
+        else:
+            return {"status": "error", "message": f"Unknown source_type: {source_type}"}
+        self._state.mc_collection = mc
+        return {"status": "ok", "runs": len(mc.runs)}
+
+    def mc_info(self) -> dict:
+        """Return info about the current MC collection."""
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "no_mc_data"}
+        return {
+            "status": "ok",
+            "runs": len(mc.runs),
+            "nominal": mc.nominal_index,
+            "display_mode": mc.display_mode,
+            "envelope_sigma": mc.envelope_sigma,
+            "parameters": list(mc.parameters.keys()),
+            "run_filter": mc.run_filter,
+        }
+
+    def mc_style(self, mode: str, sigma: float = 3.0) -> dict:
+        """Set MC display mode: spaghetti, envelope, or single."""
+        if self._on_mutation:
+            self._on_mutation("mc_style", mode=mode, sigma=sigma)
+            return {"status": "ok"}
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        mc.display_mode = mode
+        mc.envelope_sigma = sigma
+        return {"status": "ok"}
+
+    def mc_nominal(self, idx: int) -> dict:
+        """Set the nominal run index."""
+        if self._on_mutation:
+            self._on_mutation("mc_nominal", idx=idx)
+            return {"status": "ok"}
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        mc.nominal_index = idx
+        return {"status": "ok"}
+
+    def mc_filter(self, runs) -> dict:
+        """Set run filter: 'all' (str) or list of run indices."""
+        if self._on_mutation:
+            self._on_mutation("mc_filter", runs=runs)
+            return {"status": "ok"}
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        if runs == "all":
+            mc.run_filter = None
+        else:
+            mc.run_filter = runs
+        return {"status": "ok"}
+
+    def mc_param(self, name: str, values: list) -> dict:
+        """Annotate runs with parameter values."""
+        if self._on_mutation:
+            self._on_mutation("mc_param", name=name, values=values)
+            return {"status": "ok"}
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        mc.parameters[name] = values
+        return {"status": "ok"}
+
+    def mc_group(self, signal: str, pattern: str | None = None) -> dict:
+        """Group traces into MC runs by naming pattern."""
+        if self._on_mutation:
+            self._on_mutation("mc_group", signal=signal, pattern=pattern)
+            return {"status": "ok"}
+        return {"status": "ok"}
+
+    def mc_ungroup(self, signal: str) -> dict:
+        """Ungroup MC runs back to individual traces."""
+        if self._on_mutation:
+            self._on_mutation("mc_ungroup", signal=signal)
+            return {"status": "ok"}
+        return {"status": "ok"}
+
+    def mc_stats(self, signal: str) -> dict:
+        """Compute cross-run statistics for a signal group."""
+        if self._on_mutation:
+            self._on_mutation("mc_stats", signal=signal)
+            return {"status": "ok"}
+        return {"status": "error", "message": "mc_stats requires GUI mode"}
+
+    def mc_histogram(self, measurement: str, bins: int = 50,
+                     range: tuple | None = None) -> dict:
+        """Compute histogram of a measurement across MC runs."""
+        if self._on_mutation:
+            self._on_mutation("mc_histogram", measurement=measurement,
+                              bins=bins, range=range)
+            return {"status": "ok"}
+        return {"status": "error", "message": "mc_histogram requires GUI mode"}
+
+    def mc_yield(self, signal: str, low: float, high: float,
+                  condition: str | None = None) -> dict:
+        """Compute yield of runs within spec limits."""
+        if self._on_mutation:
+            self._on_mutation("mc_yield", signal=signal, low=low,
+                              high=high, condition=condition)
+            return {"status": "ok"}
+        return {"status": "error", "message": "mc_yield requires GUI mode"}
+
+    def mc_scatter(self, measurement: str, param: str) -> dict:
+        """Scatter plot of measurement vs parameter across runs."""
+        if self._on_mutation:
+            self._on_mutation("mc_scatter", measurement=measurement, param=param)
+            return {"status": "ok"}
+        return {"status": "error", "message": "mc_scatter requires GUI mode"}
+
+    def mc_worst(self, n: int = 5, metric: str = "max_abs_diff") -> dict:
+        """Return worst N runs by deviation from nominal."""
+        if self._on_mutation:
+            self._on_mutation("mc_worst", n=n, metric=metric)
+            return {"status": "ok"}
+        return {"status": "error", "message": "mc_worst requires GUI mode"}
+
+    def mc_sensitivity(self, measurement: str) -> dict:
+        """Rank parameters by impact on measurement."""
+        if self._on_mutation:
+            self._on_mutation("mc_sensitivity", measurement=measurement)
+            return {"status": "ok"}
+        return {"status": "error", "message": "mc_sensitivity requires GUI mode"}
+
     def load(self, path: str) -> dict:
         """Load a raw, vcd, or json project file into the session."""
         import os
@@ -1502,3 +1652,73 @@ def _cmd_load_template(session: SessionAPI, name: str):
              "List all saved view templates")
 def _cmd_list_templates(session: SessionAPI):
     return session.list_templates()
+
+
+# ---- Multi-dataset commands ----
+
+@api_command("datasets", "datasets()", "List all loaded datasets")
+def _cmd_datasets(session: SessionAPI):
+    return session.datasets()
+
+@api_command("unload", "unload(idx)", "Remove a dataset by index")
+def _cmd_unload(session: SessionAPI, idx: int):
+    return session.unload(idx)
+
+
+# ---- MC commands ----
+
+@api_command("mc_load", "mc_load(source, source_type='stepped')",
+             "Load file(s) as Monte Carlo run collection")
+def _cmd_mc_load(session: SessionAPI, source, source_type: str = "stepped",
+                 grouping_pattern: str | None = None):
+    return session.mc_load(source, source_type, grouping_pattern)
+
+@api_command("mc_info", "mc_info()", "Show current MC collection info")
+def _cmd_mc_info(session: SessionAPI):
+    return session.mc_info()
+
+@api_command("mc_style", "mc_style(mode, sigma=3)",
+             "Set MC display: spaghetti, envelope, or single")
+def _cmd_mc_style(session: SessionAPI, mode: str, sigma: float = 3.0):
+    return session.mc_style(mode, sigma)
+
+@api_command("mc_nominal", "mc_nominal(idx)", "Set the nominal run index")
+def _cmd_mc_nominal(session: SessionAPI, idx: int):
+    return session.mc_nominal(idx)
+
+@api_command("mc_filter", "mc_filter(runs)", "Filter runs: 'all' or list of indices")
+def _cmd_mc_filter(session: SessionAPI, runs):
+    return session.mc_filter(runs)
+
+@api_command("mc_param", "mc_param(name, values)",
+             "Annotate runs with parameter values")
+def _cmd_mc_param(session: SessionAPI, name: str, values: list):
+    return session.mc_param(name, values)
+
+@api_command("mc_stats", "mc_stats(signal)", "Cross-run statistics for a signal")
+def _cmd_mc_stats(session: SessionAPI, signal: str):
+    return session.mc_stats(signal)
+
+@api_command("mc_histogram", "mc_histogram(measurement, bins=50)",
+             "Histogram of a measurement across MC runs")
+def _cmd_mc_histogram(session: SessionAPI, measurement: str, bins: int = 50):
+    return session.mc_histogram(measurement, bins)
+
+@api_command("mc_yield", "mc_yield(signal, low, high)",
+             "Compute yield of runs within spec limits")
+def _cmd_mc_yield(session: SessionAPI, signal: str, low: float, high: float):
+    return session.mc_yield(signal, low, high)
+
+@api_command("mc_scatter", "mc_scatter(measurement, param)",
+             "Scatter plot of measurement vs parameter")
+def _cmd_mc_scatter(session: SessionAPI, measurement: str, param: str):
+    return session.mc_scatter(measurement, param)
+
+@api_command("mc_worst", "mc_worst(n=5)", "Return worst N runs")
+def _cmd_mc_worst(session: SessionAPI, n: int = 5):
+    return session.mc_worst(n)
+
+@api_command("mc_sensitivity", "mc_sensitivity(measurement)",
+             "Rank parameters by impact on measurement")
+def _cmd_mc_sensitivity(session: SessionAPI, measurement: str):
+    return session.mc_sensitivity(measurement)
