@@ -937,6 +937,9 @@ class MainWindow(QMainWindow):
             'group_bus': self._group_bus,
             'eye_diagram': self._show_eye_diagram,
             'threshold_settings': self._show_threshold_settings,
+            'save_template': self._on_save_template,
+            'load_template': self._on_load_template,
+            'manage_templates': self._on_manage_templates,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -4517,7 +4520,8 @@ class MainWindow(QMainWindow):
         phase_pw.set_axis_log_mode("X", True)
         phase_pw.autoRange()
 
-        # Synchronize X-axis: gain_panel drives phase_panel
+        # Force initial X-axis sync, then keep synced on future zoom/pan
+        phase_pw.plotItem.setXRange(*gain_pw.plotItem.vb.viewRange()[0], padding=0)
         gain_pw.plotItem.vb.sigXRangeChanged.connect(
             lambda: phase_pw.plotItem.setXRange(*gain_pw.plotItem.vb.viewRange()[0], padding=0))
 
