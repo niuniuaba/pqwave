@@ -589,6 +589,41 @@ class MainWindow(QMainWindow):
         elif action == "close_panel":
             self._close_active_panel()
 
+        elif action == "mc_group":
+            mc = self.state.mc_collection
+            if mc is not None:
+                signal = kwargs.get("signal", "")
+                pattern = kwargs.get("pattern")
+                if pattern:
+                    from pqwave.models.rawfile import detect_naming_pattern
+                    from pqwave.models.mc_collection import MCRun
+                    if self.raw_file is not None:
+                        names = self.raw_file.get_trace_names()
+                        groups = detect_naming_pattern(names)
+                        if signal in groups:
+                            mc.runs = [MCRun(dataset_idx=0, step_index=i)
+                                       for i in range(groups[signal]["count"])]
+                            self._update_mc_control_display()
+                            for panel in self.panel_grid.panels.values():
+                                panel.trace_manager.rebuild_from_state()
+
+        elif action == "mc_ungroup":
+            self.state.mc_collection = None
+            if self.mc_control_bar is not None:
+                self.mc_control_bar.setVisible(False)
+            for panel in self.panel_grid.panels.values():
+                panel.trace_manager.rebuild_from_state()
+
+    def _update_mc_control_display(self):
+        """Refresh MC control bar from current collection state."""
+        mc = self.state.mc_collection
+        if mc is None or self.mc_control_bar is None:
+            return
+        self.mc_control_bar.setVisible(True)
+        self.mc_control_bar.set_run_count(len(mc.runs))
+        self.mc_control_bar.set_nominal(mc.nominal_index)
+        self.mc_control_bar.set_display_mode(mc.display_mode)
+
     def _get_ai_translator(self):
         """Lazy-init the AI translator on first AI mode use."""
         if self._ai_translator is None:
@@ -4682,7 +4717,15 @@ class MainWindow(QMainWindow):
         stats = compute_cross_run_stats(data)
         from pqwave.ui.trace_analysis_dialog import TraceAnalysisDialog
         dialog = TraceAnalysisDialog(self)
-        dialog.show_mc_stats(signal_name, stats, mc)
+        metrics = {
+            "Mean (μ)": f"{float(np.mean(stats['mean'])):.4g}",
+            "Std (σ)": f"{float(np.mean(stats['std'])):.4g}",
+            "Min across runs": f"{float(np.min(stats['min'])):.4g}",
+            "Max across runs": f"{float(np.max(stats['max'])):.4g}",
+            "Avg σ/μ ratio": f"{float(np.mean(np.abs(stats['std'] / (np.abs(stats['mean']) + 1e-300)))):.4g}",
+        }
+        dialog.add_trace_result(f"MC: {signal_name} ({mc.active_count} runs)", metrics)
+        dialog.exec()
 
     def _on_mc_histogram(self):
         """Handle MC Histogram menu action."""
@@ -4728,12 +4771,18 @@ class MainWindow(QMainWindow):
                 return
             from pqwave.analysis.multi_run import compute_run_measurements
             measurements = compute_run_measurements(data, config["measure"])
-            param_values = self.state.mc_collection.parameters.get(config["param"])
-            if param_values is None:
+            param_values_full = self.state.mc_collection.parameters.get(config["param"])
+            if param_values_full is None:
                 self.statusBar().showMessage(
                     f"Parameter '{config['param']}' not annotated", 3000)
                 return
-            self._show_scatter_plot(config, measurements, param_values)
+            # Filter param_values to match active_runs (measurements already filtered)
+            active = self.state.mc_collection.active_runs
+            param_values = [param_values_full[i] for i in active
+                            if i < len(param_values_full)]
+            # Ensure lengths match (truncate longer array)
+            n = min(len(measurements), len(param_values))
+            self._show_scatter_plot(config, measurements[:n], param_values[:n])
 
     def _on_mc_sensitivity(self):
         """Handle MC Sensitivity menu action."""
@@ -4807,6 +4856,7 @@ class MainWindow(QMainWindow):
         if range and range[0] == range[1]:
             range = None
         hist = compute_histogram(values, bins=bins, norm="count", range=range)
+        widths = np.diff(hist["edges"])
         # Create a new panel or use active panel for histogram display
         panel_grid = self.panel_grid
         panel_id = panel_grid.split_horizontal()
@@ -4815,7 +4865,7 @@ class MainWindow(QMainWindow):
             return
         from pyqtgraph import BarGraphItem
         bar = BarGraphItem(x=hist["centers"], height=hist["counts"],
-                           width=hist["widths"], brush=(100, 150, 255, 150))
+                           width=widths, brush=(100, 150, 255, 150))
         panel.plot_widget.addItem(bar)
         panel.plot_widget.set_axis_label("X", f"{measure}({signal})")
         panel.plot_widget.set_axis_label("Y1", "Count")

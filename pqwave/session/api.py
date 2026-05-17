@@ -340,19 +340,17 @@ class SessionAPI:
         mc = self._state.mc_collection
         if mc is None:
             return {"status": "error", "message": "No MC data loaded"}
-        # Get data for first available signal
-        data = None
+        # Use first available signal from the collection's datasets
         signal = "v(out)"
-        for ds in self._state.datasets:
-            for var_name in (signal,):
-                var = ds.get_variable(var_name) if hasattr(ds, 'get_variable') else None
-                if var is not None:
-                    import numpy as np
-                    y = var.y_data if hasattr(var, 'y_data') else np.array(var.data)
-                    data = np.array([y])  # single run data
+        data = self._mc_get_signal_data(signal)
+        if data is None:
+            # Try any common signal names
+            for candidate in ("v(out)", "V(out)", "v(buf)", "out"):
+                data = self._mc_get_signal_data(candidate)
+                if data is not None:
                     break
         if data is None:
-            return {"status": "error", "message": "No trace data available"}
+            return {"status": "error", "message": "No trace data available for worst-case analysis"}
         from pqwave.analysis.multi_run import compute_worst_cases
         worst = compute_worst_cases(data, mc.nominal_index, n, metric)
         return {"status": "ok", "worst": worst}
