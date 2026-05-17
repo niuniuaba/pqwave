@@ -320,6 +320,9 @@ class ApplicationState:
         self.fft_config: FftConfig = FftConfig()
         self.eye_diagram_config: EyeDiagramConfig = EyeDiagramConfig()
 
+        # Monte Carlo run collection (None when not in MC mode)
+        self.mc_collection = None
+
         self.window_registry: WindowRegistry = get_registry()
         self.command_handler: Optional[CommandHandler] = None
 
