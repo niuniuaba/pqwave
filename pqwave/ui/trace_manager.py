@@ -1606,6 +1606,131 @@ class TraceManager(QtCore.QObject):
 
         return plot_item
 
+    def _create_mc_spaghetti(self, mc, signal_name, x_data_list, y_data_list, color):
+        """Create spaghetti plot: all runs overlaid with low alpha.
+
+        Args:
+            mc: MCRunCollection instance
+            signal_name: name of the signal group
+            x_data_list: list of x-data arrays, one per run
+            y_data_list: list of y-data arrays, one per run
+            color: base RGB tuple for run traces
+
+        Returns:
+            List of PlotCurveItem objects (one per active run, max 500)
+        """
+        from pyqtgraph import PlotCurveItem
+        import numpy as np
+
+        items = []
+        max_runs = min(mc.active_count, 500)
+
+        # Nominal gets a warm highlight color
+        nominal_color = (255, 80, 80) if sum(color) < 300 else (255, 200, 50)
+
+        for i, run_idx in enumerate(mc.active_runs[:max_runs]):
+            if run_idx >= len(x_data_list):
+                break
+            x = np.array(x_data_list[run_idx], dtype=np.float64)
+            y = np.array(y_data_list[run_idx], dtype=np.float64)
+
+            if self.x_log:
+                x = np.log10(np.abs(x) + 1e-300)
+            if self._y_log_for_signal(signal_name):
+                y = np.log10(np.abs(y) + 1e-300)
+
+            is_nominal = (run_idx == mc.nominal_index)
+            pen_color = nominal_color if is_nominal else color
+            pen_width = 2.0 if is_nominal else 0.5
+            alpha = 255 if is_nominal else 40
+
+            curve = PlotCurveItem(
+                x, y,
+                pen=self._make_pen(pen_color, pen_width, alpha),
+                symbol=None,
+                skipFiniteCheck=True,
+            )
+            items.append(curve)
+
+        return items
+
+    def _create_mc_envelope(self, mc, signal_name, x_data_list, y_data_list, color):
+        """Create envelope plot: mean line + sigma band fill.
+
+        Returns:
+            List of plot items: [FillBetweenItem, mean_curve, upper_curve, nominal_curve]
+        """
+        from pyqtgraph import PlotCurveItem, FillBetweenItem
+        from pqwave.analysis.multi_run import compute_cross_run_stats
+        import numpy as np
+
+        # Build data matrix from active runs
+        n_runs = mc.active_count
+        n_points = max(len(y_data_list[r]) for r in mc.active_runs if r < len(y_data_list))
+        data_matrix = np.zeros((n_runs, n_points))
+        for i, run_idx in enumerate(mc.active_runs):
+            if i >= n_runs or run_idx >= len(y_data_list):
+                break
+            y = y_data_list[run_idx]
+            data_matrix[i, :len(y)] = y
+
+        stats = compute_cross_run_stats(data_matrix)
+        mean = stats["mean"]
+        std = stats["std"]
+        upper = mean + mc.envelope_sigma * std
+        lower = mean - mc.envelope_sigma * std
+
+        # Use first run's x data as reference
+        x = np.array(x_data_list[0][:len(mean)], dtype=np.float64)
+
+        if self.x_log:
+            x = np.log10(np.abs(x) + 1e-300)
+        if self._y_log_for_signal(signal_name):
+            mean = np.log10(np.abs(mean) + 1e-300)
+            upper = np.log10(np.abs(upper) + 1e-300)
+            lower = np.log10(np.abs(lower) + 1e-300)
+
+        # Mean line (solid)
+        mean_curve = PlotCurveItem(
+            x, mean,
+            pen=self._make_pen(color, 1.5, 255),
+            symbol=None, skipFiniteCheck=True,
+        )
+        # Upper band edge (dashed, faint)
+        upper_curve = PlotCurveItem(
+            x, upper,
+            pen=self._make_pen(color, 0.5, 80),
+            symbol=None, skipFiniteCheck=True,
+        )
+
+        # Fill between mean and upper band
+        fill = FillBetweenItem(upper_curve, mean_curve, brush=(*color[:3], 30))
+
+        # Nominal overlay (distinct color)
+        nominal_y = np.array(y_data_list[mc.nominal_index][:len(mean)], dtype=np.float64)
+        if self._y_log_for_signal(signal_name):
+            nominal_y = np.log10(np.abs(nominal_y) + 1e-300)
+        nominal_curve = PlotCurveItem(
+            x, nominal_y,
+            pen=self._make_pen((255, 80, 80), 2.0, 255),
+            symbol=None, skipFiniteCheck=True,
+        )
+
+        return [fill, mean_curve, upper_curve, nominal_curve]
+
+    def _make_pen(self, color, width, alpha):
+        """Create a QPen from (r, g, b) color, width, and alpha."""
+        from PyQt6.QtGui import QPen, QColor
+        r, g, b = color[:3]
+        return QPen(QColor(r, g, b, alpha), width)
+
+    def _y_log_for_signal(self, signal_name):
+        """Check if Y axis log mode is active for the given signal."""
+        # Check y1_log attribute on the TraceManager or its panel
+        if hasattr(self, 'y1_log'):
+            return self.y1_log
+        return False
+
     def recreate_trace_plot_item(self, trace_idx: int) -> None:
         """Recreate the plot item for a trace after type change.
 
