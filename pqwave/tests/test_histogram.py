@@ -42,3 +42,23 @@ def test_histogram_normalization_modes():
     assert abs(np.sum(r_count["counts"]) - 5000) < 1
     assert abs(np.sum(r_density["counts"] * np.diff(r_density["edges"])) - 1.0) < 0.01
     assert abs(np.sum(r_prob["counts"]) - 1.0) < 0.01
+
+
+def test_histogram_config_defaults():
+    from pqwave.models.state import HistogramConfig
+    cfg = HistogramConfig()
+    assert cfg.bins is None
+    assert cfg.norm == "count"
+    assert cfg.range is None
+
+
+def test_histogram_config_to_from_dict():
+    from pqwave.models.state import HistogramConfig
+    cfg = HistogramConfig(bins=50, norm="density", range=(0, 5))
+    d = cfg.to_dict()
+    assert d["bins"] == 50
+    assert d["norm"] == "density"
+    restored = HistogramConfig.from_dict(d)
+    assert restored.bins == 50
+    assert restored.norm == "density"
+    assert restored.range == (0, 5)
