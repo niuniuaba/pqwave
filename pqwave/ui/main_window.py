@@ -1125,11 +1125,12 @@ class MainWindow(QMainWindow):
             if name:
                 result = self._session.load_template(name)
                 if result.get("success"):
-                    self.statusBar().showMessage(
-                        f"Template '{name}' loaded "
-                        f"({result.get('applied_expressions', 0)} traces)",
-                        3000,
-                    )
+                    applied = result.get('applied_expressions', 0)
+                    skipped = result.get('skipped_expressions', [])
+                    msg = f"Template '{name}' loaded ({applied} traces)"
+                    if skipped:
+                        msg += f" — {len(skipped)} skipped: {', '.join(skipped[:3])}"
+                    self.statusBar().showMessage(msg, 5000)
                 else:
                     self.statusBar().showMessage(
                         f"Error: {result.get('error')}", 5000
