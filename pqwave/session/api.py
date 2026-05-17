@@ -45,6 +45,11 @@ def get_command_registry() -> dict[str, dict]:
     return _COMMAND_REGISTRY
 
 
+def get_template_dir() -> str:
+    """Return the directory where view templates are stored."""
+    return os.path.join(os.path.expanduser("~"), ".pqwave", "templates")
+
+
 # ---- Session API ----
 
 class SessionAPI:
@@ -514,6 +519,70 @@ class SessionAPI:
             "active_panel": self._state.active_panel_id,
             "num_panels": len(self._state.panels),
         }
+
+    # ---- View Templates ----
+
+    def _template_manager(self):
+        from pqwave.templates.manager import TemplateManager
+        return TemplateManager(get_template_dir())
+
+    def save_template(self, name: str) -> dict:
+        """Save current panel view as a named template."""
+        config = {
+            "axis_configs": {
+                ax.value: cfg.to_dict()
+                for ax, cfg in self._state.axis_configs.items()
+            },
+            "trace_expressions": [
+                {
+                    "expr": t.expression or t.name,
+                    "axis": t.y_axis.value,
+                    "color": list(t.color),
+                }
+                for t in self._state.traces if t.visible
+            ],
+            "display": {
+                "title": self._state.plot_title,
+            },
+        }
+        self._template_manager().save(name, config)
+        return {"success": True, "name": name}
+
+    def load_template(self, name: str) -> dict:
+        """Load a saved view template onto the active panel."""
+        try:
+            config = self._template_manager().load(name)
+        except FileNotFoundError:
+            return {"success": False, "error": f"Template '{name}' not found"}
+
+        from pqwave.models.state import AxisId, AxisConfig
+
+        # Apply axis configs
+        for ax_name, ax_cfg in config.get("axis_configs", {}).items():
+            try:
+                axis_id = AxisId(ax_name)
+                self._state.set_axis_config(axis_id, AxisConfig.from_dict(ax_cfg))
+            except (ValueError, Exception):
+                pass
+
+        # Apply trace expressions - skip missing vectors gracefully
+        applied = 0
+        for te in config.get("trace_expressions", []):
+            try:
+                self.add(te["expr"], axis=te.get("axis", "Y1"))
+                applied += 1
+            except Exception:
+                pass
+
+        # Apply display
+        if config.get("display", {}).get("title"):
+            self._state.plot_title = config["display"]["title"]
+
+        return {"success": True, "name": name, "applied_expressions": applied}
+
+    def list_templates(self) -> dict:
+        """List all saved view templates."""
+        return {"templates": self._template_manager().list()}
 
     def help(self, command_name: str = None) -> str:
         """List available commands or get help for a specific command."""
@@ -1219,3 +1288,21 @@ def _cmd_set_trace(session: SessionAPI, name: str, height: float = None,
                    width: int = None, color=None, alias: str = None):
     return session.set_trace(name, height=height, width=width,
                              color=color, alias=alias)
+
+
+# ---- View Templates ----
+
+@api_command("save_template", "save_template(name)",
+             "Save current panel view as a named template")
+def _cmd_save_template(session: SessionAPI, name: str):
+    return session.save_template(name)
+
+@api_command("load_template", "load_template(name)",
+             "Load a saved view template onto the active panel")
+def _cmd_load_template(session: SessionAPI, name: str):
+    return session.load_template(name)
+
+@api_command("list_templates", "list_templates()",
+             "List all saved view templates")
+def _cmd_list_templates(session: SessionAPI):
+    return session.list_templates()
