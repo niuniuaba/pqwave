@@ -1174,6 +1174,47 @@ class MainWindow(QMainWindow):
             config = dialog.get_config()
             self._load_mc_data(config)
 
+    def _load_mc_data(self, config):
+        """Load Monte Carlo data from dialog configuration."""
+        from pqwave.models.rawfile import RawFile, detect_naming_pattern
+        from pqwave.models.mc_collection import (
+            build_mc_from_stepped, build_mc_from_pattern, build_mc_from_multi_files
+        )
+        from pqwave.models.dataset import Dataset
+
+        if config.is_stepped:
+            raw = RawFile(config.file_path)
+            mc = build_mc_from_stepped(raw, config.file_path)
+            for ds_idx in range(len(raw.datasets)):
+                dataset = Dataset(raw, ds_idx)
+                self.state.add_dataset(dataset)
+        elif config.is_multi_file:
+            for path in config.file_paths:
+                raw = RawFile(path)
+                for ds_idx in range(len(raw.datasets)):
+                    dataset = Dataset(raw, ds_idx)
+                    self.state.add_dataset(dataset)
+            mc = build_mc_from_multi_files(config.file_paths)
+        else:  # pattern
+            raw = RawFile(config.file_path)
+            for ds_idx in range(len(raw.datasets)):
+                dataset = Dataset(raw, ds_idx)
+                self.state.add_dataset(dataset)
+            pattern = config.grouping_pattern or "vout"
+            mc = build_mc_from_pattern(raw, config.file_path, pattern)
+
+        self.state.mc_collection = mc
+        self._update_dataset_combo()
+        self._update_variable_combo()
+
+        if hasattr(self, 'mc_control_bar'):
+            self.mc_control_bar.setVisible(True)
+            self.mc_control_bar.set_run_count(len(mc.runs))
+            self.mc_control_bar.set_nominal(mc.nominal_index)
+            self.mc_control_bar.set_display_mode(mc.display_mode)
+
+        self.statusBar().showMessage(f"MC: {len(mc.runs)} runs loaded", 5000)
+
     def _connect_xschem_signals(self):
         """Connect xschem command handler signals."""
         if self.state.command_handler is None:

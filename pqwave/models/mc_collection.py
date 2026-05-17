@@ -114,3 +114,42 @@ class CorrelationMatrix:
     @classmethod
     def from_dict(cls, data: dict) -> "CorrelationMatrix":
         return cls(params=data["params"], matrix=data["matrix"])
+
+
+# ---------------------------------------------------------------------------
+# Factory functions for building MCRunCollection from different source types
+# ---------------------------------------------------------------------------
+
+
+def build_mc_from_stepped(raw_file, file_path: str) -> "MCRunCollection":
+    """Build an MCRunCollection from a single stepped raw file."""
+    runs = []
+    params = raw_file.step_param_values
+    for i in range(raw_file.step_count):
+        run_params = {}
+        for name, values in params.items():
+            if i < len(values):
+                run_params[name] = values[i]
+        runs.append(MCRun(dataset_idx=0, step_index=i, params=run_params))
+    return MCRunCollection(
+        runs=runs,
+        parameters={name: list(values) for name, values in params.items()},
+    )
+
+
+def build_mc_from_pattern(raw_file, file_path: str, base_name: str) -> "MCRunCollection":
+    """Build an MCRunCollection from a file with named run vectors (vout0..voutN)."""
+    trace_names = raw_file.get_trace_names()
+    from pqwave.models.rawfile import detect_naming_pattern
+    groups = detect_naming_pattern(trace_names)
+    if base_name not in groups:
+        return MCRunCollection(runs=[])
+    count = groups[base_name]["count"]
+    runs = [MCRun(dataset_idx=0, step_index=i) for i in range(count)]
+    return MCRunCollection(runs=runs)
+
+
+def build_mc_from_multi_files(file_paths: list[str]) -> "MCRunCollection":
+    """Build an MCRunCollection from multiple single-run files."""
+    runs = [MCRun(dataset_idx=i, step_index=0) for i in range(len(file_paths))]
+    return MCRunCollection(runs=runs)
