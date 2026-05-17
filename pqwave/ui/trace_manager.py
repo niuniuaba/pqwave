@@ -1807,10 +1807,10 @@ class TraceManager(QtCore.QObject):
         return [upper_fill, lower_fill, mean_curve, upper_curve, lower_curve, nominal_curve]
 
     def _create_mc_single_run(self, mc, signal_name, x_data_list, y_data_list, color):
-        """Render a single MC run at full opacity.
+        """Render the nominal MC run at full opacity.
 
-        Uses mc.display_mode metadata to determine which run to show
-        (defaults to nominal_index when no specific run is set).
+        Uses mc.nominal_index to select the run. Falls back to the first
+        active run if nominal_index is out of bounds.
         """
         from pyqtgraph import PlotCurveItem
         import numpy as np
