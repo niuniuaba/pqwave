@@ -933,6 +933,12 @@ class MainWindow(QMainWindow):
             'histogram': self._show_histogram,
             'nyquist': self._show_nyquist,
             'bode': self._show_bode,
+            'mc_stats': self._on_mc_stats,
+            'mc_histogram': self._on_mc_histogram,
+            'mc_yield': self._on_mc_yield,
+            'mc_scatter': self._on_mc_scatter,
+            'mc_sensitivity': self._on_mc_sensitivity,
+            'mc_worst': self._on_mc_worst,
             'toggle_digital_analog': self._toggle_digital_analog,
             'group_bus': self._group_bus,
             'eye_diagram': self._show_eye_diagram,
@@ -4593,6 +4599,60 @@ class MainWindow(QMainWindow):
         phase_pw.plotItem.setXRange(*gain_pw.plotItem.vb.viewRange()[0], padding=0)
         gain_pw.plotItem.vb.sigXRangeChanged.connect(
             lambda: phase_pw.plotItem.setXRange(*gain_pw.plotItem.vb.viewRange()[0], padding=0))
+
+    def _on_mc_stats(self):
+        """Handle MC Statistics menu action."""
+        if not self.state.mc_collection:
+            return
+        # TODO: Show cross-run statistics in trace analysis dialog
+        pass
+
+    def _on_mc_histogram(self):
+        """Handle MC Histogram menu action."""
+        from pqwave.ui.mc_histogram_dialog import MCHistogramDialog
+        if not self.state.mc_collection:
+            return
+        dialog = MCHistogramDialog(self)
+        if dialog.exec():
+            config = dialog.get_config()
+            # TODO: Compute and display histogram
+            pass
+
+    def _on_mc_yield(self):
+        """Handle MC Yield menu action."""
+        from pqwave.ui.mc_yield_dialog import MCYieldDialog
+        if not self.state.mc_collection:
+            return
+        dialog = MCYieldDialog(self)
+        if dialog.exec():
+            config = dialog.get_config()
+            # TODO: Compute and display yield
+            pass
+
+    def _on_mc_scatter(self):
+        """Handle MC Scatter menu action."""
+        from pqwave.ui.mc_scatter_dialog import MCScatterDialog
+        if not self.state.mc_collection:
+            return
+        dialog = MCScatterDialog(self, self.state.mc_collection.parameters)
+        if dialog.exec():
+            config = dialog.get_config()
+            # TODO: Compute and display scatter plot
+            pass
+
+    def _on_mc_sensitivity(self):
+        """Handle MC Sensitivity menu action."""
+        if not self.state.mc_collection or not self.state.mc_collection.has_parameters:
+            return
+        # TODO: Compute sensitivity and show result
+        pass
+
+    def _on_mc_worst(self):
+        """Handle Worst Cases menu action."""
+        if not self.state.mc_collection:
+            return
+        # TODO: Compute worst cases and show result
+        pass
 
     def _toggle_digital_analog(self) -> None:
         """Toggle selected traces between digital and analog view."""

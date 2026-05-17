@@ -400,6 +400,42 @@ class MenuManager:
         analyze_menu.addAction(bode_action)
         self.actions["bode"] = bode_action
 
+        analyze_menu.addSeparator()
+
+        analyze_label = QAction("── Monte Carlo ──", self.parent)
+        analyze_label.setEnabled(False)
+        analyze_menu.addAction(analyze_label)
+
+        mc_stats_action = QAction("MC Statistics", self.parent)
+        mc_stats_action.triggered.connect(
+            self.callbacks.get("mc_stats", lambda: None))
+        analyze_menu.addAction(mc_stats_action)
+
+        mc_histogram_action = QAction("MC Histogram...", self.parent)
+        mc_histogram_action.triggered.connect(
+            self.callbacks.get("mc_histogram", lambda: None))
+        analyze_menu.addAction(mc_histogram_action)
+
+        mc_yield_action = QAction("MC Yield...", self.parent)
+        mc_yield_action.triggered.connect(
+            self.callbacks.get("mc_yield", lambda: None))
+        analyze_menu.addAction(mc_yield_action)
+
+        mc_scatter_action = QAction("MC Scatter...", self.parent)
+        mc_scatter_action.triggered.connect(
+            self.callbacks.get("mc_scatter", lambda: None))
+        analyze_menu.addAction(mc_scatter_action)
+
+        mc_sensitivity_action = QAction("MC Sensitivity", self.parent)
+        mc_sensitivity_action.triggered.connect(
+            self.callbacks.get("mc_sensitivity", lambda: None))
+        analyze_menu.addAction(mc_sensitivity_action)
+
+        mc_worst_action = QAction("Worst Cases", self.parent)
+        mc_worst_action.triggered.connect(
+            self.callbacks.get("mc_worst", lambda: None))
+        analyze_menu.addAction(mc_worst_action)
+
         self.menubar.addMenu(analyze_menu)
 
         # Help menu
