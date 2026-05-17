@@ -48,3 +48,9 @@ def test_compute_bode_from_fft():
     assert "phase_deg" in result
     assert "freq" in result
     assert len(result["freq"]) == len(result["gain_db"])
+
+
+def test_bode_command_registered():
+    from pqwave.session.api import get_command_registry
+    registry = get_command_registry()
+    assert "bode" in registry

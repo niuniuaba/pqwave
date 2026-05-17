@@ -87,6 +87,7 @@ COMMAND_SPECS = {
     "fft_config": {"needs": "none",        "valid_call": "fft_config(window='hann')"},
     "histogram":  {"needs": "trace_added", "valid_call": "histogram('v(ac_p)')"},
     "nyquist":    {"needs": "file_loaded", "valid_call": "nyquist('v(ac_p)','v(ac_n)')"},
+    "bode":       {"needs": "file_loaded", "valid_call": "bode('v(ac_p)_db','v(ac_n)_phase')"},
 
     # View Control
     "range":         {"needs": "none", "valid_call": "range(xmin=0, xmax=0.001)"},

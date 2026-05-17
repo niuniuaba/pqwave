@@ -932,6 +932,7 @@ class MainWindow(QMainWindow):
             'compute_power_analysis': self._compute_power_analysis,
             'histogram': self._show_histogram,
             'nyquist': self._show_nyquist,
+            'bode': self._show_bode,
             'toggle_digital_analog': self._toggle_digital_analog,
             'group_bus': self._group_bus,
             'eye_diagram': self._show_eye_diagram,
@@ -4433,6 +4434,91 @@ class MainWindow(QMainWindow):
         pw.set_axis_label("Y1", "Imaginary")
         pw.getViewBox().setAspectLocked(True, ratio=1.0)
         pw.autoRange()
+
+    def _show_bode(self) -> None:
+        """Compute and display Bode plot in dual split panels (gain + phase)."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        if self.raw_file is None or self.state.current_dataset_idx is None:
+            self.statusBar().showMessage("No data loaded", 3000)
+            return
+
+        dataset_idx = self.state.current_dataset_idx
+        var_names = self.raw_file.get_variable_names(dataset_idx)
+
+        from pqwave.analysis.bode import detect_bode_vectors
+        auto_pair = detect_bode_vectors(var_names)
+
+        from pqwave.ui.bode_dialog import BodeDialog
+        dlg = BodeDialog(var_names, self, auto_pair=auto_pair)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        mag_var, phase_var, freq_var = dlg.selected_vectors()
+
+        mag_data = self.raw_file.get_variable_data(mag_var, dataset_idx)
+        phase_data = self.raw_file.get_variable_data(phase_var, dataset_idx)
+        if mag_data is None or phase_data is None:
+            QMessageBox.warning(self, "Data Error",
+                                "Could not read vector data.")
+            return
+
+        freq_data = None
+        if freq_var:
+            freq_data = self.raw_file.get_variable_data(freq_var, dataset_idx)
+
+        from pqwave.analysis.bode import compute_bode
+        result = compute_bode(mag_db=mag_data, phase_deg=phase_data,
+                              freq=freq_data)
+
+        gain_db = result["gain_db"]
+        phase_deg = result["phase_deg"]
+        freq = result["freq"]
+
+        # Split panel twice for dual-panel Bode display
+        active_id = self.panel_grid.active_panel_id
+
+        gain_panel = self.panel_grid.split_panel(active_id, orientation="vertical")
+        if gain_panel is None:
+            return
+
+        phase_panel = self.panel_grid.split_panel(
+            gain_panel.panel_id, orientation="vertical")
+        if phase_panel is None:
+            return
+
+        import pyqtgraph as pg
+
+        # --- Gain panel (top) ---
+        gain_pw = gain_panel.plot_widget
+        gain_curve = pg.PlotCurveItem(
+            freq, gain_db,
+            pen=pg.mkPen("cyan", width=1),
+            skipFiniteCheck=True,
+        )
+        gain_pw.addItem(gain_curve)
+        gain_pw.set_axis_label("X", "Frequency (Hz)")
+        gain_pw.set_axis_label("Y1", "Gain (dB)")
+        gain_pw.set_axis_log_mode("X", True)
+        gain_pw.autoRange()
+
+        # --- Phase panel (bottom) ---
+        phase_pw = phase_panel.plot_widget
+        phase_curve = pg.PlotCurveItem(
+            freq, phase_deg,
+            pen=pg.mkPen("cyan", width=1),
+            skipFiniteCheck=True,
+        )
+        phase_pw.addItem(phase_curve)
+        phase_pw.set_axis_label("X", "Frequency (Hz)")
+        phase_pw.set_axis_label("Y1", "Phase (°)")
+        phase_pw.set_axis_log_mode("X", True)
+        phase_pw.autoRange()
+
+        # Synchronize X-axis: gain_panel drives phase_panel
+        gain_pw.plotItem.vb.sigXRangeChanged.connect(
+            lambda: phase_pw.plotItem.setXRange(*gain_pw.plotItem.vb.viewRange()[0], padding=0))
 
     def _toggle_digital_analog(self) -> None:
         """Toggle selected traces between digital and analog view."""

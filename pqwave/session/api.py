@@ -490,6 +490,47 @@ class SessionAPI:
             "y": result["y"].tolist(),
         }}
 
+    def bode(self, mag: str, phase: str, freq: str | None = None) -> dict:
+        """Compute a Bode plot from magnitude and phase vector data.
+
+        Args:
+            mag: Name of the magnitude (dB) variable.
+            phase: Name of the phase (degrees) variable.
+            freq: Optional name of the frequency variable.  When omitted the
+                frequency axis defaults to integer indices.
+
+        Returns:
+            dict with ``success`` flag and ``data`` containing
+            ``gain_db``, ``phase_deg``, and ``freq`` arrays.
+        """
+        from pqwave.analysis.bode import compute_bode
+
+        if self._on_mutation:
+            self._on_mutation("bode", mag=mag, phase=phase, freq=freq)
+            return {"success": True, "mag": mag, "phase": phase}
+
+        try:
+            _, mag_data = self._resolve_signal(mag)
+            _, phase_data = self._resolve_signal(phase)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+        freq_data = None
+        if freq:
+            try:
+                _, freq_data = self._resolve_signal(freq)
+            except Exception:
+                pass
+
+        result = compute_bode(
+            mag_db=mag_data, phase_deg=phase_data, freq=freq_data,
+        )
+        return {"success": True, "data": {
+            "gain_db": result["gain_db"].tolist(),
+            "phase_deg": result["phase_deg"].tolist(),
+            "freq": result["freq"].tolist(),
+        }}
+
     # ---- View control ----
 
     def range(self, xmin: float = None, xmax: float = None,
@@ -1174,6 +1215,12 @@ def _cmd_histogram(session: SessionAPI, trace: str, **kwargs):
              "Render a Nyquist plot from real and imaginary vector data")
 def _cmd_nyquist(session: SessionAPI, real: str, imag: str, freq: str | None = None):
     return session.nyquist(real, imag, freq)
+
+
+@api_command("bode", "bode(mag, phase, freq=None)",
+             "Render a Bode plot (gain/phase vs frequency)")
+def _cmd_bode(session: SessionAPI, mag: str, phase: str, freq: str | None = None):
+    return session.bode(mag, phase, freq)
 
 
 @api_command("load", "load(path)",
