@@ -558,28 +558,76 @@ class SessionAPI:
 
         from pqwave.models.state import AxisId, AxisConfig
 
-        # Apply axis configs
+        # Apply axis configs — route through API methods so GUI mutation
+        # callback fires and the plot widget is notified to redraw.
         for ax_name, ax_cfg in config.get("axis_configs", {}).items():
             try:
                 axis_id = AxisId(ax_name)
-                self._state.set_axis_config(axis_id, AxisConfig.from_dict(ax_cfg))
-            except (ValueError, Exception):
-                pass
+                cfg = AxisConfig.from_dict(ax_cfg)
 
-        # Apply trace expressions - skip missing vectors gracefully
+                if axis_id == AxisId.X:
+                    self.log_x(cfg.log_mode)
+                    if cfg.range and not cfg.auto_range:
+                        self.range(xmin=cfg.range[0], xmax=cfg.range[1])
+                elif axis_id == AxisId.Y1:
+                    self.log_y(cfg.log_mode)
+                    if cfg.range and not cfg.auto_range:
+                        self.range(ymin=cfg.range[0], ymax=cfg.range[1])
+            except Exception:
+                logger.warning(
+                    "load_template: failed to apply axis config for %s",
+                    ax_name,
+                    exc_info=True,
+                )
+
+        # Apply trace expressions — skip missing vectors gracefully
         applied = 0
+        skipped = []
         for te in config.get("trace_expressions", []):
             try:
                 self.add(te["expr"], axis=te.get("axis", "Y1"))
                 applied += 1
             except Exception:
-                pass
+                logger.warning(
+                    "load_template: skipping '%s' — vector not found "
+                    "in loaded data",
+                    te.get("expr", ""),
+                )
+                skipped.append(te.get("expr", ""))
+                continue
+
+            # Restore saved color
+            color = te.get("color")
+            if color is not None:
+                color_tuple = tuple(color)
+                # Update the trace model in state
+                for t in reversed(self._state.traces):
+                    expr = te["expr"]
+                    if t.expression == expr or t.name == expr:
+                        t.color = color_tuple
+                        break
+                # In GUI mode, also update the plot item pen through mutation
+                if self._on_mutation:
+                    self._on_mutation(
+                        "set_trace", name=te["expr"], color=color_tuple
+                    )
 
         # Apply display
         if config.get("display", {}).get("title"):
             self._state.plot_title = config["display"]["title"]
 
-        return {"success": True, "name": name, "applied_expressions": applied}
+        result: dict = {
+            "success": True,
+            "name": name,
+            "applied_expressions": applied,
+        }
+        if skipped:
+            result["skipped_expressions"] = skipped
+            result["warning"] = (
+                f"Skipped {len(skipped)} expression(s) "
+                f"not found in current data"
+            )
+        return result
 
     def list_templates(self) -> dict:
         """List all saved view templates."""
