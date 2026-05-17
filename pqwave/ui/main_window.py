@@ -3028,6 +3028,14 @@ class MainWindow(QMainWindow):
                     path=abs_path, file_type='raw'))
                 self._update_save_as_enabled()
 
+            # Step hint for multi-run files opened flat
+            if hasattr(self.raw_file, 'step_count') and self.raw_file.step_count > 1:
+                self.statusBar().showMessage(
+                    f"{self.raw_file.step_count} simulation steps detected — "
+                    f"File > Open Monte Carlo... for statistical analysis",
+                    8000
+                )
+
             # Process any pending xschem commands that arrived before file was loaded
             self._process_pending_xschem_commands()
 
