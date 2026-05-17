@@ -1806,6 +1806,39 @@ class TraceManager(QtCore.QObject):
 
         return [upper_fill, lower_fill, mean_curve, upper_curve, lower_curve, nominal_curve]
 
+    def _create_mc_single_run(self, mc, signal_name, x_data_list, y_data_list, color):
+        """Render a single MC run at full opacity.
+
+        Uses mc.display_mode metadata to determine which run to show
+        (defaults to nominal_index when no specific run is set).
+        """
+        from pyqtgraph import PlotCurveItem
+        import numpy as np
+
+        if mc.active_count == 0:
+            return []
+
+        # Use nominal run as default for single-run display
+        run_idx = mc.nominal_index
+        if run_idx >= len(x_data_list) or run_idx >= len(y_data_list):
+            run_idx = mc.active_runs[0]
+
+        x = np.array(x_data_list[run_idx], dtype=np.float64)
+        y = np.array(y_data_list[run_idx], dtype=np.float64)
+
+        if self.x_log:
+            x = np.log10(np.abs(x) + 1e-300)
+        if self._y_log_for_signal(signal_name):
+            y = np.log10(np.abs(y) + 1e-300)
+
+        curve = PlotCurveItem(
+            x, y,
+            pen=self._make_pen(color, 1.5, 255),
+            symbol=None, skipFiniteCheck=True,
+        )
+
+        return [curve]
+
     def _make_pen(self, color, width, alpha):
         """Create a QPen from (r, g, b) color, width, and alpha."""
         from PyQt6.QtGui import QPen, QColor
