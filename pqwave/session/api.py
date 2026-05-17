@@ -422,6 +422,41 @@ class SessionAPI:
 
         return power_analysis(v_data, i_data, t_data, xmin, xmax, v_threshold)
 
+    def histogram(self, trace: str, bins: int | None = None,
+                  range: list[float] | None = None, norm: str = "count") -> dict:
+        """Compute histogram of a trace and return the bin data.
+
+        Args:
+            trace: Trace name or expression.
+            bins: Number of bins (default: Sturges' rule).
+            range: (lo, hi) bounds.
+            norm: Normalization mode — "count", "density", or "probability".
+
+        Returns:
+            dict with ``success``, optionally ``data`` containing
+            ``counts``, ``edges``, ``centers``.
+        """
+        from pqwave.analysis.histogram import compute_histogram
+        # find trace by name or expression in active panel
+        found = None
+        for t in self._state.traces:
+            if t.name == trace or t.expression == trace:
+                found = t
+                break
+        if found is None:
+            return {"success": False, "error": f"Trace '{trace}' not found"}
+        y_data = found.y_data if found.y_data is not None else np.array([])
+        result = compute_histogram(
+            y_data, bins=bins,
+            range=tuple(range) if range else None,
+            norm=norm,
+        )
+        return {"success": True, "data": {
+            "counts": result["counts"].tolist(),
+            "edges": result["edges"].tolist(),
+            "centers": result["centers"].tolist(),
+        }}
+
     # ---- View control ----
 
     def range(self, xmin: float = None, xmax: float = None,
@@ -1094,6 +1129,12 @@ def _cmd_fft(session: SessionAPI, signal: str, window: str = "hann",
 def _cmd_power(session: SessionAPI, v_signal: str, i_signal: str,
                from_: str = None, to: str = None, v_threshold: float = None):
     return session.power(v_signal, i_signal, from_=from_, to=to, v_threshold=v_threshold)
+
+
+@api_command("histogram", "histogram(trace, bins=None, range=None, norm='count')",
+             "Compute histogram of a trace")
+def _cmd_histogram(session: SessionAPI, trace: str, **kwargs):
+    return session.histogram(trace, **kwargs)
 
 
 @api_command("load", "load(path)",

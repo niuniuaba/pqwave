@@ -368,6 +368,12 @@ class MenuManager:
         analyze_menu.addAction(power_action)
         self.actions["compute_power_analysis"] = power_action
 
+        histogram_action = QAction("Histogram", self.parent)
+        histogram_action.triggered.connect(
+            self.callbacks.get("histogram", lambda: None))
+        analyze_menu.addAction(histogram_action)
+        self.actions["histogram"] = histogram_action
+
         self.menubar.addMenu(analyze_menu)
 
         # Help menu

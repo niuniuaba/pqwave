@@ -85,6 +85,7 @@ COMMAND_SPECS = {
     "power":      {"needs": "two_traces",  "valid_call": "power('v(ac_p)', 'v(r1)')"},
     "eye":        {"needs": "file_loaded", "valid_call": "eye('V(eye)')"},
     "fft_config": {"needs": "none",        "valid_call": "fft_config(window='hann')"},
+    "histogram":  {"needs": "trace_added", "valid_call": "histogram('v(ac_p)')"},
 
     # View Control
     "range":         {"needs": "none", "valid_call": "range(xmin=0, xmax=0.001)"},
@@ -1014,3 +1015,10 @@ class TestErrorHandling:
             r = e.run_sync(code)
             assert isinstance(r, dict), f"{code} should return dict, got {type(r)}"
             assert "ok" in r, f"{code} should have 'ok' key"
+
+
+def test_histogram_command_registered():
+    """histogram should be in the command registry."""
+    from pqwave.session.api import get_command_registry
+    registry = get_command_registry()
+    assert "histogram" in registry, f"histogram not in {list(registry.keys())}"

@@ -930,6 +930,7 @@ class MainWindow(QMainWindow):
             'close_panel': self._close_active_panel,
             'compute_trace_stats': self._compute_trace_stats,
             'compute_power_analysis': self._compute_power_analysis,
+            'histogram': self._show_histogram,
             'toggle_digital_analog': self._toggle_digital_analog,
             'group_bus': self._group_bus,
             'eye_diagram': self._show_eye_diagram,
@@ -4323,6 +4324,44 @@ class MainWindow(QMainWindow):
         )
         dlg.show()
 
+    def _show_histogram(self) -> None:
+        """Compute and display histogram in a new split panel."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        state = panel.state
+        if not state.traces:
+            self.statusBar().showMessage("No traces to histogram", 3000)
+            return
+
+        from pqwave.ui.histogram_dialog import HistogramDialog
+        dlg = HistogramDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        config = dlg.get_config()
+        trace = state.traces[0]
+        y_data = trace.y_data if trace.y_data is not None else np.array([])
+        from pqwave.analysis.histogram import compute_histogram
+        result = compute_histogram(
+            y_data, bins=config.bins, range=config.range, norm=config.norm,
+        )
+
+        new_panel = self.panel_grid.split_panel(
+            self.panel_grid.active_panel_id, orientation="vertical")
+        if new_panel is None:
+            return
+
+        import pyqtgraph as pg
+        width = (np.diff(result["edges"])[0]
+                 if len(result["edges"]) > 1 else 1.0)
+        bar_item = pg.BarGraphItem(
+            x=result["centers"], height=result["counts"],
+            width=width,
+            brush=(100, 149, 237, 180),
+        )
+        new_panel.plot_widget.addItem(bar_item)
+        new_panel.plot_widget.autoRange()
 
     def _toggle_digital_analog(self) -> None:
         """Toggle selected traces between digital and analog view."""
