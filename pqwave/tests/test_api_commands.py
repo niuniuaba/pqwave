@@ -130,6 +130,11 @@ COMMAND_SPECS = {
     "reload":           {"needs": "none", "valid_call": "reload()"},
     "change_x":         {"needs": "file_loaded", "valid_call": "change_x('time')"},
     "set_trace":        {"needs": "trace_added", "valid_call": "set_trace('v(ac_p)', alias='foo')"},
+
+    # View Templates
+    "save_template":  {"needs": "none", "valid_call": "save_template('test_template')"},
+    "load_template":  {"needs": "none", "valid_call": "load_template('test_template')"},
+    "list_templates": {"needs": "none", "valid_call": "list_templates()"},
 }
 
 

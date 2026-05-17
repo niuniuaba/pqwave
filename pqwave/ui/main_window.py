@@ -1095,6 +1095,49 @@ class MainWindow(QMainWindow):
         """Close the active panel."""
         self.panel_grid.close_panel(self.panel_grid.active_panel_id)
 
+    # ---- View Templates ----
+
+    def _on_save_template(self):
+        """Save current panel view as a named template."""
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Save Template", "Template name:")
+        if ok and name:
+            result = self._session.save_template(name)
+            if result.get("success"):
+                self.statusBar().showMessage(
+                    f"Template '{name}' saved", 3000
+                )
+            else:
+                self.statusBar().showMessage(
+                    f"Error: {result.get('error')}", 5000
+                )
+
+    def _on_load_template(self):
+        """Load a saved view template onto the active panel."""
+        from pqwave.ui.template_manager_dialog import TemplateManagerDialog
+        from PyQt6.QtWidgets import QDialog
+        dlg = TemplateManagerDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            name = dlg._selected_name
+            if name:
+                result = self._session.load_template(name)
+                if result.get("success"):
+                    self.statusBar().showMessage(
+                        f"Template '{name}' loaded "
+                        f"({result.get('applied_expressions', 0)} traces)",
+                        3000,
+                    )
+                else:
+                    self.statusBar().showMessage(
+                        f"Error: {result.get('error')}", 5000
+                    )
+
+    def _on_manage_templates(self):
+        """Open the Template Manager dialog."""
+        from pqwave.ui.template_manager_dialog import TemplateManagerDialog
+        dlg = TemplateManagerDialog(self)
+        dlg.exec()
+
     def _connect_xschem_signals(self):
         """Connect xschem command handler signals."""
         if self.state.command_handler is None:

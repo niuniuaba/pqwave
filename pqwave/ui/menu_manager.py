@@ -143,6 +143,19 @@ class MenuManager:
             self.callbacks.get("convert_raw_data", lambda: None)
         )
         file_menu.addAction(convert_raw_action)
+        file_menu.addSeparator()
+
+        save_template_action = QAction("Save View Template...", self.parent)
+        save_template_action.triggered.connect(self.parent._on_save_template)
+        file_menu.addAction(save_template_action)
+
+        load_template_action = QAction("Load View Template...", self.parent)
+        load_template_action.triggered.connect(self.parent._on_load_template)
+        file_menu.addAction(load_template_action)
+
+        manage_templates_action = QAction("Manage Templates...", self.parent)
+        manage_templates_action.triggered.connect(self.parent._on_manage_templates)
+        file_menu.addAction(manage_templates_action)
 
         self.menubar.addMenu(file_menu)
 
