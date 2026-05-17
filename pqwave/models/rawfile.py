@@ -274,6 +274,66 @@ def preprocess_raw_file(filepath: str) -> str:
     )
     return tmp_path
 
+def parse_step_header(header_bytes: bytes) -> dict:
+    """Extract step count and parameter info from raw file header.
+
+    Handles QSPICE-style headers where .step param and .param lines
+    carry step metadata that spicelib can't extract without a .log file.
+
+    Returns:
+        dict with keys: step_count, step_param_names, step_param_values
+    """
+    result = {"step_count": 0, "step_param_names": [], "step_param_values": {}}
+    header_text = header_bytes.decode("utf-8", errors="replace")
+
+    import re
+    step_match = re.search(
+        r"\.step\s+param\s+(\w+)\s+([\d.e+\-]+)\s+([\d.e+\-]+)\s+([\d.e+\-]+)",
+        header_text, re.IGNORECASE
+    )
+    if step_match:
+        name = step_match.group(1)
+        start = float(step_match.group(2))
+        stop = float(step_match.group(3))
+        inc = float(step_match.group(4))
+        n_steps = int(round((stop - start) / inc)) + 1
+        values = [start + i * inc for i in range(n_steps)]
+        result["step_count"] = n_steps
+        result["step_param_names"] = [name]
+        result["step_param_values"][name] = [
+            int(v) if v == int(v) else v for v in values
+        ]
+        return result
+
+    return result
+
+
+def detect_naming_pattern(trace_names: list) -> dict:
+    """Detect MC run naming patterns like vout0..voutN.
+
+    Returns:
+        dict of {base_name: {"indices": [0,1,...], "count": N}}
+        for each detected group. Single names with no numeric suffix
+        are excluded. Groups with only one match are excluded.
+    """
+    import re
+    groups = {}
+    pattern = re.compile(r"^(.+?)(\d+)$")
+
+    for name in trace_names:
+        m = pattern.match(name)
+        if not m:
+            continue
+        base = m.group(1)
+        idx = int(m.group(2))
+        if base not in groups:
+            groups[base] = {"indices": [], "count": 0}
+        groups[base]["indices"].append(idx)
+        groups[base]["count"] = len(groups[base]["indices"])
+
+    return {k: v for k, v in groups.items() if v["count"] > 1}
+
+
 class RawFile:
     """Parse NGSPICE raw files using spicelib"""
     def __init__(self, filename):
@@ -285,7 +345,11 @@ class RawFile:
         self._mmap_path = None  # Temp file path for np.memmap backing store
         self._name_map = {}    # correct_name -> spicelib_name mapping
         self._data_cache = {}  # (dataset_idx, var_name) -> numpy view
+        self._step_count = 0
+        self._step_param_names: list = []
+        self._step_param_values: dict = {}
         self.parse()
+        self._extract_step_info()
 
     def __del__(self):
         """Clean up temporary files (preprocessed file and memmap backing store).
@@ -307,6 +371,103 @@ class RawFile:
         except (AttributeError, TypeError):
             # Interpreter shutdown: modules are being torn down
             pass
+
+    def _extract_spicelib_step_info(self):
+        """Extract step metadata from spicelib plots before raw_data is released.
+
+        Called from parse() while self.raw_data is still alive.
+        """
+        if self.raw_data is None:
+            return
+        try:
+            for plot in self.raw_data._plots:
+                if hasattr(plot, "steps") and len(plot.steps) > 0:
+                    self._step_count = max(self._step_count, len(plot.steps))
+                    for step in plot.steps:
+                        for key, value in step.items():
+                            if key not in self._step_param_names:
+                                self._step_param_names.append(key)
+                            if key not in self._step_param_values:
+                                self._step_param_values[key] = []
+                            if value not in self._step_param_values[key]:
+                                self._step_param_values[key].append(value)
+        except Exception:
+            pass
+
+    def _extract_step_info(self):
+        """Extract step metadata from header and naming patterns.
+
+        Complements _extract_spicelib_step_info() by parsing the raw
+        header for QSPICE-style .step param lines and detecting
+        ngspice-style naming patterns (vout0..voutN).
+        """
+        # Parse header for QSPICE-style step params
+        try:
+            raw_bytes = self._read_header_bytes()
+            header_info = parse_step_header(raw_bytes)
+            if header_info["step_count"] > self._step_count:
+                self._step_count = header_info["step_count"]
+                self._step_param_names = header_info["step_param_names"]
+                self._step_param_values = header_info["step_param_values"]
+        except Exception:
+            pass
+
+        # For ngspice, count is the max count from naming patterns
+        if self._step_count == 0:
+            try:
+                trace_names = self.get_trace_names()
+                groups = detect_naming_pattern(trace_names)
+                max_count = 0
+                for _base, info in groups.items():
+                    if info["count"] > max_count:
+                        max_count = info["count"]
+                self._step_count = max_count
+            except Exception:
+                pass
+
+    @property
+    def step_count(self) -> int:
+        return self._step_count
+
+    @property
+    def step_param_names(self) -> list:
+        return self._step_param_names
+
+    @property
+    def step_param_values(self) -> dict:
+        return self._step_param_values
+
+    def get_step_trace_data(self, var_name: str, step: int):
+        """Get trace data for a specific variable at a specific step index."""
+        if self.raw_data is None or step >= self._step_count:
+            return np.array([])
+        try:
+            plot = self.raw_data._plots[0]
+            spicelib_name = self._name_map.get(var_name, var_name)
+            trace = plot.get_trace_read(spicelib_name)
+            if trace is None:
+                return np.array([])
+            wave = trace.get_wave(step)
+            if isinstance(wave, np.ndarray):
+                return wave
+            return np.array([wave]) if wave is not None else np.array([])
+        except Exception:
+            return np.array([])
+
+    def get_trace_names(self) -> list:
+        """Get all trace names from the raw file.
+
+        Returns trace names from parsed datasets or falls back to
+        header parsing if raw_data has been released.
+        """
+        if self.datasets:
+            return [var["name"] for var in self.datasets[0].get("variables", [])]
+        try:
+            raw_bytes = self._read_header_bytes()
+            vars_list, _ = _parse_header_variables(raw_bytes)
+            return [v["name"] for v in vars_list]
+        except Exception:
+            return []
 
     def _read_header_bytes(self) -> bytes:
         """Read only the header portion of the raw file (up to Binary:\n).
@@ -523,6 +684,9 @@ class RawFile:
                 '_is_ac_or_complex': is_ac_or_complex,
             }
             self.datasets.append(dataset)
+
+            # Extract step metadata from spicelib while raw_data is still alive
+            self._extract_spicelib_step_info()
 
             # Release spicelib raw_data to free ~50% of parsed memory.
             # All data is now in the memmap/column_stack matrix.
