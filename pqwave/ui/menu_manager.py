@@ -436,6 +436,11 @@ class MenuManager:
             self.callbacks.get("mc_worst", lambda: None))
         analyze_menu.addAction(mc_worst_action)
 
+        mc_correlation_action = QAction("MC Correlation...", self.parent)
+        mc_correlation_action.triggered.connect(
+            self.callbacks.get("mc_correlation", lambda: None))
+        analyze_menu.addAction(mc_correlation_action)
+
         self.menubar.addMenu(analyze_menu)
 
         # Help menu

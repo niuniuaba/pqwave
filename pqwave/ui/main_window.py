@@ -614,6 +614,9 @@ class MainWindow(QMainWindow):
             for panel in self.panel_grid.panels.values():
                 panel.trace_manager.rebuild_from_state()
 
+        elif action == "mc_correlation":
+            self._on_mc_correlation()
+
     def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""
         mc = self.state.mc_collection
@@ -976,6 +979,7 @@ class MainWindow(QMainWindow):
             'mc_scatter': self._on_mc_scatter,
             'mc_sensitivity': self._on_mc_sensitivity,
             'mc_worst': self._on_mc_worst,
+            'mc_correlation': self._on_mc_correlation,
             'toggle_digital_analog': self._toggle_digital_analog,
             'group_bus': self._group_bus,
             'eye_diagram': self._show_eye_diagram,
@@ -4823,6 +4827,12 @@ class MainWindow(QMainWindow):
         mc = self.state.mc_collection
         worst = compute_worst_cases(data, mc.nominal_index, n=5)
         self._show_worst_cases_result(signal_name, worst, mc)
+
+    def _on_mc_correlation(self):
+        """Open the MC Correlation Tools dialog."""
+        from pqwave.ui.correlation_editor import CorrelationMatrixEditor
+        dialog = CorrelationMatrixEditor(self)
+        dialog.exec()
 
     def _get_mc_signal_data(self, signal_name: str):
         """Get 2D data array (n_runs, n_points) for an MC signal group."""

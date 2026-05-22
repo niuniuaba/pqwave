@@ -379,6 +379,104 @@ class SessionAPI:
         })
         return {"status": "ok", "sensitivity": sensitivity}
 
+    def mc_correlation_load(self, path: str) -> dict:
+        """Load a correlation matrix from a CSV file onto the MC collection."""
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        import csv
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                reader = csv.reader(fh)
+                rows = list(reader)
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+        if len(rows) < 2:
+            return {"status": "error", "message": "CSV must have header + data"}
+        headers = rows[0][1:]
+        n = len(headers)
+        flat = []
+        for r in range(n):
+            for c in range(n):
+                try:
+                    val = float(rows[r + 1][c + 1])
+                except (IndexError, ValueError):
+                    val = 0.0 if r != c else 1.0
+                flat.append(val)
+        from pqwave.models.mc_collection import CorrelationMatrix
+        mc._correlation = CorrelationMatrix(params=headers, matrix=flat)
+        return {"status": "ok", "size": n, "params": headers}
+
+    def mc_correlation_show(self) -> dict:
+        """Print the current correlation matrix."""
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        cm = getattr(mc, "_correlation", None)
+        if cm is None:
+            return {"status": "error", "message": "No correlation matrix loaded"}
+        dense = cm.get_dense()
+        lines = ["  " + " ".join(f"{n:>12s}" for n in cm.params)]
+        for i, name in enumerate(cm.params):
+            row_str = " ".join(f"{dense[i, j]:12.4f}" for j in range(cm.size))
+            lines.append(f"  {name:>10s} {row_str}")
+        text = "\n".join(lines)
+        return {"status": "ok", "size": cm.size, "text": text}
+
+    def mc_correlation_edit(self) -> dict:
+        """Open the Correlation Matrix Editor dialog (GUI only)."""
+        if self._on_mutation:
+            self._on_mutation("mc_correlation")
+            return {"status": "ok"}
+        return {"status": "error", "message": "Editor requires GUI"}
+
+    def mc_generate(
+        self, output_path: str, format: str = "csv",
+        runs: int = 100, seed: int | None = None,
+    ) -> dict:
+        """Generate correlated parameter values to a file."""
+        mc = self._state.mc_collection
+        if mc is None:
+            return {"status": "error", "message": "No MC data loaded"}
+        cm = getattr(mc, "_correlation", None)
+        if cm is None:
+            return {"status": "error", "message": "No correlation matrix loaded"}
+
+        from pqwave.analysis.correlation import (
+            compute_cholesky, generate_correlated_values,
+            generate_control_script, generate_csv, generate_param_snippet,
+        )
+        try:
+            L = compute_cholesky(cm)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+
+        n = cm.size
+        params = [
+            {"model": "", "param": name, "nominal": 0.0, "logical_name": name}
+            for name in cm.params
+        ]
+        nominals = [0.0] * n
+        sigmas = [0.1] * n
+
+        values = generate_correlated_values(L, nominals, sigmas, runs, seed)
+
+        if format == "csv":
+            generate_csv(values, cm.params, output_path)
+        elif format == "tsv":
+            generate_csv(values, cm.params, output_path, delimiter="\t")
+        elif format == "ngspice":
+            generate_control_script(
+                params, nominals, L, output_path,
+                sim_command="tran 1n 100n 0", n_runs=runs, seed=seed,
+            )
+        elif format == "param":
+            generate_param_snippet(values, cm.params, output_path)
+        else:
+            return {"status": "error", "message": f"Unknown format: {format}"}
+
+        return {"status": "ok", "runs": runs, "params": n, "path": output_path}
+
     def _mc_get_signal_data(self, signal: str):
         """Get 2D data array (n_runs, n_points) for an MC signal from state."""
         import numpy as np
@@ -1844,3 +1942,26 @@ def _cmd_mc_worst(session: SessionAPI, n: int = 5):
              "Rank parameters by impact on measurement")
 def _cmd_mc_sensitivity(session: SessionAPI, measurement: str):
     return session.mc_sensitivity(measurement)
+
+# ---- Correlation commands ----
+
+@api_command("mc_correlation_load", "mc_correlation_load(path)",
+             "Load a correlation matrix from CSV onto the MC collection")
+def _cmd_mc_correlation_load(session: SessionAPI, path: str):
+    return session.mc_correlation_load(path)
+
+@api_command("mc_correlation_show", "mc_correlation_show()",
+             "Print the current correlation matrix")
+def _cmd_mc_correlation_show(session: SessionAPI):
+    return session.mc_correlation_show()
+
+@api_command("mc_correlation_edit", "mc_correlation_edit()",
+             "Open the Correlation Matrix Editor dialog (GUI)")
+def _cmd_mc_correlation_edit(session: SessionAPI):
+    return session.mc_correlation_edit()
+
+@api_command("mc_generate", "mc_generate(path, format='csv', runs=100, seed=None)",
+             "Generate correlated parameter values to a file")
+def _cmd_mc_generate(session: SessionAPI, path: str, format: str = "csv",
+                    runs: int = 100, seed: int | None = None):
+    return session.mc_generate(path, format=format, runs=runs, seed=seed)
