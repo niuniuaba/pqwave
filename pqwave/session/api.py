@@ -1532,6 +1532,7 @@ def _mc_generate_core(
 
     values = generate_correlated_values(L, noms, sigs, runs, seed)
 
+    output_format = output_format.lower()
     if output_format == "csv":
         generate_csv(values, cm.params, output_path)
     elif output_format == "tsv":

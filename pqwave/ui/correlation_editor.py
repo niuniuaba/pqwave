@@ -195,7 +195,7 @@ class CorrelationMatrixEditor(QDialog):
                 elif r < c:
                     item.setText("0.0")
                 else:
-                    item.setText("")
+                    item.setText("0.0")
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     item.setBackground(Qt.GlobalColor.lightGray)
                 self.matrix_table.setItem(r, c, item)

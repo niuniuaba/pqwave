@@ -148,7 +148,7 @@ class TestCholeskyEngine:
     def test_cholesky_rejects_non_psd_matrix(self):
         from pqwave.analysis.correlation import compute_cholesky
         cm = CorrelationMatrix(params=["a","b","c"], matrix=[1.0,0.9,0.9,0.9,1.0,-0.9,0.9,-0.9,1.0])
-        with pytest.raises(ValueError, match="positive semi-definite"):
+        with pytest.raises(ValueError, match="positive definite"):
             compute_cholesky(cm)
 
     def test_generate_correlated_values_shape(self):

@@ -91,7 +91,7 @@ def compute_cholesky(correlation_matrix: CorrelationMatrix) -> np.ndarray:
         L = np.linalg.cholesky(dense)
     except np.linalg.LinAlgError:
         raise ValueError(
-            "Correlation matrix is not positive semi-definite. "
+            "Correlation matrix is not positive definite. "
             "Check for inconsistent correlation values."
         ) from None
     return L
