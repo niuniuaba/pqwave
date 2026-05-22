@@ -86,12 +86,6 @@ class CorrelationMatrixEditor(QDialog):
         self.n_runs_spin.setValue(100)
         gen_layout.addRow("Runs:", self.n_runs_spin)
 
-        self.sigma_spin = QDoubleSpinBox()
-        self.sigma_spin.setRange(0.1, 10.0)
-        self.sigma_spin.setValue(3.0)
-        self.sigma_spin.setSingleStep(0.5)
-        gen_layout.addRow("Sigma:", self.sigma_spin)
-
         self.seed_spin = QSpinBox()
         self.seed_spin.setRange(0, 2 ** 31 - 1)
         self.seed_spin.setValue(12345)
@@ -388,7 +382,6 @@ class CorrelationMatrixEditor(QDialog):
             generate_csv(values, param_names, output_path, delimiter="\t")
         elif "ngspice" in fmt:
             sim_cmd = self.sim_command_edit.text()
-            sigma = self.sigma_spin.value()
             generate_control_script(
                 params=self._params,
                 nominals=nominals,
@@ -396,7 +389,6 @@ class CorrelationMatrixEditor(QDialog):
                 output_path=output_path,
                 sim_command=sim_cmd,
                 n_runs=n_runs,
-                sigma=sigma,
                 seed=seed,
             )
         elif "param" in fmt:
