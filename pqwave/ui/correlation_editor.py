@@ -406,10 +406,11 @@ class CorrelationMatrixEditor(QDialog):
             preview_lines.append(f"... ({n_runs} runs total)")
         else:
             # CSV/TSV preview
-            header = ", ".join(["run"] + param_names)
+            delim = "\t" if "tsv" in fmt else ", "
+            header = delim.join(["run"] + param_names)
             preview_lines.append(header)
             for run_idx in range(preview_rows):
-                row = ", ".join(
+                row = delim.join(
                     [str(run_idx)] + [f"{values[run_idx, i]:.8g}" for i in range(len(param_names))])
                 preview_lines.append(row)
             if n_runs > preview_rows:
