@@ -116,10 +116,10 @@ class CorrelationMatrixEditor(QDialog):
         gen_layout.addRow("Sim Command:", self.sim_command_edit)
 
         # Only show sim_command for ngspice format
+        self._sim_cmd_label = gen_layout.labelForField(self.sim_command_edit)
         self.sim_command_edit.setVisible(False)
-        lbl = gen_layout.labelForField(self.sim_command_edit)
-        if lbl:
-            lbl.setVisible(False)
+        if self._sim_cmd_label:
+            self._sim_cmd_label.setVisible(False)
         self.format_combo.currentIndexChanged.connect(self._on_format_changed)
 
         self.output_path_edit = QLineEdit()
@@ -147,6 +147,8 @@ class CorrelationMatrixEditor(QDialog):
         fmt = self.format_combo.currentText()
         visible = "ngspice" in fmt
         self.sim_command_edit.setVisible(visible)
+        if self._sim_cmd_label:
+            self._sim_cmd_label.setVisible(visible)
 
     # ---- Model file handling ----
 

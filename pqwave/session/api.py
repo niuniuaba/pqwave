@@ -1533,15 +1533,25 @@ def _mc_generate_core(
     values = generate_correlated_values(L, noms, sigs, runs, seed)
 
     output_format = output_format.lower()
-    if output_format == "csv":
-        generate_csv(values, cm.params, output_path)
-    elif output_format == "tsv":
-        generate_csv(values, cm.params, output_path, delimiter="\t")
-    elif output_format == "ngspice":
+    if output_format == "ngspice":
+        missing = [p["logical_name"] for p in params if not p.get("model")]
+        if missing:
+            return {
+                "status": "error",
+                "message": (
+                    "ngspice format requires model names for all parameters. "
+                    f"Missing model for: {', '.join(missing)}. "
+                    "Load a .model file first, or use CSV format."
+                ),
+            }
         generate_control_script(
             params, noms, L, output_path,
             sim_command="tran 1n 100n 0", n_runs=runs, seed=seed,
         )
+    elif output_format == "csv":
+        generate_csv(values, cm.params, output_path)
+    elif output_format == "tsv":
+        generate_csv(values, cm.params, output_path, delimiter="\t")
     elif output_format == "param":
         generate_param_snippet(values, cm.params, output_path)
     else:
