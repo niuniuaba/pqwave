@@ -5,6 +5,7 @@ Pure NumPy module, no Qt dependencies. Callable from both UI and CLI.
 from __future__ import annotations
 
 import re
+import warnings
 import numpy as np
 
 from pqwave.models.mc_collection import CorrelationMatrix
@@ -47,6 +48,10 @@ def parse_model_file(path: str) -> list[dict]:
 
             nominal = _extract_nominal(value_str)
             if nominal is None:
+                warnings.warn(
+                    f"Skipping param '{param_name}' in model '{model_name}': "
+                    f"could not parse value '{value_str}'"
+                )
                 continue
 
             results.append({
@@ -130,9 +135,9 @@ def _build_cholesky_let_expressions(L: np.ndarray, param_names: list[str]) -> li
             coeff = L[i, j]
             if coeff == 0.0:
                 continue
-            if abs(coeff - 1.0) < 1e-15:
+            if abs(coeff - 1.0) < 1e-12:
                 terms.append(f"z{j + 1}")
-            elif abs(coeff + 1.0) < 1e-15:
+            elif abs(coeff + 1.0) < 1e-12:
                 terms.append(f"(-z{j + 1})")
             else:
                 terms.append(f"({coeff:.6g} * z{j + 1})")
@@ -183,17 +188,18 @@ def generate_control_script(
         logical = p["logical_name"]
         lines.append(f"  let {logical}_nom = @{model}[{param}]")
     lines.append("")
-    lines.append("  * Independent standard normal draws")
-    for i in range(n_params):
-        lines.append(f"  let z{i + 1} = sgauss(0)")
-    lines.append("")
-    lines.append("  * Correlated normals via Cholesky decomposition")
-    cholesky_lines = _build_cholesky_let_expressions(L, param_names)
-    lines.extend(cholesky_lines)
-    lines.append("")
     lines.append("  * MC simulation loop")
     lines.append("  dowhile run <= mc_runs")
     lines.append("    if run > 0")
+    lines.append("      * Independent standard normal draws")
+    for i in range(n_params):
+        lines.append(f"      let z{i + 1} = sgauss(0)")
+    lines.append("")
+    lines.append("      * Correlated normals via Cholesky decomposition")
+    cholesky_lines = _build_cholesky_let_expressions(L, param_names)
+    for cl in cholesky_lines:
+        lines.append(f"    {cl}")
+    lines.append("")
     for i, p in enumerate(params):
         model = p["model"]
         param = p["param"]

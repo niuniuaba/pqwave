@@ -616,35 +616,38 @@ class MainWindow(QMainWindow):
 
         elif action == "mc_correlation":
             self._on_mc_correlation()
-        elif action == "mc_generate":
-            from pqwave.analysis.correlation import (
-                compute_cholesky, generate_correlated_values,
-                generate_control_script, generate_csv, generate_param_snippet,
-            )
+        elif action == "mc_correlation_load":
+            from pqwave.session.api import _mc_generate_core  # reuse shared import context
+            from pqwave.models.mc_collection import CorrelationMatrix
+            import csv
             mc = self.state.mc_collection
-            if mc is None or not hasattr(mc, "_correlation") or mc._correlation is None:
+            if mc is None:
                 return
-            cm = mc._correlation
-            L = compute_cholesky(cm)
-            n = cm.size
-            params = [{"model": "", "param": name, "nominal": 0.0, "logical_name": name}
-                      for name in cm.params]
-            nominals = [0.0] * n
-            sigmas = [0.1] * n
-            values = generate_correlated_values(L, nominals, sigmas, kwargs.get("runs", 100),
-                                                kwargs.get("seed"))
-            output_path = kwargs.get("output_path", "")
-            output_format = kwargs.get("output_format", "csv")
-            if output_format == "csv":
-                generate_csv(values, cm.params, output_path)
-            elif output_format == "tsv":
-                generate_csv(values, cm.params, output_path, delimiter="\t")
-            elif output_format == "ngspice":
-                generate_control_script(params, nominals, L, output_path,
-                                       n_runs=kwargs.get("runs", 100),
-                                       seed=kwargs.get("seed"))
-            elif output_format == "param":
-                generate_param_snippet(values, cm.params, output_path)
+            path = kwargs.get("path", "")
+            with open(path, "r", encoding="utf-8") as fh:
+                reader = csv.reader(fh)
+                rows = list(reader)
+            headers = rows[0][1:]
+            n = len(headers)
+            flat = []
+            for r in range(n):
+                for c in range(n):
+                    try:
+                        flat.append(float(rows[r + 1][c + 1]))
+                    except (IndexError, ValueError):
+                        flat.append(0.0 if r != c else 1.0)
+            mc._correlation = CorrelationMatrix(params=headers, matrix=flat)
+        elif action == "mc_generate":
+            from pqwave.session.api import _mc_generate_core
+            _mc_generate_core(
+                self.state,
+                kwargs.get("output_path", ""),
+                kwargs.get("output_format", "csv"),
+                kwargs.get("runs", 100),
+                kwargs.get("seed"),
+                kwargs.get("nominals"),
+                kwargs.get("sigmas"),
+            )
 
     def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""
@@ -4860,8 +4863,7 @@ class MainWindow(QMainWindow):
     def _on_mc_correlation(self):
         """Open the MC Correlation Tools dialog."""
         from pqwave.ui.correlation_editor import CorrelationMatrixEditor
-        dialog = CorrelationMatrixEditor(self)
-        dialog._mc_collection = self.state.mc_collection
+        dialog = CorrelationMatrixEditor(self, mc_collection=self.state.mc_collection)
         dialog.exec()
 
     def _get_mc_signal_data(self, signal_name: str):

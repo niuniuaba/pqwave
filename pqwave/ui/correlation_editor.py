@@ -16,12 +16,12 @@ from pqwave.models.mc_collection import CorrelationMatrix
 class CorrelationMatrixEditor(QDialog):
     """Dialog for editing correlation matrices and generating MC output."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, mc_collection=None):
         super().__init__(parent)
         self.setWindowTitle("MC Correlation Tools")
         self.setMinimumSize(640, 540)
         self._params: list[dict] = []  # all parsed params
-        self._mc_collection: "MCRunCollection | None" = None
+        self._mc_collection = mc_collection  # MCRunCollection | None
         self._suppress_cell_changed: bool = False
         self._setup_ui()
 
@@ -384,6 +384,18 @@ class CorrelationMatrixEditor(QDialog):
         elif "tsv" in fmt:
             generate_csv(values, param_names, output_path, delimiter="\t")
         elif "ngspice" in fmt:
+            # Validate model names: ngspice altermod requires non-empty model
+            missing = [p["logical_name"] for p in self._params
+                       if p["logical_name"] in param_names and not p.get("model")]
+            if missing:
+                QMessageBox.warning(
+                    self, "Missing Model Names",
+                    "The following parameters have no model name — "
+                    "ngspice altermod requires model@param syntax.\n\n"
+                    f"Parameters: {', '.join(missing)}\n\n"
+                    "Load a .model file first, or use CSV output format.",
+                )
+                return
             sim_cmd = self.sim_command_edit.text()
             generate_control_script(
                 params=self._params,

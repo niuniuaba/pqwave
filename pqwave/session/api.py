@@ -381,6 +381,9 @@ class SessionAPI:
 
     def mc_correlation_load(self, path: str) -> dict:
         """Load a correlation matrix from a CSV file onto the MC collection."""
+        if self._on_mutation:
+            self._on_mutation("mc_correlation_load", path=path)
+            return {"status": "ok"}
         mc = self._state.mc_collection
         if mc is None:
             return {"status": "error", "message": "No MC data loaded"}
@@ -433,53 +436,27 @@ class SessionAPI:
     def mc_generate(
         self, output_path: str, output_format: str = "csv",
         runs: int = 100, seed: int | None = None,
+        nominals: list[float] | None = None,
+        sigmas: list[float] | None = None,
     ) -> dict:
-        """Generate correlated parameter values to a file."""
+        """Generate correlated parameter values to a file.
+
+        Args:
+            output_path: Where to write the output.
+            output_format: 'csv', 'tsv', 'ngspice', or 'param'.
+            runs: Number of perturbed MC runs.
+            seed: RNG seed for reproducibility.
+            nominals: Optional per-parameter nominal values. Defaults to zeros.
+            sigmas: Optional per-parameter absolute variation. Defaults to 0.1.
+        """
         if self._on_mutation:
             self._on_mutation("mc_generate", output_path=output_path,
-                              output_format=output_format, runs=runs, seed=seed)
+                              output_format=output_format, runs=runs, seed=seed,
+                              nominals=nominals, sigmas=sigmas)
             return {"status": "ok"}
-        mc = self._state.mc_collection
-        if mc is None:
-            return {"status": "error", "message": "No MC data loaded"}
-        cm = mc._correlation
-        if cm is None:
-            return {"status": "error", "message": "No correlation matrix loaded"}
-
-        from pqwave.analysis.correlation import (
-            compute_cholesky, generate_correlated_values,
-            generate_control_script, generate_csv, generate_param_snippet,
+        return _mc_generate_core(
+            self._state, output_path, output_format, runs, seed, nominals, sigmas,
         )
-        try:
-            L = compute_cholesky(cm)
-        except ValueError as e:
-            return {"status": "error", "message": str(e)}
-
-        n = cm.size
-        params = [
-            {"model": "", "param": name, "nominal": 0.0, "logical_name": name}
-            for name in cm.params
-        ]
-        nominals = [0.0] * n
-        sigmas = [0.1] * n
-
-        values = generate_correlated_values(L, nominals, sigmas, runs, seed)
-
-        if output_format == "csv":
-            generate_csv(values, cm.params, output_path)
-        elif output_format == "tsv":
-            generate_csv(values, cm.params, output_path, delimiter="\t")
-        elif output_format == "ngspice":
-            generate_control_script(
-                params, nominals, L, output_path,
-                sim_command="tran 1n 100n 0", n_runs=runs, seed=seed,
-            )
-        elif output_format == "param":
-            generate_param_snippet(values, cm.params, output_path)
-        else:
-            return {"status": "error", "message": f"Unknown format: {output_format}"}
-
-        return {"status": "ok", "runs": runs, "params": n, "path": output_path}
 
     def _mc_get_signal_data(self, signal: str):
         """Get 2D data array (n_runs, n_points) for an MC signal from state."""
@@ -1519,6 +1496,59 @@ class SessionAPI:
         return {}
 
 
+def _mc_generate_core(
+    state,
+    output_path: str,
+    output_format: str = "csv",
+    runs: int = 100,
+    seed: int | None = None,
+    nominals: list[float] | None = None,
+    sigmas: list[float] | None = None,
+) -> dict:
+    """Shared implementation for mc_generate — used by API and GUI dispatch."""
+    mc = state.mc_collection
+    if mc is None:
+        return {"status": "error", "message": "No MC data loaded"}
+    cm = mc._correlation
+    if cm is None:
+        return {"status": "error", "message": "No correlation matrix loaded"}
+
+    from pqwave.analysis.correlation import (
+        compute_cholesky, generate_correlated_values,
+        generate_control_script, generate_csv, generate_param_snippet,
+    )
+    try:
+        L = compute_cholesky(cm)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    n = cm.size
+    noms = nominals if nominals else [0.0] * n
+    sigs = sigmas if sigmas else [0.1] * n
+    params = [
+        {"model": "", "param": name, "nominal": noms[i], "logical_name": name}
+        for i, name in enumerate(cm.params)
+    ]
+
+    values = generate_correlated_values(L, noms, sigs, runs, seed)
+
+    if output_format == "csv":
+        generate_csv(values, cm.params, output_path)
+    elif output_format == "tsv":
+        generate_csv(values, cm.params, output_path, delimiter="\t")
+    elif output_format == "ngspice":
+        generate_control_script(
+            params, noms, L, output_path,
+            sim_command="tran 1n 100n 0", n_runs=runs, seed=seed,
+        )
+    elif output_format == "param":
+        generate_param_snippet(values, cm.params, output_path)
+    else:
+        return {"status": "error", "message": f"Unknown format: {output_format}"}
+
+    return {"status": "ok", "runs": runs, "params": n, "path": output_path}
+
+
 # ---- Core command registrations ----
 # Registered here (not in feature modules) to avoid circular imports
 # since session/api.py imports from measure_engine, fft_engine, etc.
@@ -1964,8 +1994,11 @@ def _cmd_mc_correlation_show(session: SessionAPI):
 def _cmd_mc_correlation_edit(session: SessionAPI):
     return session.mc_correlation_edit()
 
-@api_command("mc_generate", "mc_generate(path, output_format='csv', runs=100, seed=None)",
+@api_command("mc_generate", "mc_generate(path, output_format='csv', runs=100, seed=None, nominals=None, sigmas=None)",
              "Generate correlated parameter values to a file")
 def _cmd_mc_generate(session: SessionAPI, path: str, output_format: str = "csv",
-                    runs: int = 100, seed: int | None = None):
-    return session.mc_generate(path, output_format=output_format, runs=runs, seed=seed)
+                    runs: int = 100, seed: int | None = None,
+                    nominals: list[float] | None = None,
+                    sigmas: list[float] | None = None):
+    return session.mc_generate(path, output_format=output_format, runs=runs, seed=seed,
+                               nominals=nominals, sigmas=sigmas)

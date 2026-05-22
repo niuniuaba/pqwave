@@ -100,6 +100,37 @@ class TestParseModelFile:
             os.unlink(path)
 
 
+class TestExtractNominal:
+    """Direct unit tests for _extract_nominal helper."""
+
+    def test_plain_number(self):
+        from pqwave.analysis.correlation import _extract_nominal
+        assert _extract_nominal("0.6322") == 0.6322
+
+    def test_negative_number(self):
+        from pqwave.analysis.correlation import _extract_nominal
+        assert _extract_nominal("-0.673") == -0.673
+
+    def test_scientific_notation(self):
+        from pqwave.analysis.correlation import _extract_nominal
+        assert _extract_nominal("9e-09") == 9e-09
+
+    def test_no_leading_zero(self):
+        from pqwave.analysis.correlation import _extract_nominal
+        assert _extract_nominal(".5") == 0.5
+
+    def test_agauss_first_arg(self):
+        from pqwave.analysis.correlation import _extract_nominal
+        assert _extract_nominal("agauss(0.6, 0.1, 3)") == 0.6
+
+    def test_gauss_first_arg(self):
+        from pqwave.analysis.correlation import _extract_nominal
+        assert _extract_nominal("gauss(400, 0.05, 3)") == 400.0
+
+    def test_invalid_returns_none(self):
+        from pqwave.analysis.correlation import _extract_nominal
+        assert _extract_nominal("abc") is None
+
 class TestCholeskyEngine:
     def test_cholesky_identity_matrix(self):
         from pqwave.analysis.correlation import compute_cholesky
