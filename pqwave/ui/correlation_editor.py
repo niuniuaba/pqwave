@@ -21,6 +21,8 @@ class CorrelationMatrixEditor(QDialog):
         self.setWindowTitle("MC Correlation Tools")
         self.setMinimumSize(640, 540)
         self._params: list[dict] = []  # all parsed params
+        self._mc_collection = None     # set by caller after construction
+        self._connected = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -171,6 +173,10 @@ class CorrelationMatrixEditor(QDialog):
 
     def _rebuild_matrix_from_params(self):
         """Rebuild the matrix table from self._params."""
+        if self._connected:
+            self.matrix_table.cellChanged.disconnect(self._on_cell_changed)
+            self._connected = False
+
         n = len(self._params)
         self.matrix_table.clear()
         if n == 0:
@@ -200,16 +206,24 @@ class CorrelationMatrixEditor(QDialog):
                 self.matrix_table.setItem(r, c, item)
 
         self.matrix_table.cellChanged.connect(self._on_cell_changed)
+        self._connected = True
 
     def _on_cell_changed(self, row: int, col: int):
-        """Mirror upper triangle value to lower triangle."""
+        """Validate range and mirror upper triangle to lower triangle."""
         if row < col:
             item = self.matrix_table.item(row, col)
-            value = item.text() if item else "0.0"
+            raw = item.text() if item else "0.0"
+            try:
+                val = float(raw)
+            except ValueError:
+                val = 0.0
+            if not -1.0 <= val <= 1.0:
+                val = max(-1.0, min(1.0, val))
+                item.setText(str(val))
             self.matrix_table.cellChanged.disconnect(self._on_cell_changed)
             mirror = self.matrix_table.item(col, row)
             if mirror is not None:
-                mirror.setText(value)
+                mirror.setText(str(val))
             self.matrix_table.cellChanged.connect(self._on_cell_changed)
 
     # ---- Correlation matrix import/export ----
@@ -237,9 +251,15 @@ class CorrelationMatrixEditor(QDialog):
         headers = rows[0][1:]  # first cell is empty or "param"
         n = len(headers)
 
-        # Set _params from headers (no model file needed for pure matrix editing)
+        # Preserve nominals from previously parsed model file if names match
+        existing_nominals = {p["logical_name"]: p["nominal"] for p in self._params}
         self._params = [
-            {"model": "", "param": h, "nominal": 0.0, "logical_name": h}
+            {
+                "model": "",
+                "param": h,
+                "nominal": existing_nominals.get(h, 0.0),
+                "logical_name": h,
+            }
             for h in headers
         ]
         self._rebuild_matrix_from_params()
@@ -383,9 +403,11 @@ class CorrelationMatrixEditor(QDialog):
             generate_param_snippet(values, param_names, output_path)
 
         # Store on MC collection if active
-        state = ApplicationState()
-        if state.mc_collection is not None:
-            state.mc_collection._correlation = cm
+        mc = self._mc_collection
+        if mc is None:
+            mc = ApplicationState().mc_collection
+        if mc is not None:
+            mc._correlation = cm
 
         QMessageBox.information(
             self, "Done",

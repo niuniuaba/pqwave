@@ -4832,6 +4832,7 @@ class MainWindow(QMainWindow):
         """Open the MC Correlation Tools dialog."""
         from pqwave.ui.correlation_editor import CorrelationMatrixEditor
         dialog = CorrelationMatrixEditor(self)
+        dialog._mc_collection = self.state.mc_collection
         dialog.exec()
 
     def _get_mc_signal_data(self, signal_name: str):

@@ -63,7 +63,7 @@ def _extract_nominal(value_str: str) -> float | None:
     """Extract the nominal value from a parameter value string."""
     func_match = re.match(
         r"(?:agauss|gauss|aunif|unif)\s*\(\s*"
-        r"(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)",
+        r"(-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)",
         value_str,
     )
     if func_match:
@@ -155,6 +155,10 @@ def generate_control_script(
 ) -> str:
     """Generate ngspice .control script with correlated parameter variation."""
     n_params = len(params)
+    if n_params != L.shape[0]:
+        raise ValueError(
+            f"params count ({n_params}) must match L dimension ({L.shape[0]})"
+        )
     param_names = [p["logical_name"] for p in params]
 
     lines: list[str] = []
@@ -195,16 +199,15 @@ def generate_control_script(
         model = p["model"]
         param = p["param"]
         logical = p["logical_name"]
-        sigma_val = abs(nominals[i] * 0.1) if nominals[i] != 0 else 0.1
+        sigma_val = abs(nominals[i]) * 0.1 if nominals[i] != 0 else 0.1
         lines.append(
             f"      altermod @{model}[{param}] = "
-            f"agauss({logical}_nom, {sigma_val:.6g}, {sigma}) "
-            f"+ {sigma_val:.6g} * zc{i + 1}"
+            f"{logical}_nom + {sigma_val:.6g} * zc{i + 1}"
         )
     lines.append("    end")
     lines.append(f"    {sim_command}")
     lines.append("")
-    lines.append('    set run ="$&run"')
+    lines.append('    set run="$&run"')
     lines.append("    set dt = $curplot")
     lines.append("    setplot $scratch")
     lines.append("    let vout{$run}={$dt}.v(out)")
