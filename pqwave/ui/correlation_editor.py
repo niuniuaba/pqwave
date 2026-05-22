@@ -21,8 +21,8 @@ class CorrelationMatrixEditor(QDialog):
         self.setWindowTitle("MC Correlation Tools")
         self.setMinimumSize(640, 540)
         self._params: list[dict] = []  # all parsed params
-        self._mc_collection = None     # set by caller after construction
-        self._connected = False
+        self._mc_collection: "MCRunCollection | None" = None
+        self._suppress_cell_changed: bool = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -62,6 +62,7 @@ class CorrelationMatrixEditor(QDialog):
             QHeaderView.ResizeMode.Stretch
         )
         matrix_layout.addWidget(self.matrix_table)
+        self.matrix_table.cellChanged.connect(self._on_cell_changed)
 
         matrix_buttons = QHBoxLayout()
         load_csv_btn = QPushButton("Load Matrix (CSV)")
@@ -84,7 +85,9 @@ class CorrelationMatrixEditor(QDialog):
         self.n_runs_spin = QSpinBox()
         self.n_runs_spin.setRange(1, 100000)
         self.n_runs_spin.setValue(100)
-        gen_layout.addRow("Runs:", self.n_runs_spin)
+        self.n_runs_spin.setToolTip(
+            "Number of perturbed MC runs (run 0 is always nominal)")
+        gen_layout.addRow("MC Runs:", self.n_runs_spin)
 
         self.seed_spin = QSpinBox()
         self.seed_spin.setRange(0, 2 ** 31 - 1)
@@ -167,15 +170,13 @@ class CorrelationMatrixEditor(QDialog):
 
     def _rebuild_matrix_from_params(self):
         """Rebuild the matrix table from self._params."""
-        if self._connected:
-            self.matrix_table.cellChanged.disconnect(self._on_cell_changed)
-            self._connected = False
-
+        self._suppress_cell_changed = True
         n = len(self._params)
         self.matrix_table.clear()
         if n == 0:
             self.matrix_table.setRowCount(0)
             self.matrix_table.setColumnCount(0)
+            self._suppress_cell_changed = False
             return
 
         headers = [p["logical_name"] for p in self._params]
@@ -199,26 +200,28 @@ class CorrelationMatrixEditor(QDialog):
                     item.setBackground(Qt.GlobalColor.lightGray)
                 self.matrix_table.setItem(r, c, item)
 
-        self.matrix_table.cellChanged.connect(self._on_cell_changed)
-        self._connected = True
+        self._suppress_cell_changed = False
 
     def _on_cell_changed(self, row: int, col: int):
         """Validate range and mirror upper triangle to lower triangle."""
+        if self._suppress_cell_changed:
+            return
         if row < col:
             item = self.matrix_table.item(row, col)
             raw = item.text() if item else "0.0"
             try:
                 val = float(raw)
             except ValueError:
-                val = 0.0
+                item.setText("0.0")
+                return
             if not -1.0 <= val <= 1.0:
                 val = max(-1.0, min(1.0, val))
                 item.setText(str(val))
-            self.matrix_table.cellChanged.disconnect(self._on_cell_changed)
+            self._suppress_cell_changed = True
             mirror = self.matrix_table.item(col, row)
             if mirror is not None:
                 mirror.setText(str(val))
-            self.matrix_table.cellChanged.connect(self._on_cell_changed)
+            self._suppress_cell_changed = False
 
     # ---- Correlation matrix import/export ----
 

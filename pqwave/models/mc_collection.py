@@ -30,6 +30,7 @@ class MCRunCollection:
     display_mode: str = "spaghetti"   # spaghetti, envelope, single
     envelope_sigma: float = 3.0
     run_filter: Optional[List[int]] = None  # None = all runs
+    _correlation: Optional["CorrelationMatrix"] = field(default=None, repr=False)
 
     def __post_init__(self):
         if self.run_filter == "all":
@@ -90,6 +91,15 @@ class CorrelationMatrix:
     """Square correlation matrix stored as flat list (row-major)."""
     params: List[str]
     matrix: List[float]
+
+    def __post_init__(self):
+        n = len(self.params)
+        expected = n * n
+        if len(self.matrix) != expected:
+            raise ValueError(
+                f"Correlation matrix has {len(self.matrix)} elements "
+                f"for {n} params — expected {expected}"
+            )
 
     @property
     def size(self) -> int:

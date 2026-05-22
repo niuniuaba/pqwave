@@ -328,3 +328,26 @@ class TestCorrelationIntegration:
         assert "mc_correlation_show" in registry
         assert "mc_correlation_edit" in registry
         assert "mc_generate" in registry
+
+    def test_control_script_mc_runs_matches_n_runs(self):
+        """Verify mc_runs in generated script matches n_runs parameter."""
+        import tempfile, os
+        from pqwave.analysis.correlation import compute_cholesky, generate_control_script
+        from pqwave.models.mc_collection import CorrelationMatrix
+
+        cm = CorrelationMatrix(params=["a"], matrix=[1.0])
+        L = compute_cholesky(cm)
+        params = [{"model":"n1","param":"vth0","nominal":0.6,"logical_name":"n1_vth0"}]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = os.path.join(tmpdir, "test.sp")
+            generate_control_script(params, [0.6], L, out, n_runs=30)
+            content = open(out).read()
+            assert "let mc_runs = 30" in content
+            assert "dowhile run <= mc_runs" in content
+
+    def test_correlation_matrix_rejects_non_square(self):
+        """Verify CorrelationMatrix rejects flat list that isn't square."""
+        from pqwave.models.mc_collection import CorrelationMatrix
+        with pytest.raises(ValueError):
+            CorrelationMatrix(params=["a","b"], matrix=[1.0,0.5,0.5])  # 3 for 2 params

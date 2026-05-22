@@ -216,7 +216,7 @@ def generate_control_script(
     lines.append("  end")
     lines.append("")
     lines.append("  * Save all results")
-    lines.append("  write $rawfile {$scratch}.allv")
+    lines.append("  write $rawfile {$scratch}.all")
     lines.append("  rusage")
     lines.append("  quit")
     lines.append(".endc")

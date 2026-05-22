@@ -616,6 +616,35 @@ class MainWindow(QMainWindow):
 
         elif action == "mc_correlation":
             self._on_mc_correlation()
+        elif action == "mc_generate":
+            from pqwave.analysis.correlation import (
+                compute_cholesky, generate_correlated_values,
+                generate_control_script, generate_csv, generate_param_snippet,
+            )
+            mc = self.state.mc_collection
+            if mc is None or not hasattr(mc, "_correlation") or mc._correlation is None:
+                return
+            cm = mc._correlation
+            L = compute_cholesky(cm)
+            n = cm.size
+            params = [{"model": "", "param": name, "nominal": 0.0, "logical_name": name}
+                      for name in cm.params]
+            nominals = [0.0] * n
+            sigmas = [0.1] * n
+            values = generate_correlated_values(L, nominals, sigmas, kwargs.get("runs", 100),
+                                                kwargs.get("seed"))
+            output_path = kwargs.get("output_path", "")
+            output_format = kwargs.get("output_format", "csv")
+            if output_format == "csv":
+                generate_csv(values, cm.params, output_path)
+            elif output_format == "tsv":
+                generate_csv(values, cm.params, output_path, delimiter="\t")
+            elif output_format == "ngspice":
+                generate_control_script(params, nominals, L, output_path,
+                                       n_runs=kwargs.get("runs", 100),
+                                       seed=kwargs.get("seed"))
+            elif output_format == "param":
+                generate_param_snippet(values, cm.params, output_path)
 
     def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""

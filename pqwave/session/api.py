@@ -431,10 +431,14 @@ class SessionAPI:
         return {"status": "error", "message": "Editor requires GUI"}
 
     def mc_generate(
-        self, output_path: str, format: str = "csv",
+        self, output_path: str, output_format: str = "csv",
         runs: int = 100, seed: int | None = None,
     ) -> dict:
         """Generate correlated parameter values to a file."""
+        if self._on_mutation:
+            self._on_mutation("mc_generate", output_path=output_path,
+                              output_format=output_format, runs=runs, seed=seed)
+            return {"status": "ok"}
         mc = self._state.mc_collection
         if mc is None:
             return {"status": "error", "message": "No MC data loaded"}
@@ -461,19 +465,19 @@ class SessionAPI:
 
         values = generate_correlated_values(L, nominals, sigmas, runs, seed)
 
-        if format == "csv":
+        if output_format == "csv":
             generate_csv(values, cm.params, output_path)
-        elif format == "tsv":
+        elif output_format == "tsv":
             generate_csv(values, cm.params, output_path, delimiter="\t")
-        elif format == "ngspice":
+        elif output_format == "ngspice":
             generate_control_script(
                 params, nominals, L, output_path,
                 sim_command="tran 1n 100n 0", n_runs=runs, seed=seed,
             )
-        elif format == "param":
+        elif output_format == "param":
             generate_param_snippet(values, cm.params, output_path)
         else:
-            return {"status": "error", "message": f"Unknown format: {format}"}
+            return {"status": "error", "message": f"Unknown format: {output_format}"}
 
         return {"status": "ok", "runs": runs, "params": n, "path": output_path}
 
@@ -1960,8 +1964,8 @@ def _cmd_mc_correlation_show(session: SessionAPI):
 def _cmd_mc_correlation_edit(session: SessionAPI):
     return session.mc_correlation_edit()
 
-@api_command("mc_generate", "mc_generate(path, format='csv', runs=100, seed=None)",
+@api_command("mc_generate", "mc_generate(path, output_format='csv', runs=100, seed=None)",
              "Generate correlated parameter values to a file")
-def _cmd_mc_generate(session: SessionAPI, path: str, format: str = "csv",
+def _cmd_mc_generate(session: SessionAPI, path: str, output_format: str = "csv",
                     runs: int = 100, seed: int | None = None):
-    return session.mc_generate(path, format=format, runs=runs, seed=seed)
+    return session.mc_generate(path, output_format=output_format, runs=runs, seed=seed)
