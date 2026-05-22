@@ -103,6 +103,15 @@ class CorrelationMatrixEditor(QDialog):
         ])
         gen_layout.addRow("Format:", self.format_combo)
 
+        self.format_hint = QLabel(
+            "CSV output works with any simulator via external scripting.\n"
+            "Use ngspice format only when you intend to run the generated\n"
+            ".control script directly in ngspice."
+        )
+        self.format_hint.setWordWrap(True)
+        self.format_hint.setStyleSheet("color: palette(text); font-size: 10px;")
+        gen_layout.addRow("", self.format_hint)
+
         self.sim_command_edit = QLineEdit("tran 1n 100n 0")
         gen_layout.addRow("Sim Command:", self.sim_command_edit)
 
@@ -379,6 +388,45 @@ class CorrelationMatrixEditor(QDialog):
         values = generate_correlated_values(L, nominals, sigmas, n_runs, seed)
 
         fmt = self.format_combo.currentText()
+
+        # Show preview of first rows before writing
+        preview_rows = min(5, n_runs)
+        preview_lines = []
+        if "ngspice" in fmt:
+            # For ngspice, the preview is shown after validation below
+            pass
+        elif "param" in fmt:
+            preview_lines.append(f"* --- Run 0 ---")
+            preview_lines.append(".param " + " ".join(
+                f"{name}={values[0, i]:.8g}" for i, name in enumerate(param_names)))
+            if n_runs > 1:
+                preview_lines.append(f"* --- Run 1 ---")
+                preview_lines.append(".param " + " ".join(
+                    f"{name}={values[1, i]:.8g}" for i, name in enumerate(param_names)))
+            preview_lines.append(f"... ({n_runs} runs total)")
+        else:
+            # CSV/TSV preview
+            header = ", ".join(["run"] + param_names)
+            preview_lines.append(header)
+            for run_idx in range(preview_rows):
+                row = ", ".join(
+                    [str(run_idx)] + [f"{values[run_idx, i]:.8g}" for i in range(len(param_names))])
+                preview_lines.append(row)
+            if n_runs > preview_rows:
+                preview_lines.append(f"... ({n_runs} runs total)")
+
+        if preview_lines:
+            reply = QMessageBox.question(
+                self, "Confirm Output",
+                f"Preview (first {preview_rows} of {n_runs} runs):\n\n"
+                + "\n".join(preview_lines)
+                + f"\n\nWrite to:\n{output_path}?",
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Ok,
+            )
+            if reply != QMessageBox.StandardButton.Ok:
+                return
+
         if "csv" in fmt and "tsv" not in fmt:
             generate_csv(values, param_names, output_path)
         elif "tsv" in fmt:
@@ -397,6 +445,19 @@ class CorrelationMatrixEditor(QDialog):
                 )
                 return
             sim_cmd = self.sim_command_edit.text()
+            # Show preview for ngspice format
+            reply = QMessageBox.question(
+                self, "Confirm Output",
+                f"Generate ngspice .control script:\n\n"
+                f"  Runs: {n_runs} (+ 1 nominal)\n"
+                f"  Parameters: {', '.join(param_names)}\n"
+                f"  Simulation: {sim_cmd}\n\n"
+                f"Write to:\n{output_path}?",
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Ok,
+            )
+            if reply != QMessageBox.StandardButton.Ok:
+                return
             generate_control_script(
                 params=self._params,
                 nominals=nominals,
