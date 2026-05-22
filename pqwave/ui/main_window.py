@@ -617,7 +617,6 @@ class MainWindow(QMainWindow):
         elif action == "mc_correlation":
             self._on_mc_correlation()
         elif action == "mc_correlation_load":
-            from pqwave.session.api import _mc_generate_core  # reuse shared import context
             from pqwave.models.mc_collection import CorrelationMatrix
             import csv
             mc = self.state.mc_collection
