@@ -329,8 +329,12 @@ class TestCorrelationIntegration:
         assert "mc_correlation_edit" in registry
         assert "mc_generate" in registry
 
-    def test_control_script_mc_runs_matches_n_runs(self):
-        """Verify mc_runs in generated script matches n_runs parameter."""
+    def test_control_script_mc_runs_is_nominal_plus_n_perturbed(self):
+        """Verify mc_runs = n_runs produces nominal + N perturbed iterations.
+
+        Ngspice convention: let mc_runs = N, dowhile run <= mc_runs
+        gives run 0 (nominal) + runs 1..N (perturbed) = N+1 total sims.
+        """
         import tempfile, os
         from pqwave.analysis.correlation import compute_cholesky, generate_control_script
         from pqwave.models.mc_collection import CorrelationMatrix

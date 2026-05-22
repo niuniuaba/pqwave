@@ -412,7 +412,7 @@ class SessionAPI:
         mc = self._state.mc_collection
         if mc is None:
             return {"status": "error", "message": "No MC data loaded"}
-        cm = getattr(mc, "_correlation", None)
+        cm = mc._correlation
         if cm is None:
             return {"status": "error", "message": "No correlation matrix loaded"}
         dense = cm.get_dense()
@@ -442,7 +442,7 @@ class SessionAPI:
         mc = self._state.mc_collection
         if mc is None:
             return {"status": "error", "message": "No MC data loaded"}
-        cm = getattr(mc, "_correlation", None)
+        cm = mc._correlation
         if cm is None:
             return {"status": "error", "message": "No correlation matrix loaded"}
 
