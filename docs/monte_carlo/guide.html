@@ -1,544 +1,728 @@
-<h1 id="monte-carlo-analysis-user-guide">Monte Carlo Analysis User Guide</h1>
-<p>pqwave supports comprehensive Monte Carlo (MC) analysis for ngspice, LTspice, and QSPICE simulation output. This guide has two parts: a <strong>feature reference</strong> for quick lookup, and <strong>worked tutorials</strong> that walk through real analysis workflows using the example files in <code>docs/monte_carlo/examples/</code>.</p>
-<blockquote>
-<p>All example files are pre-computed. Open them directly — no simulator required.</p>
-</blockquote>
-<h2 id="table-of-contents">Table of Contents</h2>
-<h3 id="part-1-feature-reference">Part 1 — Feature Reference</h3>
+<html>
+<head>
+<style>
+body { font-family: sans-serif; font-size: 11pt; color: #222; margin: 16px 20px; }
+h1 { font-size: 16pt; margin: 20px 0 8px 0; }
+h2 { font-size: 14pt; margin: 18px 0 6px 0; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+h3 { font-size: 12pt; margin: 14px 0 4px 0; }
+h4 { font-size: 11pt; margin: 10px 0 4px 0; }
+p { margin: 6px 0; }
+table { border: 1px solid #aaa; border-collapse: collapse; margin: 8px 0; }
+th { background: #e8e8e8; padding: 4px 8px; border: 1px solid #aaa; text-align: left; }
+td { padding: 4px 8px; border: 1px solid #aaa; vertical-align: top; }
+pre { background: #f4f4f4; border: 1px solid #ddd; padding: 8px; margin: 6px 0; font-family: monospace; font-size: 10pt; white-space: pre-wrap; }
+code { font-family: monospace; font-size: 10pt; background: #f4f4f4; padding: 1px 3px; }
+blockquote { border-left: 3px solid #ccc; margin: 6px 0; padding: 2px 10px; color: #555; }
+ul, ol { margin: 6px 0; }
+li { margin: 2px 0; }
+hr { border: none; border-top: 1px solid #ccc; margin: 12px 0; }
+a { color: #1a6eb5; text-decoration: none; }
+.note { border-left: 3px solid #ccc; padding: 2px 10px; color: #555; margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<h1>Monte Carlo Analysis User Guide</h1>
+
+<p>pqwave supports comprehensive Monte Carlo (MC) analysis for ngspice, LTspice, and QSPICE simulation output. This guide has two parts: a <b>feature reference</b> for quick lookup, and <b>worked tutorials</b> that walk through real analysis workflows using the example files in <tt>docs/monte_carlo/examples/</tt>.</p>
+
+<p class="note">All example files are pre-computed. Open them directly — no simulator required.</p>
+
+<h2>Table of Contents</h2>
+
+<h3>Part 1 — Feature Reference</h3>
 <ul>
-<li><a href="#loading-modes">Loading Modes</a></li>
-<li><a href="#display-modes-control-bar">Display Modes &amp; Control Bar</a></li>
-<li><a href="#statistical-analysis-features">Statistical Analysis</a></li>
-<li><a href="#correlation-tools">Correlation Tools</a></li>
-<li><a href="#session-api-commands">Session API Commands</a></li>
+  <li><a href="#loading-modes">Loading Modes</a></li>
+  <li><a href="#display-modes-control-bar">Display Modes &amp; Control Bar</a></li>
+  <li><a href="#statistical-analysis-features">Statistical Analysis</a></li>
+  <li><a href="#correlation-tools">Correlation Tools</a></li>
+  <li><a href="#session-api-commands">Session API Commands</a></li>
 </ul>
-<h3 id="part-2-worked-tutorials">Part 2 — Worked Tutorials</h3>
+
+<h3>Part 2 — Worked Tutorials</h3>
 <ul>
-<li><a href="#example-overview">Example Overview</a></li>
-<li><a href="#example-1-rc-low-pass-filter">Example 1: RC Low-Pass Filter</a></li>
-<li><a href="#example-2-ring-oscillator">Example 2: Ring Oscillator</a></li>
-<li><a href="#example-3-correlation-matrix-editor">Example 3: Correlation Matrix Editor</a></li>
-<li><a href="#example-4-ltspice-lc-bandpass-filter">Example 4: LTspice LC Bandpass Filter</a></li>
-<li><a href="#standalone-scripting-example">Standalone Scripting Example</a></li>
+  <li><a href="#example-overview">Example Overview</a></li>
+  <li><a href="#example-1-rc-low-pass-filter">Example 1: RC Low-Pass Filter</a></li>
+  <li><a href="#example-2-ring-oscillator">Example 2: Ring Oscillator</a></li>
+  <li><a href="#example-3-correlation-matrix-editor">Example 3: Correlation Matrix Editor</a></li>
+  <li><a href="#example-4-ltspice-lc-bandpass-filter">Example 4: LTspice LC Bandpass Filter</a></li>
+  <li><a href="#standalone-scripting-example">Standalone Scripting Example</a></li>
 </ul>
-<hr />
-<h2 id="part-1-feature-reference_1">Part 1 — Feature Reference</h2>
-<h3 id="loading-modes">Loading Modes</h3>
-<p>Open via <strong>File &gt; Open Monte Carlo</strong>. Three source types are available:</p>
-<p>| Mode | Source | Description | API Command |
-|------|--------|-------------|-------------|
-| Single stepped file | <code>.step param</code> simulations (LTspice, QSPICE) | Each step = one MC run. Parameter names and values auto-detected from raw file header. | <code>mc_load(path, source_type="stepped")</code> |
-| Multiple files | Two or more single-run raw files | Each file = one MC run. Use for batch simulations that save per-run output files. | <code>mc_load([path1, path2, ...], source_type="multi")</code> |
-| Single file with named runs | Raw files with run-named vectors (vout0, vout1, ...) | Common in ngspice <code>.control</code> loop simulations. Enter base name and optional run count. | <code>mc_load(path, source_type="pattern", grouping_pattern="vout")</code> |</p>
-<p><strong>After loading</strong>, the MC Control Bar appears at the top of the main window showing the run count and display controls. All panels receive MC rendering.</p>
-<h3 id="display-modes-control-bar">Display Modes &amp; Control Bar</h3>
+
+<hr>
+
+<h2>Part 1 — Feature Reference</h2>
+
+<h3><a name="loading-modes"></a>Loading Modes</h3>
+
+<p>Open via <b>File &gt; Open Monte Carlo</b>. Three source types are available:</p>
+
+<table>
+<tr><th>Mode</th><th>Source</th><th>Description</th><th>API Command</th></tr>
+<tr>
+  <td>Single stepped file</td>
+  <td><tt>.step param</tt> simulations (LTspice, QSPICE)</td>
+  <td>Each step = one MC run. Parameter names and values auto-detected from raw file header.</td>
+  <td><code>mc_load(path, source_type="stepped")</code></td>
+</tr>
+<tr>
+  <td>Multiple files</td>
+  <td>Two or more single-run raw files</td>
+  <td>Each file = one MC run. Use for batch simulations that save per-run output files.</td>
+  <td><code>mc_load([path1, path2, ...], source_type="multi")</code></td>
+</tr>
+<tr>
+  <td>Single file with named runs</td>
+  <td>Raw files with run-named vectors (vout0, vout1, ...)</td>
+  <td>Common in ngspice <tt>.control</tt> loop simulations. Enter base name and optional run count.</td>
+  <td><code>mc_load(path, source_type="pattern", grouping_pattern="vout")</code></td>
+</tr>
+</table>
+
+<p><b>After loading</b>, the MC Control Bar appears at the top of the main window showing the run count and display controls. All panels receive MC rendering.</p>
+
+<h3><a name="display-modes-control-bar"></a>Display Modes &amp; Control Bar</h3>
+
 <p>The MC Control Bar appears after loading MC data:</p>
-<p>| Control | Values | Description | API Command |
-|---------|--------|-------------|-------------|
-| Run count | Read-only | Shows total loaded runs, e.g. "MC: 21 runs" | <code>mc_info()</code> |
-| Display mode | <code>spaghetti</code>, <code>envelope</code>, <code>single</code> | How all runs are rendered | <code>mc_style(mode)</code> |
-| Sigma (σ) | 0.5–6.0 (default 3.0) | Envelope band width in standard deviations | <code>mc_style(mode, sigma=N)</code> |
-| Nominal | 0 to N−1 (default 0) | Index of the reference run | <code>mc_nominal(idx)</code> |
-| Run filter | "all" or comma-separated indices | Subset of runs to display, e.g. <code>0, 5, 10</code> | <code>mc_filter("all")</code> / <code>mc_filter([0,5,10])</code> |</p>
-<p><strong>Display modes:</strong></p>
-<p>| Mode | Behavior |
-|------|----------|
-| <strong>Spaghetti</strong> | All active runs plotted as individual translucent traces. Density patterns reveal outliers. |
-| <strong>Envelope</strong> | Nominal run as solid line + shaded bands at ±1σ, ±2σ, ±3σ around the cross-run mean. |
-| <strong>Single</strong> | Only the nominal run. Use to focus on the reference waveform. |</p>
-<h3 id="statistical-analysis-features">Statistical Analysis Features</h3>
-<p>All commands in <strong>Analyze</strong> menu. Require an active MC collection.</p>
-<p>| Feature | Menu Path | Purpose | API Command |
-|---------|-----------|---------|-------------|
-| MC Statistics | Analyze &gt; MC Statistics | Per-timepoint mean, std, min, max across all runs. Plotted as additional traces. | <code>mc_stats(signal)</code> |
-| MC Histogram | Analyze &gt; MC Histogram | Histogram of a scalar measurement across runs. Choose measurement function (max, min, mean, rms, pk_pk) and bin count. | <code>mc_histogram("max(v(out))", bins=50)</code> |
-| MC Yield | Analyze &gt; MC Yield | Percentage of runs within spec limits. Optional measurement function for scalar yield. | <code>mc_yield(signal, low, high, condition=None)</code> |
-| Worst Cases | Analyze &gt; Worst Cases | Top N runs with largest deviation from nominal. Metrics: max_abs_diff or rms_diff. | <code>mc_worst(n=5, metric="max_abs_diff")</code> |
-| MC Sensitivity | Analyze &gt; MC Sensitivity | Ranks parameters by Spearman correlation with a measurement. Requires parameter-annotated runs. | <code>mc_sensitivity("max(v(out))")</code> |
-| MC Scatter | Analyze &gt; MC Scatter | Scatter plot of measurement vs parameter across runs. Requires parameter-annotated runs. | <code>mc_scatter("max(v(out))", "Rval")</code> |</p>
-<p><strong>Measurement functions</strong> (used in histogram, yield, sensitivity, scatter):</p>
-<p>| Function | Computes |
-|----------|----------|
-| <code>max</code> | Maximum value of the signal in each run |
-| <code>min</code> | Minimum value of the signal in each run |
-| <code>mean</code> | Mean value of the signal in each run |
-| <code>rms</code> | RMS (root mean square) of the signal in each run |
-| <code>pk_pk</code> | Peak-to-peak (max − min) of the signal in each run |</p>
-<p><strong>Parameter annotation:</strong> For simulations that don't embed parameter values (ngspice loops), annotate manually:</p>
-<p><code>mc_param("Rval", [10000, 1000, 2200, ...])
-mc_param("Cval", [10e-9, 10e-9, 1e-9, ...])</code></p>
-<p>Companion CSV files (like <code>rc_filter_params.csv</code>) list parameter values per run.</p>
-<h3 id="correlation-tools">Correlation Tools</h3>
-<p><strong>Analyze &gt; MC Correlation</strong> opens the Correlation Matrix Editor — a three-step tool for designing correlated parameter variations.</p>
-<p>| Step | Action | Description |
-|------|--------|-------------|
-| 1. Load Model File | Browse and Parse a <code>.model</code> or <code>.lib</code> file | Extracts parameter names and nominal values from SPICE <code>.model</code> statements. Format: <code>modelname_paramname</code>. |
-| 2. Correlation Matrix | Edit the matrix table or import/export CSV | Square matrix with 1.0 on diagonal. Upper-triangle cells editable (−1.0 to 1.0). Mirrored to lower triangle. Matrix must be positive definite. |
-| 3. Generate Output | Configure runs, seed, format, and output path | Generates correlated parameter sets via Cholesky decomposition. |</p>
-<p><strong>Output formats:</strong></p>
-<p>| Format | Description |
-|--------|-------------|
-| CSV | <code>run, param1, param2, ...</code> — simulator-agnostic |
-| TSV | Tab-separated variant of CSV |
-| ngspice .control | Complete <code>.control</code> script with <code>altermod</code> assignments and simulation loop |
-| .param snippet | Per-run <code>.param</code> lines with baked values |</p>
-<p><strong>Under the hood:</strong> The correlation matrix <em>R</em> is decomposed via Cholesky (<em>R = L × L^T</em>). Independent standard normals <em>Z</em> are multiplied by <em>L^T</em> to produce correlated normals <em>Zc</em>. Final values = nominal + sigma × <em>Zc</em>.</p>
+
+<table>
+<tr><th>Control</th><th>Values</th><th>Description</th><th>API Command</th></tr>
+<tr><td>Run count</td><td>Read-only</td><td>Shows total loaded runs, e.g. "MC: 21 runs"</td><td><code>mc_info()</code></td></tr>
+<tr><td>Display mode</td><td><tt>spaghetti</tt>, <tt>envelope</tt>, <tt>single</tt></td><td>How all runs are rendered</td><td><code>mc_style(mode)</code></td></tr>
+<tr><td>Sigma (&sigma;)</td><td>0.5–6.0 (default 3.0)</td><td>Envelope band width in standard deviations</td><td><code>mc_style(mode, sigma=N)</code></td></tr>
+<tr><td>Nominal</td><td>0 to N&minus;1 (default 0)</td><td>Index of the reference run</td><td><code>mc_nominal(idx)</code></td></tr>
+<tr><td>Run filter</td><td>"all" or comma-separated indices</td><td>Subset of runs to display, e.g. <tt>0, 5, 10</tt></td><td><code>mc_filter("all")</code> / <code>mc_filter([0,5,10])</code></td></tr>
+</table>
+
+<p><b>Display modes:</b></p>
+
+<table>
+<tr><th>Mode</th><th>Behavior</th></tr>
+<tr><td><b>Spaghetti</b></td><td>All active runs plotted as individual translucent traces. Density patterns reveal outliers.</td></tr>
+<tr><td><b>Envelope</b></td><td>Nominal run as solid line + shaded bands at &plusmn;1&sigma;, &plusmn;2&sigma;, &plusmn;3&sigma; around the cross-run mean.</td></tr>
+<tr><td><b>Single</b></td><td>Only the nominal run. Use to focus on the reference waveform.</td></tr>
+</table>
+
+<h3><a name="statistical-analysis-features"></a>Statistical Analysis Features</h3>
+
+<p>All commands in <b>Analyze</b> menu. Require an active MC collection.</p>
+
+<table>
+<tr><th>Feature</th><th>Menu Path</th><th>Purpose</th><th>API Command</th></tr>
+<tr><td>MC Statistics</td><td>Analyze &gt; MC Statistics</td><td>Per-timepoint mean, std, min, max across all runs. Plotted as additional traces.</td><td><code>mc_stats(signal)</code></td></tr>
+<tr><td>MC Histogram</td><td>Analyze &gt; MC Histogram</td><td>Histogram of a scalar measurement across runs. Choose measurement function and bin count.</td><td><code>mc_histogram("max(v(out))", bins=50)</code></td></tr>
+<tr><td>MC Yield</td><td>Analyze &gt; MC Yield</td><td>Percentage of runs within spec limits. Optional measurement function for scalar yield.</td><td><code>mc_yield(signal, low, high, condition=None)</code></td></tr>
+<tr><td>Worst Cases</td><td>Analyze &gt; Worst Cases</td><td>Top N runs with largest deviation from nominal. Metrics: max_abs_diff or rms_diff.</td><td><code>mc_worst(n=5, metric="max_abs_diff")</code></td></tr>
+<tr><td>MC Sensitivity</td><td>Analyze &gt; MC Sensitivity</td><td>Ranks parameters by Spearman correlation with a measurement. Requires parameter-annotated runs.</td><td><code>mc_sensitivity("max(v(out))")</code></td></tr>
+<tr><td>MC Scatter</td><td>Analyze &gt; MC Scatter</td><td>Scatter plot of measurement vs parameter across runs. Requires parameter-annotated runs.</td><td><code>mc_scatter("max(v(out))", "Rval")</code></td></tr>
+</table>
+
+<p><b>Measurement functions</b> (used in histogram, yield, sensitivity, scatter):</p>
+
+<table>
+<tr><th>Function</th><th>Computes</th></tr>
+<tr><td><tt>max</tt></td><td>Maximum value of the signal in each run</td></tr>
+<tr><td><tt>min</tt></td><td>Minimum value of the signal in each run</td></tr>
+<tr><td><tt>mean</tt></td><td>Mean value of the signal in each run</td></tr>
+<tr><td><tt>rms</tt></td><td>RMS (root mean square) of the signal in each run</td></tr>
+<tr><td><tt>pk_pk</tt></td><td>Peak-to-peak (max &minus; min) of the signal in each run</td></tr>
+</table>
+
+<p><b>Parameter annotation:</b> For simulations that don't embed parameter values (ngspice loops), annotate manually:</p>
+
+<pre>mc_param("Rval", [10000, 1000, 2200, ...])
+mc_param("Cval", [10e-9, 10e-9, 1e-9, ...])</pre>
+
+<p>Companion CSV files (like <tt>rc_filter_params.csv</tt>) list parameter values per run.</p>
+
+<h3><a name="correlation-tools"></a>Correlation Tools</h3>
+
+<p><b>Analyze &gt; MC Correlation</b> opens the Correlation Matrix Editor — a three-step tool for designing correlated parameter variations.</p>
+
+<table>
+<tr><th>Step</th><th>Action</th><th>Description</th></tr>
+<tr><td>1. Load Model File</td><td>Browse and Parse a <tt>.model</tt> or <tt>.lib</tt> file</td><td>Extracts parameter names and nominal values from SPICE <tt>.model</tt> statements. Format: <tt>modelname_paramname</tt>.</td></tr>
+<tr><td>2. Correlation Matrix</td><td>Edit the matrix table or import/export CSV</td><td>Square matrix with 1.0 on diagonal. Upper-triangle cells editable (&minus;1.0 to 1.0). Mirrored to lower triangle. Matrix must be positive definite.</td></tr>
+<tr><td>3. Generate Output</td><td>Configure runs, seed, format, and output path</td><td>Generates correlated parameter sets via Cholesky decomposition.</td></tr>
+</table>
+
+<p><b>Output formats:</b></p>
+
+<table>
+<tr><th>Format</th><th>Description</th></tr>
+<tr><td>CSV</td><td><tt>run, param1, param2, ...</tt> — simulator-agnostic</td></tr>
+<tr><td>TSV</td><td>Tab-separated variant of CSV</td></tr>
+<tr><td>ngspice .control</td><td>Complete <tt>.control</tt> script with <tt>altermod</tt> assignments and simulation loop</td></tr>
+<tr><td>.param snippet</td><td>Per-run <tt>.param</tt> lines with baked values</td></tr>
+</table>
+
+<p><b>Under the hood:</b> The correlation matrix <i>R</i> is decomposed via Cholesky (<i>R = L &times; L<sup>T</sup></i>). Independent standard normals <i>Z</i> are multiplied by <i>L<sup>T</sup></i> to produce correlated normals <i>Zc</i>. Final values = nominal + sigma &times; <i>Zc</i>.</p>
+
 <p>API commands: <code>mc_correlation_load(path)</code>, <code>mc_correlation_show()</code>, <code>mc_generate(output_path, format, runs, seed)</code>.</p>
-<h3 id="session-api-commands">Session API Commands</h3>
-<p>All MC commands available headlessly via <code>SessionAPI</code> (REPL: <code>F6</code>, batch scripts, external automation).</p>
-<p><strong>Loading &amp; Inspection:</strong></p>
-<p>| Command | Signature | Description |
-|---------|-----------|-------------|
-| <code>mc_load</code> | <code>mc_load(source, source_type="stepped", grouping_pattern=None)</code> | Load MC data. Returns <code>{"status": "ok", "runs": N}</code>. |
-| <code>mc_info</code> | <code>mc_info()</code> | Current collection state: runs, nominal, mode, sigma, parameters, filter. |</p>
-<p><strong>Display Control:</strong></p>
-<p>| Command | Signature | Description |
-|---------|-----------|-------------|
-| <code>mc_style</code> | <code>mc_style(mode, sigma=3.0)</code> | Set mode: "spaghetti", "envelope", or "single". |
-| <code>mc_nominal</code> | <code>mc_nominal(idx)</code> | Set nominal run index. |
-| <code>mc_filter</code> | <code>mc_filter(runs)</code> | <code>"all"</code> or <code>[0, 2, 5]</code> to show subset. |</p>
-<p><strong>Parameter Annotation &amp; Grouping:</strong></p>
-<p>| Command | Signature | Description |
-|---------|-----------|-------------|
-| <code>mc_param</code> | <code>mc_param(name, values)</code> | Annotate runs with parameter values. Required for sensitivity/scatter. |
-| <code>mc_group</code> | <code>mc_group(signal, pattern=None)</code> | Register grouping intent for a signal. |
-| <code>mc_ungroup</code> | <code>mc_ungroup(signal)</code> | Clear MC grouping and collection. |</p>
-<p><strong>Statistical Analysis:</strong></p>
-<p>| Command | Signature | Description |
-|---------|-----------|-------------|
-| <code>mc_stats</code> | <code>mc_stats(signal)</code> | Cross-run mean, std, min, max per timepoint. |
-| <code>mc_histogram</code> | <code>mc_histogram(measurement, bins=50, range=None)</code> | Histogram of measurement across runs. |
-| <code>mc_yield</code> | <code>mc_yield(signal, low, high, condition=None)</code> | Yield percentage within spec limits. |
-| <code>mc_worst</code> | <code>mc_worst(n=5, metric="max_abs_diff")</code> | Top N worst runs by deviation. |
-| <code>mc_sensitivity</code> | <code>mc_sensitivity(measurement)</code> | Parameter ranking by Spearman correlation. |
-| <code>mc_scatter</code> | <code>mc_scatter(measurement, param)</code> | Scatter data (x=param values, y=measurements). |</p>
-<p><strong>Correlation Matrix:</strong></p>
-<p>| Command | Signature | Description |
-|---------|-----------|-------------|
-| <code>mc_correlation_load</code> | <code>mc_correlation_load(path)</code> | Load correlation matrix from CSV. |
-| <code>mc_correlation_show</code> | <code>mc_correlation_show()</code> | Print current correlation matrix as text. |
-| <code>mc_correlation_edit</code> | <code>mc_correlation_edit()</code> | Open Correlation Matrix Editor dialog (GUI only). |
-| <code>mc_generate</code> | <code>mc_generate(output_path, output_format="csv", runs=100, seed=None, nominals=None, sigmas=None)</code> | Generate correlated parameter values to file. |</p>
-<hr />
-<h2 id="part-2-worked-tutorials_1">Part 2 — Worked Tutorials</h2>
-<h3 id="example-overview">Example Overview</h3>
-<p>Three pre-computed example files live in <code>docs/monte_carlo/examples/</code>. Each demonstrates a different loading mode and set of analysis features:</p>
-<p>| Example | File | Circuit | Runs | Loading Mode | Demonstrates |
-|---------|------|---------|------|-------------|--------------|
-| RC Filter | <code>ngspice/rc_filter_mc.raw</code> + <code>rc_filter_params.csv</code> | RC low-pass (R=1k–100k, C=1n–100n), AC 100 Hz–1 MHz | 21 | Pattern (base: <code>vout</code>) | Loading, display, parameter annotation, sensitivity, scatter, yield, worst-case, API scripting |
-| Ring Oscillator | <code>ngspice/MC_ring.raw</code> | 25-stage CMOS ring oscillator, transient 0–100 ns | 31 | Pattern (base: <code>vout</code>) | Envelope display, cross-run statistics, histogram |
-| Correlation Editor | <code>ngspice/mc_ring_circ.net</code> | BSIM3 NMOS/PMOS model definitions | — | — | Model parsing, correlation matrix editing, Cholesky-based parameter generation |
-| LTspice LC Filter | <code>ltspice/MonteCarlo.raw</code> | LC bandpass filter, AC 300 kHz–10 MHz | 21 | Stepped | Stepped loading, auto-detected parameters |</p>
-<p><strong>Prerequisites:</strong> pqwave installed. No simulator required — all raw files are pre-computed.</p>
-<hr />
-<h3 id="example-1-rc-low-pass-filter">Example 1: RC Low-Pass Filter</h3>
+
+<h3><a name="session-api-commands"></a>Session API Commands</h3>
+
+<p>All MC commands available headlessly via <tt>SessionAPI</tt> (REPL: <tt>F6</tt>, batch scripts, external automation).</p>
+
+<p><b>Loading &amp; Inspection:</b></p>
+
+<table>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+<tr><td><code>mc_load</code></td><td><code>mc_load(source, source_type="stepped", grouping_pattern=None)</code></td><td>Load MC data. Returns <tt>{"status": "ok", "runs": N}</tt>.</td></tr>
+<tr><td><code>mc_info</code></td><td><code>mc_info()</code></td><td>Current collection state: runs, nominal, mode, sigma, parameters, filter.</td></tr>
+</table>
+
+<p><b>Display Control:</b></p>
+
+<table>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+<tr><td><code>mc_style</code></td><td><code>mc_style(mode, sigma=3.0)</code></td><td>Set mode: "spaghetti", "envelope", or "single".</td></tr>
+<tr><td><code>mc_nominal</code></td><td><code>mc_nominal(idx)</code></td><td>Set nominal run index.</td></tr>
+<tr><td><code>mc_filter</code></td><td><code>mc_filter(runs)</code></td><td><tt>"all"</tt> or <tt>[0, 2, 5]</tt> to show subset.</td></tr>
+</table>
+
+<p><b>Parameter Annotation &amp; Grouping:</b></p>
+
+<table>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+<tr><td><code>mc_param</code></td><td><code>mc_param(name, values)</code></td><td>Annotate runs with parameter values. Required for sensitivity/scatter.</td></tr>
+<tr><td><code>mc_group</code></td><td><code>mc_group(signal, pattern=None)</code></td><td>Register grouping intent for a signal.</td></tr>
+<tr><td><code>mc_ungroup</code></td><td><code>mc_ungroup(signal)</code></td><td>Clear MC grouping and collection.</td></tr>
+</table>
+
+<p><b>Statistical Analysis:</b></p>
+
+<table>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+<tr><td><code>mc_stats</code></td><td><code>mc_stats(signal)</code></td><td>Cross-run mean, std, min, max per timepoint.</td></tr>
+<tr><td><code>mc_histogram</code></td><td><code>mc_histogram(measurement, bins=50, range=None)</code></td><td>Histogram of measurement across runs.</td></tr>
+<tr><td><code>mc_yield</code></td><td><code>mc_yield(signal, low, high, condition=None)</code></td><td>Yield percentage within spec limits.</td></tr>
+<tr><td><code>mc_worst</code></td><td><code>mc_worst(n=5, metric="max_abs_diff")</code></td><td>Top N worst runs by deviation.</td></tr>
+<tr><td><code>mc_sensitivity</code></td><td><code>mc_sensitivity(measurement)</code></td><td>Parameter ranking by Spearman correlation.</td></tr>
+<tr><td><code>mc_scatter</code></td><td><code>mc_scatter(measurement, param)</code></td><td>Scatter data (x=param values, y=measurements).</td></tr>
+</table>
+
+<p><b>Correlation Matrix:</b></p>
+
+<table>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+<tr><td><code>mc_correlation_load</code></td><td><code>mc_correlation_load(path)</code></td><td>Load correlation matrix from CSV.</td></tr>
+<tr><td><code>mc_correlation_show</code></td><td><code>mc_correlation_show()</code></td><td>Print current correlation matrix as text.</td></tr>
+<tr><td><code>mc_correlation_edit</code></td><td><code>mc_correlation_edit()</code></td><td>Open Correlation Matrix Editor dialog (GUI only).</td></tr>
+<tr><td><code>mc_generate</code></td><td><code>mc_generate(output_path, output_format="csv", runs=100, seed=None, nominals=None, sigmas=None)</code></td><td>Generate correlated parameter values to file.</td></tr>
+</table>
+
+<hr>
+
+<h2>Part 2 — Worked Tutorials</h2>
+
+<h3><a name="example-overview"></a>Example Overview</h3>
+
+<p>Three pre-computed example files live in <tt>docs/monte_carlo/examples/</tt>. Each demonstrates a different loading mode and set of analysis features:</p>
+
+<table>
+<tr><th>Example</th><th>File</th><th>Circuit</th><th>Runs</th><th>Loading Mode</th><th>Demonstrates</th></tr>
+<tr>
+  <td>RC Filter</td>
+  <td><tt>ngspice/rc_filter_mc.raw</tt> + <tt>rc_filter_params.csv</tt></td>
+  <td>RC low-pass (R=1k–100k, C=1n–100n), AC 100 Hz–1 MHz</td>
+  <td>21</td>
+  <td>Pattern (base: <tt>vout</tt>)</td>
+  <td>Loading, display, parameter annotation, sensitivity, scatter, yield, worst-case, API scripting</td>
+</tr>
+<tr>
+  <td>Ring Oscillator</td>
+  <td><tt>ngspice/MC_ring.raw</tt></td>
+  <td>25-stage CMOS ring oscillator, transient 0–100 ns</td>
+  <td>31</td>
+  <td>Pattern (base: <tt>vout</tt>)</td>
+  <td>Envelope display, cross-run statistics, histogram</td>
+</tr>
+<tr>
+  <td>Correlation Editor</td>
+  <td><tt>ngspice/mc_ring_circ.net</tt></td>
+  <td>BSIM3 NMOS/PMOS model definitions</td>
+  <td>—</td>
+  <td>—</td>
+  <td>Model parsing, correlation matrix editing, Cholesky-based parameter generation</td>
+</tr>
+<tr>
+  <td>LTspice LC Filter</td>
+  <td><tt>ltspice/MonteCarlo.raw</tt></td>
+  <td>LC bandpass filter, AC 300 kHz–10 MHz</td>
+  <td>21</td>
+  <td>Stepped</td>
+  <td>Stepped loading, auto-detected parameters</td>
+</tr>
+</table>
+
+<p><b>Prerequisites:</b> pqwave installed. No simulator required — all raw files are pre-computed.</p>
+
+<hr>
+
+<h3><a name="example-1-rc-low-pass-filter"></a>Example 1: RC Low-Pass Filter</h3>
+
 <p>This example demonstrates the full MC workflow from loading through sensitivity analysis. The circuit is a simple RC low-pass filter with AC analysis from 100 Hz to 1 MHz. R and C were varied independently across 21 runs, producing a range of cutoff frequencies.</p>
-<p><strong>Input:</strong>
-- Raw file: <code>docs/monte_carlo/examples/ngspice/rc_filter_mc.raw</code>
-- Companion CSV: <code>docs/monte_carlo/examples/ngspice/rc_filter_params.csv</code>
-- Circuit: V1 → R1 → out → C1 → GND
-- Analysis: AC dec 50, 100 Hz – 1 MHz
-- Runs: 21 (R × C combinations)</p>
-<h4 id="step-1-load-the-data">Step 1: Load the Data</h4>
+
+<p><b>Input:</b></p>
+<ul>
+  <li>Raw file: <tt>docs/monte_carlo/examples/ngspice/rc_filter_mc.raw</tt></li>
+  <li>Companion CSV: <tt>docs/monte_carlo/examples/ngspice/rc_filter_params.csv</tt></li>
+  <li>Circuit: V1 &rarr; R1 &rarr; out &rarr; C1 &rarr; GND</li>
+  <li>Analysis: AC dec 50, 100 Hz – 1 MHz</li>
+  <li>Runs: 21 (R &times; C combinations)</li>
+</ul>
+
+<h4>Step 1: Load the Data</h4>
+
 <ol>
-<li><strong>File &gt; Open Monte Carlo</strong> to open the MC configuration dialog.</li>
-<li>Select source type: <strong>Single file with named runs</strong>.</li>
-<li>Click <strong>Browse</strong> and select <code>docs/monte_carlo/examples/ngspice/rc_filter_mc.raw</code>.</li>
-<li>The dialog preview shows: <code>vout: 21 runs (vout0..vout20)</code>.</li>
-<li>Enter base name: <strong>vout</strong>.</li>
-<li>Click <strong>OK</strong>.</li>
+  <li><b>File &gt; Open Monte Carlo</b> to open the MC configuration dialog.</li>
+  <li>Select source type: <b>Single file with named runs</b>.</li>
+  <li>Click <b>Browse</b> and select <tt>rc_filter_mc.raw</tt>. The dialog preview shows: <tt>vout: 21 runs (vout0..vout20)</tt>.</li>
+  <li>Enter base name: <b>vout</b>.</li>
+  <li>Click <b>OK</b>.</li>
 </ol>
-<p><strong>Expected output:</strong> The MC Control Bar appears: "MC: 21 runs". A frequency response trace appears on the plot — this is vout0 (nominal run, R=10k, C=10n).</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-```python
-api.mc_load(
-    "docs/monte_carlo/examples/ngspice/rc_filter_mc.raw",
-    source_type="pattern",
-    grouping_pattern="vout"
-)</p>
-<h1 id="returns-status-ok-runs-21">Returns: {"status": "ok", "runs": 21}</h1>
-<p>```</p>
-</blockquote>
-<h4 id="step-2-explore-display-modes">Step 2: Explore Display Modes</h4>
+
+<p><b>Expected output:</b> MC Control Bar appears: "MC: 21 runs". A frequency response trace appears — this is vout0 (nominal run, R=10k, C=10n).</p>
+
+<p class="note">Or via API:<br>
+<code>api.mc_load("rc_filter_mc.raw", source_type="pattern", grouping_pattern="vout")</code><br>
+Returns: <tt>{"status": "ok", "runs": 21}</tt></p>
+
+<h4>Step 2: Explore Display Modes</h4>
+
 <ol>
-<li>In the MC Control Bar, switch the <strong>Display</strong> dropdown to <code>envelope</code>.</li>
-<li>Set <strong>σ</strong> to <code>3.0</code> (default).</li>
-<li>Observe the plot:</li>
-<li>The solid center line is run 0 (R=10k, C=10n, nominal).</li>
-<li>Three shaded bands show ±1σ, ±2σ, ±3σ around the cross-run mean.</li>
-<li>At 100 Hz: all runs are near gain ≈ 1.0 (passband — capacitor is open circuit).</li>
-<li>At 1 kHz: the envelope widens dramatically — some runs have already rolled off while others are still near unity gain. Mean gain ≈ 0.19, σ ≈ 0.34.</li>
-<li>At 10 kHz: most runs are in deep roll-off. Mean gain ≈ 0.10, σ ≈ 0.27.</li>
-<li>At 100 kHz: all runs are near 0 (stopband).</li>
-<li>Switch to <code>spaghetti</code> mode — 21 translucent traces show the full spread of frequency responses.</li>
-<li>Switch to <code>single</code> mode — only the nominal run is visible.</li>
-<li>Try the <strong>Run filter</strong>: enter <code>0, 5, 10, 15, 20</code> to show every 5th run. Enter <code>all</code> to restore.</li>
+  <li>In the MC Control Bar, switch <b>Display</b> to <tt>envelope</tt>.</li>
+  <li>Set <b>&sigma;</b> to <tt>3.0</tt> (default).</li>
+  <li>Observe the plot:
+    <ul>
+      <li>The solid center line is run 0 (R=10k, C=10n, nominal).</li>
+      <li>Three shaded bands show &plusmn;1&sigma;, &plusmn;2&sigma;, &plusmn;3&sigma; around the cross-run mean.</li>
+      <li>At 100 Hz: all runs near gain &asymp; 1.0 (passband).</li>
+      <li>At 1 kHz: the envelope widens — some runs have already rolled off. Mean gain &asymp; 0.19, &sigma; &asymp; 0.34.</li>
+      <li>At 10 kHz: most runs in deep roll-off. Mean gain &asymp; 0.10, &sigma; &asymp; 0.27.</li>
+      <li>At 100 kHz: all runs near 0 (stopband).</li>
+    </ul>
+  </li>
+  <li>Switch to <tt>spaghetti</tt> — 21 translucent traces show the full spread.</li>
+  <li>Switch to <tt>single</tt> — only the nominal run is visible.</li>
+  <li>Try the <b>Run filter</b>: enter <tt>0, 5, 10, 15, 20</tt> to show every 5th run. Enter <tt>all</tt> to restore.</li>
 </ol>
-<p><strong>Expected output:</strong> Envelope mode reveals that the transition band (~500 Hz to ~50 kHz) has the highest run-to-run variability. The passband and stopband have almost none.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-api.mc_style("envelope", sigma=3.0)
-api.mc_filter([0, 5, 10, 15, 20])
-api.mc_style("spaghetti")
+
+<p><b>Expected output:</b> Envelope mode reveals the transition band (~500 Hz to ~50 kHz) has the highest variability. The passband and stopband have almost none.</p>
+
+<p class="note">Or via API:<br>
+<code>api.mc_style("envelope", sigma=3.0)<br>
+api.mc_filter([0, 5, 10, 15, 20])<br>
+api.mc_style("spaghetti")<br>
 api.mc_filter("all")</code></p>
-</blockquote>
-<h4 id="step-3-annotate-parameters">Step 3: Annotate Parameters</h4>
-<p>The raw file contains run outputs but not the R and C values that produced them. The companion CSV <code>rc_filter_params.csv</code> lists them:</p>
-<p>| run | Rval (Ω) | Cval (F) |
-|-----|----------|----------|
-| 0 | 10000 | 1e-08 |
-| 1 | 1000 | 1e-08 |
-| 2 | 2200 | 1e-09 |
-| ... | ... | ... |
-| 20 | 10000 | 2.2e-08 |</p>
-<p>R ranges from 1 kΩ to 100 kΩ (two orders of magnitude). C ranges from 1 nF to 100 nF (two orders of magnitude).</p>
+
+<h4>Step 3: Annotate Parameters</h4>
+
+<p>The raw file contains run outputs but not the R and C values that produced them. The companion CSV lists them:</p>
+
+<table>
+<tr><th>run</th><th>Rval (&Omega;)</th><th>Cval (F)</th></tr>
+<tr><td>0</td><td>10000</td><td>1e-08</td></tr>
+<tr><td>1</td><td>1000</td><td>1e-08</td></tr>
+<tr><td>2</td><td>2200</td><td>1e-09</td></tr>
+<tr><td>...</td><td>...</td><td>...</td></tr>
+<tr><td>20</td><td>10000</td><td>2.2e-08</td></tr>
+</table>
+
+<p>R ranges from 1 k&Omega; to 100 k&Omega;. C ranges from 1 nF to 100 nF.</p>
+
 <ol>
-<li>Open the REPL (<strong>F6</strong>).</li>
-<li>Run the following commands to annotate each run with its parameter values:</li>
+  <li>Open the REPL (<b>F6</b>).</li>
+  <li>Run:</li>
 </ol>
-<p><code>python
-import csv
+
+<pre>import csv
 with open("docs/monte_carlo/examples/ngspice/rc_filter_params.csv") as f:
     runs = list(csv.DictReader(f))
 api.mc_param("Rval", [float(r["Rval"]) for r in runs])
 api.mc_param("Cval", [float(r["Cval"]) for r in runs])
-api.mc_info()</code></p>
-<ol>
-<li><code>mc_info()</code> now shows <code>'parameters': ['Rval', 'Cval']</code>.</li>
-</ol>
-<p><strong>Expected output:</strong> The MC collection is now parameter-annotated. Sensitivity and scatter analysis are unlocked.</p>
-<blockquote>
-<p>The unitvec-init workaround: ngspice loop simulations don't embed parameter values in the raw file. Companion CSVs bridge this gap. For <code>.step param</code> simulations (LTspice, QSPICE), parameters are auto-detected — skip this step.</p>
-</blockquote>
-<h4 id="step-4-sensitivity-analysis">Step 4: Sensitivity Analysis</h4>
+api.mc_info()</pre>
+
+<p><b>Expected output:</b> <tt>mc_info()</tt> now shows <tt>'parameters': ['Rval', 'Cval']</tt>. Sensitivity and scatter analysis are unlocked.</p>
+
+<p class="note">ngspice loop simulations don't embed parameter values in the raw file. Companion CSVs bridge this gap. For <tt>.step param</tt> simulations (LTspice, QSPICE), parameters are auto-detected — skip this step.</p>
+
+<h4>Step 4: Sensitivity Analysis</h4>
+
 <p>Which parameter matters more for the maximum output — R or C?</p>
+
 <ol>
-<li><strong>Analyze &gt; MC Sensitivity</strong>.</li>
-<li>Enter measurement: <code>max(v(out))</code>.</li>
-<li>Click <strong>OK</strong>.</li>
+  <li><b>Analyze &gt; MC Sensitivity</b>.</li>
+  <li>Enter measurement: <tt>max(v(out))</tt>.</li>
+  <li>Click <b>OK</b>.</li>
 </ol>
-<p><strong>Expected output (Spearman rank correlation):</strong></p>
-<p>| Parameter | r (correlation) | p-value | Interpretation |
-|-----------|----------------|---------|----------------|
-| Cval | −0.208 | 0.366 | Weak negative correlation — larger C reduces max output more |
-| Rval | −0.042 | 0.858 | Negligible correlation — R has almost no effect on max output |</p>
-<p>The maximum output is always ≈1.0 in the passband, so <code>max(v(out))</code> doesn't vary much between runs (range: 0.0000–1.0000). For a more informative sensitivity analysis, use a frequency-domain measurement. Try <code>mc_histogram</code> at a specific frequency or measure the −3 dB point.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-result = api.mc_sensitivity("max(v(out))")
-for entry in result["sensitivity"]:
-    print(f"  {entry['param']}: r={entry['r']:.3f}, p={entry['p']:.3f}")</code></p>
-</blockquote>
-<h4 id="step-5-scatter-plot">Step 5: Scatter Plot</h4>
-<p>Visualize the relationship between Rval and max output:</p>
+
+<p><b>Expected output (Spearman rank correlation):</b></p>
+
+<table>
+<tr><th>Parameter</th><th>r (correlation)</th><th>p-value</th><th>Interpretation</th></tr>
+<tr><td>Cval</td><td>&minus;0.208</td><td>0.366</td><td>Weak negative correlation — larger C reduces max output more</td></tr>
+<tr><td>Rval</td><td>&minus;0.042</td><td>0.858</td><td>Negligible correlation — R has almost no effect on max output</td></tr>
+</table>
+
+<p>The maximum output is always &asymp;1.0 in the passband, so <tt>max(v(out))</tt> doesn't vary much between runs (range: 0.0000–1.0000). For a more informative sensitivity analysis, try a frequency-domain measurement.</p>
+
+<p class="note">Or via API:<br>
+<code>result = api.mc_sensitivity("max(v(out))")<br>
+for entry in result["sensitivity"]:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;print(f"  {entry['param']}: r={entry['r']:.3f}, p={entry['p']:.3f}")</code></p>
+
+<h4>Step 5: Scatter Plot</h4>
+
 <ol>
-<li><strong>Analyze &gt; MC Scatter</strong>.</li>
-<li>Enter measurement: <code>max(v(out))</code>.</li>
-<li>Enter parameter: <code>Rval</code>.</li>
-<li>Click <strong>OK</strong>.</li>
+  <li><b>Analyze &gt; MC Scatter</b>.</li>
+  <li>Enter measurement: <tt>max(v(out))</tt>.</li>
+  <li>Enter parameter: <tt>Rval</tt>.</li>
+  <li>Click <b>OK</b>.</li>
 </ol>
-<p><strong>Expected output:</strong> A scatter plot with 21 points. Rval on x-axis (1 kΩ – 100 kΩ), max(v(out)) on y-axis (0.0–1.0). Most runs cluster near max=1.0 (good filters) with a few outliers near max=0.0 (runs where the cutoff is so low that even the passband is attenuated).</p>
-<p>Repeat with parameter <code>Cval</code> to see the C vs max output relationship. The scatter plot for Cval shows a similar pattern — only extreme C values (large C, low cutoff) drop the max output.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-api.mc_scatter("max(v(out))", "Rval")
-api.mc_scatter("max(v(out))", "Cval")</code></p>
-</blockquote>
-<h4 id="step-6-yield-analysis">Step 6: Yield Analysis</h4>
+
+<p><b>Expected output:</b> A scatter plot with 21 points. Rval on x-axis (1 k&Omega; – 100 k&Omega;), max(v(out)) on y-axis (0.0–1.0). Most runs cluster near max=1.0 with a few outliers near max=0.0. Repeat with parameter <tt>Cval</tt> to see a similar pattern.</p>
+
+<p class="note">Or via API: <code>api.mc_scatter("max(v(out))", "Rval")</code></p>
+
+<h4>Step 6: Yield Analysis</h4>
+
 <p>What fraction of runs have acceptable DC gain?</p>
+
 <ol>
-<li><strong>Analyze &gt; MC Yield</strong>.</li>
-<li>Enter signal: <code>v(out)</code>.</li>
-<li>Low limit: <code>0.99</code>, High limit: <code>1.01</code>.</li>
-<li>Leave condition blank (per-timepoint yield).</li>
-<li>Click <strong>OK</strong>.</li>
+  <li><b>Analyze &gt; MC Yield</b>.</li>
+  <li>Enter signal: <tt>v(out)</tt>.</li>
+  <li>Low limit: <tt>0.99</tt>, High limit: <tt>1.01</tt>.</li>
+  <li>Leave condition blank (per-timepoint yield).</li>
+  <li>Click <b>OK</b>.</li>
 </ol>
-<p><strong>Expected output:</strong> Yield ≈ 14%. Only 3 of 21 runs maintain DC gain above 0.99 across all frequencies. Most runs have rolled off significantly even at 100 Hz because their RC time constant is large.</p>
-<p>Try with a measurement condition: set condition to <code>mean</code>. This computes the mean gain for each run first, then checks if it's within [0.99, 1.01]. The result will be even lower — most runs have a mean gain far below 0.99.</p>
-<p>The −3 dB cutoff frequency varies from 100 Hz to 50.1 kHz across runs (mean: 3.3 kHz). Only 5% of runs have their −3 dB point between 1–10 kHz.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-y = api.mc_yield("v(out)", low=0.99, high=1.01)
-print(f"Yield: {y['yield_pct']:.0f}%")</code></p>
-</blockquote>
-<h4 id="step-7-worst-case-identification">Step 7: Worst-Case Identification</h4>
+
+<p><b>Expected output:</b> Yield &asymp; 14%. Only 3 of 21 runs maintain DC gain above 0.99 across all frequencies. Most runs have rolled off significantly even at 100 Hz.</p>
+
+<p>The &minus;3 dB cutoff frequency varies from 100 Hz to 50.1 kHz across runs (mean: 3.3 kHz). Only 5% of runs have their &minus;3 dB point between 1–10 kHz.</p>
+
+<p class="note">Or via API: <code>y = api.mc_yield("v(out)", low=0.99, high=1.01)</code></p>
+
+<h4>Step 7: Worst-Case Identification</h4>
+
 <p>Which runs deviate most from the nominal?</p>
+
 <ol>
-<li><strong>Analyze &gt; Worst Cases</strong>.</li>
-<li>N = <code>5</code>, Metric = <code>max_abs_diff</code>.</li>
-<li>Click <strong>OK</strong>.</li>
+  <li><b>Analyze &gt; Worst Cases</b>.</li>
+  <li>N = <tt>5</tt>, Metric = <tt>max_abs_diff</tt>.</li>
+  <li>Click <b>OK</b>.</li>
 </ol>
-<p><strong>Expected output:</strong></p>
-<p>| Rank | Run | Deviation |
-|------|-----|-----------|
-| 1 | 20 | 0.9980 |
-| 2 | 19 | 0.9980 |
-| 3 | 17 | 0.9980 |
-| 4 | 16 | 0.9980 |
-| 5 | 14 | 0.9978 |</p>
-<p>Runs 14–20 deviate most from the nominal — their frequency responses differ substantially due to different R/C combinations (some shift the cutoff higher, some lower). The <code>max_abs_diff</code> metric captures any deviation regardless of direction.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-worst = api.mc_worst(n=5, metric="max_abs_diff")
-for w in worst["worst"]:
-    print(f"  Run {w['run_index']}: deviation={w['deviation']:.4f}")</code></p>
-</blockquote>
-<hr />
-<h3 id="example-2-ring-oscillator">Example 2: Ring Oscillator</h3>
-<p>This example demonstrates MC analysis on transient (time-domain) data. The circuit is a 25-stage CMOS ring oscillator — a chain of inverters that produces a self-sustaining oscillation. BSIM3 model parameters (vth0, u0, tox, lint, wint for both NMOS and PMOS — 10 parameters total) were varied with Gaussian distributions across 31 runs.</p>
-<p><strong>Input:</strong>
-- Raw file: <code>docs/monte_carlo/examples/ngspice/MC_ring.raw</code>
-- Circuit: 25-stage ring oscillator, BSIM3 models, 3.3 V supply
-- Analysis: transient, 0–100 ns, 6668 time points
-- Runs: 31 (0 = nominal BSIM3 parameters, 1–30 = perturbed)</p>
-<h4 id="step-1-load-the-data_1">Step 1: Load the Data</h4>
-<ol>
-<li><strong>File &gt; Open Monte Carlo</strong>.</li>
-<li>Select source type: <strong>Single file with named runs</strong>.</li>
-<li>Browse to <code>docs/monte_carlo/examples/ngspice/MC_ring.raw</code>.</li>
-<li>Preview shows: <code>vout: 31 runs (vout0..vout30)</code>.</li>
-<li>Enter base name: <strong>vout</strong>.</li>
-<li>Click <strong>OK</strong>.</li>
-</ol>
-<p><strong>Expected output:</strong> MC Control Bar: "MC: 31 runs". The plot shows a 3.3 V square-wave-like oscillation at the buffer output.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-api.mc_load(
-    "docs/monte_carlo/examples/ngspice/MC_ring.raw",
-    source_type="pattern",
-    grouping_pattern="vout"
-)</code></p>
-</blockquote>
-<h4 id="step-2-envelope-display">Step 2: Envelope Display</h4>
-<ol>
-<li>Switch display mode to <strong>envelope</strong>.</li>
-<li>Set σ to <strong>3.0</strong>.</li>
-<li>Zoom in on the oscillation: the envelope bands show how much the waveform varies at each timepoint.</li>
-<li>At mid-simulation (~50 ns): mean voltage ≈ 2.12 V, σ ≈ 1.12 V.</li>
-<li>The envelope is widest during transitions (0→3.3 V and 3.3→0 V) — this is where process variation has the largest timing impact.</li>
-<li>Flat regions (steady 0 V or 3.3 V) have near-zero σ.</li>
-</ol>
-<p><strong>Expected output:</strong> The envelope bands reveal that process variation primarily affects <em>timing</em> (jitter), not <em>amplitude</em>. The voltage levels are rail-to-rail regardless of parameter perturbations, but the exact moment of each transition shifts run-to-run.</p>
-<blockquote>
-<p>The ring oscillator raw file has no embedded parameter values (the BSIM3 variations were applied via <code>altermod</code> in an ngspice loop). Parameter annotation is possible if you record the parameter values from the simulation log, but is not demonstrated here. See Example 1 for the full parameter-aware workflow.</p>
-</blockquote>
-<h4 id="step-3-cross-run-statistics">Step 3: Cross-Run Statistics</h4>
-<ol>
-<li><strong>Analyze &gt; MC Statistics</strong>.</li>
-<li>Enter signal: <code>v(out)</code>.</li>
-<li>Click <strong>OK</strong>.</li>
-</ol>
-<p><strong>Expected output:</strong> Four new traces appear: mean, std, min, max of v(out) across all 31 runs at each timepoint. The std trace peaks during signal transitions, confirming that timing variation dominates.</p>
-<h4 id="step-4-histogram-of-oscillation-amplitude">Step 4: Histogram of Oscillation Amplitude</h4>
-<ol>
-<li><strong>Analyze &gt; MC Histogram</strong>.</li>
-<li>Enter measurement: <code>pk_pk(v(out))</code> (peak-to-peak amplitude).</li>
-<li>Bins: <code>8</code>.</li>
-<li>Click <strong>OK</strong>.</li>
-</ol>
-<p><strong>Expected output (histogram of pk-pk amplitude across 31 runs):</strong></p>
-<p>| Bin (V) | Runs | Distribution |
-|----------|------|-------------|
-| 3.098–3.105 | 1 | █ |
-| 3.105–3.112 | 2 | ██ |
-| 3.112–3.119 | 7 | ███████ |
-| 3.119–3.126 | 5 | █████ |
-| 3.126–3.133 | 4 | ████ |
-| 3.133–3.139 | 8 | ████████ |
-| 3.139–3.146 | 3 | ███ |
-| 3.146–3.153 | 1 | █ |</p>
-<p>Amplitude ranges from 3.098 V to 3.153 V (mean: 3.126 V). The distribution is roughly bell-shaped, centered around 3.12–3.14 V. This tight spread (±0.9% of mean) indicates the oscillator amplitude is robust to process variation.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-api.mc_stats("v(out)")
-result = api.mc_histogram("pk_pk(v(out))", bins=8)</code></p>
-</blockquote>
-<hr />
-<h3 id="example-3-correlation-matrix-editor">Example 3: Correlation Matrix Editor</h3>
-<p>This example demonstrates the correlation tools using the ring oscillator's BSIM3 model file. You will parse a model file, edit a correlation matrix, and generate a correlated parameter set for a new simulation.</p>
-<p><strong>Input:</strong>
-- Model file: <code>docs/monte_carlo/examples/ngspice/mc_ring_circ.net</code>
-- Contains: NMOS and PMOS BSIM3 model definitions with <code>agauss()</code> distribution functions</p>
-<h4 id="step-1-open-the-correlation-editor">Step 1: Open the Correlation Editor</h4>
-<ol>
-<li><strong>Analyze &gt; MC Correlation</strong> to open the Correlation Matrix Editor.</li>
-<li>In <strong>Step 1: Load Model File</strong>, click <strong>Browse</strong> and select <code>docs/monte_carlo/examples/ngspice/mc_ring_circ.net</code>.</li>
-<li>Click <strong>Parse</strong>.</li>
-</ol>
-<p><strong>Expected output:</strong> The status label shows "Parsed 6 parameters from 2 model(s)". The matrix table populates with 6 rows and columns:</p>
-<p>| Parameter | Description | Nominal |
-|-----------|-------------|---------|
-| n1_version | NMOS BSIM3 version | 3.3 |
-| n1_Level | NMOS BSIM3 level | 8.0 |
-| n1_Vth0 | NMOS threshold voltage | 0.6 V |
-| p1_version | PMOS BSIM3 version | 3.3 |
-| p1_Level | PMOS BSIM3 level | 8.0 |
-| p1_Vth0 | PMOS threshold voltage | −0.6 V |</p>
-<p>The diagonal cells are fixed at 1.0 (self-correlation). Upper-triangle cells are blank (0.0 = uncorrelated by default).</p>
-<blockquote>
-<p>The <code>n1_version</code> and <code>n1_Level</code> (and their PMOS counterparts) are constants in the model file — they don't have <code>agauss()</code> wrappers and won't vary. The meaningful parameters for correlation are <code>n1_Vth0</code> and <code>p1_Vth0</code>.</p>
-</blockquote>
-<h4 id="step-2-set-up-correlations">Step 2: Set Up Correlations</h4>
-<p>Suppose you want the NMOS and PMOS threshold voltages to be <strong>positively correlated</strong> — when NMOS Vth0 shifts higher, PMOS Vth0 shifts correspondingly. This models a global process skew.</p>
-<ol>
-<li>Find the cell at row <code>n1_Vth0</code>, column <code>p1_Vth0</code> (upper triangle).</li>
-<li>Enter <strong>0.7</strong> (moderate positive correlation).</li>
-<li>Observe: the mirror cell at <code>p1_Vth0</code> × <code>n1_Vth0</code> (lower triangle) auto-fills with 0.7.</li>
-</ol>
-<p>The matrix now has one off-diagonal correlation:</p>
-<p>|   | n1_Vth0 | p1_Vth0 |
-|---|---------|---------|
-| <strong>n1_Vth0</strong> | 1.0 | 0.7 |
-| <strong>p1_Vth0</strong> | 0.7 | 1.0 |</p>
-<blockquote>
-<p><strong>Import/Export:</strong> Click <strong>Export Matrix (CSV)</strong> to save this matrix for reuse. Click <strong>Load Matrix (CSV)</strong> to import a pre-computed correlation matrix from another project.</p>
-</blockquote>
-<h4 id="step-3-generate-correlated-output">Step 3: Generate Correlated Output</h4>
-<ol>
-<li>In <strong>Step 3: Generate Output</strong>:</li>
-<li><strong>MC Runs:</strong> <code>30</code></li>
-<li><strong>Seed:</strong> <code>12345</code></li>
-<li><strong>Format:</strong> <code>csv — simulator-agnostic (recommended for LTspice/QSPICE)</code></li>
-<li><strong>Output:</strong> Browse to a convenient location, e.g. <code>mc_correlated.csv</code></li>
-<li>Click <strong>Generate</strong>.</li>
-<li>Review the preview dialog — it shows the first 5 rows of generated values.</li>
-<li>Click <strong>OK</strong> to write the file.</li>
-</ol>
-<p><strong>Expected output:</strong> A CSV file with 30 rows (+ header) and columns <code>run, n1_Vth0, p1_Vth0, n1_version, n1_Level, p1_version, p1_Level</code>. The Vth0 columns vary with the specified correlation (r ≈ 0.7 across runs), while the version/Level columns stay at their nominal values.</p>
-<h4 id="step-4-try-other-formats">Step 4: Try Other Formats</h4>
-<p>Experiment with the other output formats:</p>
-<p>| Format | Use case |
-|--------|----------|
-| <strong>ngspice .control</strong> | Generates a complete ngspice script with <code>altermod</code> commands and a simulation loop. Requires model name annotations (these are auto-extracted from the parsed model file). |
-| <strong>.param snippet</strong> | Per-run <code>.param</code> lines for inclusion in a SPICE netlist. |
-| <strong>TSV</strong> | Tab-separated CSV variant for tools that expect tabs. |</p>
-<p>For the ngspice format, enter a simulation command like <code>tran 15p 200n 0</code> to include in the generated control script.</p>
-<blockquote>
-<p><strong>Under the hood:</strong> The tool computes the Cholesky decomposition <em>L</em> of the correlation matrix <em>R</em> (where <em>R = L × L^T</em>). It generates independent standard normals <em>Z</em>, multiplies by <em>L^T</em> to produce correlated normals <em>Zc</em>, then scales and shifts: <em>value = nominal + sigma × Zc</em>. Sigma defaults to 10% of |nominal| for each parameter.</p>
-<p><strong>Or via API:</strong>
-<code>python
-api.mc_correlation_load("correlation.csv")
-api.mc_generate("mc_correlated.csv", output_format="csv", runs=30, seed=12345)
-api.mc_correlation_show()</code></p>
-</blockquote>
-<hr />
-<h3 id="example-4-ltspice-lc-bandpass-filter">Example 4: LTspice LC Bandpass Filter</h3>
-<p>This example demonstrates <strong>stepped loading</strong> — the simplest MC loading mode. The raw file was produced by an LTspice simulation with <code>.step param X 0 20 1</code>.</p>
-<p><strong>Input:</strong>
-- Raw file: <code>docs/monte_carlo/examples/ltspice/MonteCarlo.raw</code>
-- Circuit: LC bandpass filter (L1, L2, L3, C1, C2, C3) with <code>mc(val, tol)</code> random component variation
-- Analysis: AC oct 100, 300 kHz – 10 MHz
-- Steps: 21</p>
-<h4 id="step-1-load-as-stepped-file">Step 1: Load as Stepped File</h4>
-<ol>
-<li><strong>File &gt; Open Monte Carlo</strong>.</li>
-<li>Select source type: <strong>Single stepped file</strong>.</li>
-<li>Browse to <code>docs/monte_carlo/examples/ltspice/MonteCarlo.raw</code>.</li>
-<li>Click <strong>OK</strong>.</li>
-</ol>
-<p><strong>Expected output:</strong> MC Control Bar: "MC: 21 runs". Parameter <code>x</code> is auto-detected (values: 0, 1, 2, ..., 20).</p>
-<blockquote>
-<p>The parameter <code>x</code> is a dummy run counter — not a real circuit parameter. LTspice uses <code>.step param X 0 20 1</code> to cycle through Monte Carlo iterations because <code>.step</code> is the only way to produce multi-run output. The actual component variations happen inside <code>mc(val, tol)</code> function calls which are not recorded as parameters. Real stepped simulations (e.g., <code>.step param R 1k 10k 500</code>) embed meaningful parameter names that pqwave auto-detects.</p>
-</blockquote>
-<h4 id="step-2-when-to-use-each-loading-mode">Step 2: When to Use Each Loading Mode</h4>
-<p>This example highlights when each loading mode is appropriate:</p>
+
+<p><b>Expected output:</b></p>
+
+<table>
+<tr><th>Rank</th><th>Run</th><th>Deviation</th></tr>
+<tr><td>1</td><td>20</td><td>0.9980</td></tr>
+<tr><td>2</td><td>19</td><td>0.9980</td></tr>
+<tr><td>3</td><td>17</td><td>0.9980</td></tr>
+<tr><td>4</td><td>16</td><td>0.9980</td></tr>
+<tr><td>5</td><td>14</td><td>0.9978</td></tr>
+</table>
+
+<p>Runs 14–20 deviate most from the nominal — their frequency responses differ substantially due to different R/C combinations (some shift the cutoff higher, some lower). The <tt>max_abs_diff</tt> metric captures any deviation regardless of direction.</p>
+
+<p class="note">Or via API: <code>worst = api.mc_worst(n=5, metric="max_abs_diff")</code></p>
+
+<hr>
+
+<h3><a name="example-2-ring-oscillator"></a>Example 2: Ring Oscillator</h3>
+
+<p>This example demonstrates MC analysis on transient (time-domain) data. The circuit is a 25-stage CMOS ring oscillator. BSIM3 model parameters (vth0, u0, tox, lint, wint for both NMOS and PMOS — 10 parameters total) were varied with Gaussian distributions across 31 runs.</p>
+
+<p><b>Input:</b></p>
 <ul>
-<li><strong>Stepped loading</strong> (used here): Best for <code>.step param</code> simulations from LTspice and QSPICE. Parameters and run count are auto-detected — no manual configuration.</li>
-<li><strong>Pattern loading</strong>: Best for ngspice <code>.control</code> loop simulations where outputs are named <code>vout0..voutN</code>. LTspice raw files use a different internal structure and won't detect run groups in pattern mode.</li>
-<li><strong>Multi-file loading</strong>: Best when each run is saved to a separate raw file (e.g., batch simulations).</li>
+  <li>Raw file: <tt>docs/monte_carlo/examples/ngspice/MC_ring.raw</tt></li>
+  <li>Circuit: 25-stage ring oscillator, BSIM3 models, 3.3 V supply</li>
+  <li>Analysis: transient, 0–100 ns, 6668 time points</li>
+  <li>Runs: 31 (0 = nominal BSIM3 parameters, 1–30 = perturbed)</li>
 </ul>
-<h4 id="step-3-explore">Step 3: Explore</h4>
+
+<h4>Step 1: Load the Data</h4>
+
 <ol>
-<li>Switch display to <strong>envelope</strong> mode (σ=3.0).</li>
-<li>Observe the bandpass response variation across 21 runs.</li>
-<li>Run <strong>Analyze &gt; MC Statistics</strong> to see the per-frequency mean and std.</li>
+  <li><b>File &gt; Open Monte Carlo</b>.</li>
+  <li>Select source type: <b>Single file with named runs</b>.</li>
+  <li>Browse to <tt>MC_ring.raw</tt>. Preview shows: <tt>vout: 31 runs (vout0..vout30)</tt>.</li>
+  <li>Enter base name: <b>vout</b>.</li>
+  <li>Click <b>OK</b>.</li>
 </ol>
-<p><strong>Key takeaway:</strong> Stepped loading is the preferred mode for LTspice and QSPICE files — it auto-detects both the run count and parameter names without manual configuration.</p>
-<blockquote>
-<p><strong>Or via API:</strong>
-<code>python
-api.mc_load(
-    "docs/monte_carlo/examples/ltspice/MonteCarlo.raw",
-    source_type="stepped"
-)
-api.mc_style("envelope", sigma=3.0)
-api.mc_stats("v(out)")</code></p>
-</blockquote>
-<hr />
-<h3 id="standalone-scripting-example">Standalone Scripting Example</h3>
-<p>This complete script loads the RC filter data, annotates parameters, and runs a full sensitivity + yield analysis — all copy-paste runnable:</p>
-<p>```python
-"""Complete MC analysis of the RC filter example — headless/scripting mode."""
+
+<p><b>Expected output:</b> MC Control Bar: "MC: 31 runs". The plot shows a 3.3 V square-wave-like oscillation at the buffer output.</p>
+
+<p class="note">Or via API: <code>api.mc_load("MC_ring.raw", source_type="pattern", grouping_pattern="vout")</code></p>
+
+<h4>Step 2: Envelope Display</h4>
+
+<ol>
+  <li>Switch display mode to <b>envelope</b>.</li>
+  <li>Set &sigma; to <b>3.0</b>.</li>
+  <li>Zoom in on the oscillation:
+    <ul>
+      <li>At mid-simulation (~50 ns): mean voltage &asymp; 2.12 V, &sigma; &asymp; 1.12 V.</li>
+      <li>The envelope is widest during transitions (0&rarr;3.3 V and 3.3&rarr;0 V) — this is where process variation has the largest timing impact.</li>
+      <li>Flat regions (steady 0 V or 3.3 V) have near-zero &sigma;.</li>
+    </ul>
+  </li>
+</ol>
+
+<p><b>Expected output:</b> The envelope bands reveal that process variation primarily affects <i>timing</i> (jitter), not <i>amplitude</i>. The voltage levels are rail-to-rail regardless of parameter perturbations, but the exact moment of each transition shifts run-to-run.</p>
+
+<p class="note">The ring oscillator raw file has no embedded parameter values (BSIM3 variations were applied via <tt>altermod</tt> in an ngspice loop). See Example 1 for the full parameter-aware workflow.</p>
+
+<h4>Step 3: Cross-Run Statistics</h4>
+
+<ol>
+  <li><b>Analyze &gt; MC Statistics</b>.</li>
+  <li>Enter signal: <tt>v(out)</tt>.</li>
+  <li>Click <b>OK</b>.</li>
+</ol>
+
+<p><b>Expected output:</b> Four new traces appear: mean, std, min, max of v(out) across all 31 runs at each timepoint. The std trace peaks during signal transitions, confirming that timing variation dominates.</p>
+
+<h4>Step 4: Histogram of Oscillation Amplitude</h4>
+
+<ol>
+  <li><b>Analyze &gt; MC Histogram</b>.</li>
+  <li>Enter measurement: <tt>pk_pk(v(out))</tt> (peak-to-peak amplitude).</li>
+  <li>Bins: <tt>8</tt>.</li>
+  <li>Click <b>OK</b>.</li>
+</ol>
+
+<p><b>Expected output (histogram of pk-pk amplitude across 31 runs):</b></p>
+
+<table>
+<tr><th>Bin (V)</th><th>Runs</th><th>Distribution</th></tr>
+<tr><td>3.098–3.105</td><td>1</td><td>&#x2588;</td></tr>
+<tr><td>3.105–3.112</td><td>2</td><td>&#x2588;&#x2588;</td></tr>
+<tr><td>3.112–3.119</td><td>7</td><td>&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;</td></tr>
+<tr><td>3.119–3.126</td><td>5</td><td>&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;</td></tr>
+<tr><td>3.126–3.133</td><td>4</td><td>&#x2588;&#x2588;&#x2588;&#x2588;</td></tr>
+<tr><td>3.133–3.139</td><td>8</td><td>&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;</td></tr>
+<tr><td>3.139–3.146</td><td>3</td><td>&#x2588;&#x2588;&#x2588;</td></tr>
+<tr><td>3.146–3.153</td><td>1</td><td>&#x2588;</td></tr>
+</table>
+
+<p>Amplitude ranges from 3.098 V to 3.153 V (mean: 3.126 V). The distribution is roughly bell-shaped, centered around 3.12–3.14 V. This tight spread (&plusmn;0.9% of mean) indicates the oscillator amplitude is robust to process variation.</p>
+
+<p class="note">Or via API: <code>api.mc_stats("v(out)")</code> / <code>api.mc_histogram("pk_pk(v(out))", bins=8)</code></p>
+
+<hr>
+
+<h3><a name="example-3-correlation-matrix-editor"></a>Example 3: Correlation Matrix Editor</h3>
+
+<p>This example demonstrates the correlation tools using the ring oscillator's BSIM3 model file. You will parse a model file, edit a correlation matrix, and generate a correlated parameter set for a new simulation.</p>
+
+<p><b>Input:</b></p>
+<ul>
+  <li>Model file: <tt>docs/monte_carlo/examples/ngspice/mc_ring_circ.net</tt></li>
+  <li>Contains: NMOS and PMOS BSIM3 model definitions with <tt>agauss()</tt> distribution functions</li>
+</ul>
+
+<h4>Step 1: Open the Correlation Editor</h4>
+
+<ol>
+  <li><b>Analyze &gt; MC Correlation</b> to open the Correlation Matrix Editor.</li>
+  <li>In <b>Step 1: Load Model File</b>, click <b>Browse</b> and select <tt>mc_ring_circ.net</tt>.</li>
+  <li>Click <b>Parse</b>.</li>
+</ol>
+
+<p><b>Expected output:</b> Status shows "Parsed 6 parameters from 2 model(s)". The matrix table populates:</p>
+
+<table>
+<tr><th>Parameter</th><th>Description</th><th>Nominal</th></tr>
+<tr><td>n1_version</td><td>NMOS BSIM3 version</td><td>3.3</td></tr>
+<tr><td>n1_Level</td><td>NMOS BSIM3 level</td><td>8.0</td></tr>
+<tr><td>n1_Vth0</td><td>NMOS threshold voltage</td><td>0.6 V</td></tr>
+<tr><td>p1_version</td><td>PMOS BSIM3 version</td><td>3.3</td></tr>
+<tr><td>p1_Level</td><td>PMOS BSIM3 level</td><td>8.0</td></tr>
+<tr><td>p1_Vth0</td><td>PMOS threshold voltage</td><td>&minus;0.6 V</td></tr>
+</table>
+
+<p>The diagonal cells are fixed at 1.0. Upper-triangle cells default to 0.0 (uncorrelated).</p>
+
+<p class="note"><tt>n1_version</tt> and <tt>n1_Level</tt> (and PMOS counterparts) are constants — they lack <tt>agauss()</tt> wrappers and won't vary. The meaningful parameters are <tt>n1_Vth0</tt> and <tt>p1_Vth0</tt>.</p>
+
+<h4>Step 2: Set Up Correlations</h4>
+
+<p>Model a global process skew by positively correlating NMOS and PMOS threshold voltages:</p>
+
+<ol>
+  <li>Find the cell at row <tt>n1_Vth0</tt>, column <tt>p1_Vth0</tt> (upper triangle).</li>
+  <li>Enter <b>0.7</b>.</li>
+  <li>The mirror cell auto-fills with 0.7.</li>
+</ol>
+
+<p>The correlation sub-matrix:</p>
+
+<table>
+<tr><th></th><th>n1_Vth0</th><th>p1_Vth0</th></tr>
+<tr><td><b>n1_Vth0</b></td><td>1.0</td><td>0.7</td></tr>
+<tr><td><b>p1_Vth0</b></td><td>0.7</td><td>1.0</td></tr>
+</table>
+
+<p>Use <b>Export Matrix (CSV)</b> to save for reuse, or <b>Load Matrix (CSV)</b> to import.</p>
+
+<h4>Step 3: Generate Correlated Output</h4>
+
+<ol>
+  <li>In Step 3: <b>MC Runs:</b> <tt>30</tt>, <b>Seed:</b> <tt>12345</tt>, <b>Format:</b> <tt>csv — simulator-agnostic</tt>, <b>Output:</b> choose a path.</li>
+  <li>Click <b>Generate</b>.</li>
+  <li>Review the preview, click <b>OK</b>.</li>
+</ol>
+
+<p><b>Expected output:</b> CSV with 30 rows and columns <tt>run, n1_Vth0, p1_Vth0, ...</tt>. Vth0 columns vary with r &asymp; 0.7; constant columns stay at nominal.</p>
+
+<h4>Step 4: Try Other Formats</h4>
+
+<table>
+<tr><th>Format</th><th>Use case</th></tr>
+<tr><td><b>ngspice .control</b></td><td>Complete script with <tt>altermod</tt> and simulation loop.</td></tr>
+<tr><td><b>.param snippet</b></td><td>Per-run <tt>.param</tt> lines for SPICE netlist inclusion.</td></tr>
+<tr><td><b>TSV</b></td><td>Tab-separated CSV variant.</td></tr>
+</table>
+
+<p>For ngspice format, add a simulation command like <tt>tran 15p 200n 0</tt>.</p>
+
+<p><b>Under the hood:</b> Cholesky decomposition <i>R = L &times; L<sup>T</sup></i>, then correlated normals <i>Zc = Z &times; L<sup>T</sup></i>, then <i>value = nominal + sigma &times; Zc</i>. Sigma defaults to 10% of |nominal|.</p>
+
+<p class="note">Or via API: <code>api.mc_correlation_load("correlation.csv")</code> / <code>api.mc_generate("out.csv", runs=30, seed=12345)</code></p>
+
+<hr>
+
+<h3><a name="example-4-ltspice-lc-bandpass-filter"></a>Example 4: LTspice LC Bandpass Filter</h3>
+
+<p>This example demonstrates <b>stepped loading</b> — the simplest MC loading mode. The raw file was produced by an LTspice simulation with <tt>.step param X 0 20 1</tt>.</p>
+
+<p><b>Input:</b></p>
+<ul>
+  <li>Raw file: <tt>docs/monte_carlo/examples/ltspice/MonteCarlo.raw</tt></li>
+  <li>Circuit: LC bandpass filter with <tt>mc(val, tol)</tt> random component variation</li>
+  <li>Analysis: AC oct 100, 300 kHz – 10 MHz</li>
+  <li>Steps: 21</li>
+</ul>
+
+<h4>Step 1: Load as Stepped File</h4>
+
+<ol>
+  <li><b>File &gt; Open Monte Carlo</b>.</li>
+  <li>Select source type: <b>Single stepped file</b>.</li>
+  <li>Browse to <tt>MonteCarlo.raw</tt>.</li>
+  <li>Click <b>OK</b>.</li>
+</ol>
+
+<p><b>Expected output:</b> MC Control Bar: "MC: 21 runs". Parameter <tt>x</tt> auto-detected (values: 0..20).</p>
+
+<p class="note">The parameter <tt>x</tt> is a dummy run counter. LTspice uses <tt>.step param X 0 20 1</tt> to cycle Monte Carlo iterations — actual component variations inside <tt>mc(val, tol)</tt> are not recorded. Real stepped simulations (e.g., <tt>.step param R 1k 10k 500</tt>) embed meaningful parameters that pqwave auto-detects.</p>
+
+<h4>Step 2: When to Use Each Loading Mode</h4>
+
+<table>
+<tr><th>Mode</th><th>Best for</th></tr>
+<tr><td><b>Stepped loading</b></td><td><tt>.step param</tt> simulations from LTspice and QSPICE. Auto-detected parameters and run count.</td></tr>
+<tr><td><b>Pattern loading</b></td><td>ngspice <tt>.control</tt> loop simulations with outputs named <tt>vout0..voutN</tt>.</td></tr>
+<tr><td><b>Multi-file loading</b></td><td>Each run saved to a separate raw file (batch simulations).</td></tr>
+</table>
+
+<h4>Step 3: Explore</h4>
+
+<ol>
+  <li>Switch to <b>envelope</b> mode (&sigma;=3.0). Observe the bandpass variation.</li>
+  <li>Run <b>Analyze &gt; MC Statistics</b> to see per-frequency mean and std.</li>
+</ol>
+
+<p class="note">Or via API: <code>api.mc_load("MonteCarlo.raw", source_type="stepped")</code></p>
+
+<hr>
+
+<h3><a name="standalone-scripting-example"></a>Standalone Scripting Example</h3>
+
+<p>Complete script loading the RC filter data, annotating parameters, and running sensitivity + yield analysis:</p>
+
+<pre>"""Complete MC analysis of the RC filter example — headless/scripting mode."""
 from pqwave.session.api import SessionAPI
-import csv</p>
-<p>api = SessionAPI()</p>
-<h1 id="load">── Load ────────────────────────────────────────────</h1>
-<p>print("Loading RC filter MC data...")
+import csv
+
+api = SessionAPI()
+
+# ── Load ────────────────────────────────────────────
+print("Loading RC filter MC data...")
 result = api.mc_load(
     "docs/monte_carlo/examples/ngspice/rc_filter_mc.raw",
     source_type="pattern",
     grouping_pattern="vout"
 )
-print(f"  Loaded {result['runs']} runs")</p>
-<h1 id="annotate-parameters">── Annotate Parameters ─────────────────────────────</h1>
-<p>with open("docs/monte_carlo/examples/ngspice/rc_filter_params.csv") as f:
-    runs = list(csv.DictReader(f))</p>
-<p>api.mc_param("Rval", [float(r["Rval"]) for r in runs])
-api.mc_param("Cval", [float(r["Cval"]) for r in runs])</p>
-<p>info = api.mc_info()
+print(f"  Loaded {result['runs']} runs")
+
+# ── Annotate Parameters ─────────────────────────────
+with open("docs/monte_carlo/examples/ngspice/rc_filter_params.csv") as f:
+    runs = list(csv.DictReader(f))
+
+api.mc_param("Rval", [float(r["Rval"]) for r in runs])
+api.mc_param("Cval", [float(r["Cval"]) for r in runs])
+
+info = api.mc_info()
 print(f"  Parameters: {info['parameters']}")
-print(f"  Display mode: {info['display_mode']}")</p>
-<h1 id="sensitivity">── Sensitivity ─────────────────────────────────────</h1>
-<p>print("\nSensitivity: max(v(out)) vs parameters...")
+print(f"  Display mode: {info['display_mode']}")
+
+# ── Sensitivity ─────────────────────────────────────
+print("\nSensitivity: max(v(out)) vs parameters...")
 result = api.mc_sensitivity("max(v(out))")
 for entry in result["sensitivity"]:
-    direction = "↑" if entry["r"] &gt; 0 else "↓"
-    print(f"  {entry['param']}: r={entry['r']:+.3f} {direction}  p={entry['p']:.3f}")</p>
-<h1 id="yield">── Yield ───────────────────────────────────────────</h1>
-<p>y = api.mc_yield("v(out)", low=0.99, high=1.01)
-print(f"\nYield (DC gain in [0.99, 1.01]): {y['yield_pct']:.0f}%")</p>
-<h1 id="worst-cases">── Worst Cases ─────────────────────────────────────</h1>
-<p>print("\nWorst 5 runs (max_abs_diff from nominal):")
+    d = "+" if entry["r"] > 0 else "-"
+    print(f"  {entry['param']}: r={entry['r']:+.3f} {d}  p={entry['p']:.3f}")
+
+# ── Yield ───────────────────────────────────────────
+y = api.mc_yield("v(out)", low=0.99, high=1.01)
+print(f"\nYield (DC gain in [0.99, 1.01]): {y['yield_pct']:.0f}%")
+
+# ── Worst Cases ─────────────────────────────────────
+print("\nWorst 5 runs (max_abs_diff from nominal):")
 worst = api.mc_worst(n=5)
 for w in worst["worst"]:
-    print(f"  Run {w['run_index']:&gt;2}: deviation = {w['deviation']:.4f}")</p>
-<h1 id="cross-run-stats">── Cross-Run Stats ─────────────────────────────────</h1>
-<p>stats = api.mc_stats("v(out)")
+    print(f"  Run {w['run_index']:>2}: deviation = {w['deviation']:.4f}")
+
+# ── Cross-Run Stats ─────────────────────────────────
+stats = api.mc_stats("v(out)")
 print(f"\nCross-run stats at DC (100 Hz):")
 print(f"  mean = {stats['mean'][0]:.4f}")
 print(f"  std  = {stats['std'][0]:.4f}")
 print(f"  min  = {stats['min'][0]:.4f}")
 print(f"  max  = {stats['max'][0]:.4f}")
-print("\nDone.")
-```</p>
-<p><strong>Expected output:</strong>
-```
-Loading RC filter MC data...
+print("\nDone.")</pre>
+
+<p><b>Expected output:</b></p>
+
+<pre>Loading RC filter MC data...
   Loaded 21 runs
   Parameters: ['Rval', 'Cval']
-  Display mode: spaghetti</p>
-<p>Sensitivity: max(v(out)) vs parameters...
-  Cval: r=-0.208 ↓  p=0.366
-  Rval: r=-0.042 ↓  p=0.858</p>
-<p>Yield (DC gain in [0.99, 1.01]): 14%</p>
-<p>Worst 5 runs (max_abs_diff from nominal):
+  Display mode: spaghetti
+
+Sensitivity: max(v(out)) vs parameters...
+  Cval: r=-0.208 -  p=0.366
+  Rval: r=-0.042 -  p=0.858
+
+Yield (DC gain in [0.99, 1.01]): 14%
+
+Worst 5 runs (max_abs_diff from nominal):
   Run 20: deviation = 0.9980
   Run 19: deviation = 0.9980
   Run 17: deviation = 0.9980
   Run 16: deviation = 0.9980
-  Run 14: deviation = 0.9978</p>
-<p>Cross-run stats at DC (100 Hz):
+  Run 14: deviation = 0.9978
+
+Cross-run stats at DC (100 Hz):
   mean = 0.3154
   std  = 0.4586
   min  = 0.0000
-  max  = 1.0000</p>
-<p>Done.
-```</p>
+  max  = 1.0000
+
+Done.</pre>
+
+</body>
+</html>
