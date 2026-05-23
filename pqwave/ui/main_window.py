@@ -4473,6 +4473,14 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Inject palette-adaptive colors into the HTML template
+        p = self.palette()
+        html = html.replace("__TEXT__", p.color(p.ColorRole.WindowText).name())
+        html = html.replace("__BASE__", p.color(p.ColorRole.Base).name())
+        html = html.replace("__ALT__", p.color(p.ColorRole.AlternateBase).name())
+        html = html.replace("__MID__", p.color(p.ColorRole.Mid).name())
+        html = html.replace("__LINK__", p.color(p.ColorRole.Link).name())
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Monte Carlo Guide")
         dialog.resize(780, 620)
