@@ -25,7 +25,6 @@ pqwave supports comprehensive Monte Carlo (MC) analysis for ngspice, LTspice, an
 
 ## Part 1 — Feature Reference
 
-<a name="loading-modes"></a>
 ### Loading Modes
 
 Open via **File > Open Monte Carlo**. Three source types are available:
@@ -38,7 +37,6 @@ Open via **File > Open Monte Carlo**. Three source types are available:
 
 **After loading**, the MC Control Bar appears at the top of the main window showing the run count and display controls. All panels receive MC rendering.
 
-<a name="display-modes--control-bar"></a>
 ### Display Modes & Control Bar
 
 The MC Control Bar appears after loading MC data:
@@ -59,7 +57,6 @@ The MC Control Bar appears after loading MC data:
 | **Envelope** | Nominal run as solid line + shaded bands at ±1σ, ±2σ, ±3σ around the cross-run mean. |
 | **Single** | Only the nominal run. Use to focus on the reference waveform. |
 
-<a name="statistical-analysis-features"></a>
 ### Statistical Analysis Features
 
 All commands in **Analyze** menu. Require an active MC collection.
@@ -92,7 +89,6 @@ mc_param("Cval", [10e-9, 10e-9, 1e-9, ...])
 
 Companion CSV files (like `rc_filter_params.csv`) list parameter values per run.
 
-<a name="correlation-tools"></a>
 ### Correlation Tools
 
 **Analyze > MC Correlation** opens the Correlation Matrix Editor — a three-step tool for designing correlated parameter variations.
@@ -116,7 +112,6 @@ Companion CSV files (like `rc_filter_params.csv`) list parameter values per run.
 
 API commands: `mc_correlation_load(path)`, `mc_correlation_show()`, `mc_generate(output_path, format, runs, seed)`.
 
-<a name="session-api-commands"></a>
 ### Session API Commands
 
 All MC commands available headlessly via `SessionAPI` (REPL: `F6`, batch scripts, external automation).
@@ -168,7 +163,6 @@ All MC commands available headlessly via `SessionAPI` (REPL: `F6`, batch scripts
 
 ## Part 2 — Worked Tutorials
 
-<a name="example-overview"></a>
 ### Example Overview
 
 Three pre-computed example files live in `docs/monte_carlo/examples/`. Each demonstrates a different loading mode and set of analysis features:
@@ -184,7 +178,6 @@ Three pre-computed example files live in `docs/monte_carlo/examples/`. Each demo
 
 ---
 
-<a name="example-1-rc-low-pass-filter"></a>
 ### Example 1: RC Low-Pass Filter
 
 This example demonstrates the full MC workflow from loading through sensitivity analysis. The circuit is a simple RC low-pass filter with AC analysis from 100 Hz to 1 MHz. R and C were varied independently across 21 runs, producing a range of cutoff frequencies.
@@ -368,7 +361,6 @@ Runs 14–20 deviate most from the nominal — their frequency responses differ 
 
 ---
 
-<a name="example-2-ring-oscillator"></a>
 ### Example 2: Ring Oscillator
 
 This example demonstrates MC analysis on transient (time-domain) data. The circuit is a 25-stage CMOS ring oscillator — a chain of inverters that produces a self-sustaining oscillation. BSIM3 model parameters (vth0, u0, tox, lint, wint for both NMOS and PMOS — 10 parameters total) were varied with Gaussian distributions across 31 runs.
@@ -450,7 +442,6 @@ Amplitude ranges from 3.098 V to 3.153 V (mean: 3.126 V). The distribution is ro
 
 ---
 
-<a name="example-3-correlation-matrix-editor"></a>
 ### Example 3: Correlation Matrix Editor
 
 This example demonstrates the correlation tools using the ring oscillator's BSIM3 model file. You will parse a model file, edit a correlation matrix, and generate a correlated parameter set for a new simulation.
@@ -533,7 +524,6 @@ For the ngspice format, enter a simulation command like `tran 15p 200n 0` to inc
 
 ---
 
-<a name="example-4-ltspice-lc-bandpass-filter"></a>
 ### Example 4: LTspice LC Bandpass Filter
 
 This example demonstrates **stepped loading** — the simplest MC loading mode. The raw file was produced by an LTspice simulation with `.step param X 0 20 1`.
@@ -583,7 +573,6 @@ This example highlights when each loading mode is appropriate:
 
 ---
 
-<a name="standalone-scripting-example"></a>
 ### Standalone Scripting Example
 
 This complete script loads the RC filter data, annotates parameters, and runs a full sensitivity + yield analysis — all copy-paste runnable:

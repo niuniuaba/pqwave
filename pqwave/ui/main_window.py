@@ -996,6 +996,7 @@ class MainWindow(QMainWindow):
             'show_vector_selection_help': self._show_vector_selection_help,
             'show_repl_help': self._show_repl_help,
             'show_api_help': self._show_api_help,
+            'show_mc_guide': self._show_mc_guide,
             'split_horizontal': self._split_panel_horizontal,
             'split_vertical': self._split_panel_vertical,
             'close_panel': self._close_active_panel,
@@ -4446,6 +4447,47 @@ class MainWindow(QMainWindow):
         """Show API command reference."""
         from pqwave.ui.api_help_dialog import ApiHelpDialog
         dialog = ApiHelpDialog(self)
+        dialog.exec()
+
+    def _show_mc_guide(self) -> None:
+        """Show the Monte Carlo user guide."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+        )
+
+        # Resolve guide path relative to this source file
+        # pqwave/ui/main_window.py → project root
+        from pathlib import Path
+        guide_path = Path(__file__).parent.parent.parent / "docs" / "monte_carlo" / "guide.md"
+        if not guide_path.exists():
+            QMessageBox.warning(
+                self, "Not Found",
+                f"Monte Carlo guide not found at:\n{guide_path}",
+            )
+            return
+
+        try:
+            markdown = guide_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(
+                self, "Error",
+                f"Failed to read Monte Carlo guide:\n{e}",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Monte Carlo Guide")
+        dialog.resize(780, 620)
+
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setMarkdown(markdown)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
         dialog.exec()
 
     @staticmethod
