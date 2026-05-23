@@ -348,7 +348,7 @@ Which runs deviate most from the nominal?
 | 4 | 16 | 0.9980 |
 | 5 | 14 | 0.9978 |
 
-Runs 14–20 are consistently the worst — these correspond to the largest RC products (lowest cutoff frequencies). Their frequency response differs most from the nominal (run 0: R=10k, C=10n).
+Runs 14–20 deviate most from the nominal — their frequency responses differ substantially due to different R/C combinations (some shift the cutoff higher, some lower). The `max_abs_diff` metric captures any deviation regardless of direction.
 
 > **Or via API:**
 > ```python
@@ -461,13 +461,13 @@ This example demonstrates **stepped loading** — the simplest MC loading mode. 
 
 > The parameter `x` is a dummy run counter — not a real circuit parameter. LTspice uses `.step param X 0 20 1` to cycle through Monte Carlo iterations because `.step` is the only way to produce multi-run output. The actual component variations happen inside `mc(val, tol)` function calls which are not recorded as parameters. Real stepped simulations (e.g., `.step param R 1k 10k 500`) embed meaningful parameter names that pqwave auto-detects.
 
-#### Step 2: Compare with Pattern Loading
+#### Step 2: When to Use Each Loading Mode
 
-The same file can also be loaded in pattern mode — try it:
+This example highlights when each loading mode is appropriate:
 
-1. Close the current MC collection.
-2. **File > Open Monte Carlo** > **Single file with named runs**.
-3. Browse to the same file. Note: LTspice raw files use a different internal structure than ngspice ones. Pattern loading may not detect groups, but stepped loading always works for `.step` simulations.
+- **Stepped loading** (used here): Best for `.step param` simulations from LTspice and QSPICE. Parameters and run count are auto-detected — no manual configuration.
+- **Pattern loading**: Best for ngspice `.control` loop simulations where outputs are named `vout0..voutN`. LTspice raw files use a different internal structure and won't detect run groups in pattern mode.
+- **Multi-file loading**: Best when each run is saved to a separate raw file (e.g., batch simulations).
 
 #### Step 3: Explore
 
