@@ -484,7 +484,7 @@ def main():
     parser.add_argument(
         "--version", "-v",
         action="version",
-        version="pqwave 0.2.5"
+        version="pqwave 0.3.1"
     )
 
     # Testing and debugging arguments

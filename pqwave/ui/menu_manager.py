@@ -484,6 +484,14 @@ class MenuManager:
         )
         help_menu.addAction(api_help_action)
 
+        help_menu.addSeparator()
+
+        mc_guide_action = QAction("Monte Carlo Guide", self.parent)
+        mc_guide_action.triggered.connect(
+            self.callbacks.get("show_mc_guide", lambda: None)
+        )
+        help_menu.addAction(mc_guide_action)
+
         self.menubar.addMenu(help_menu)
 
     @staticmethod

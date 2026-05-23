@@ -92,5 +92,5 @@
 - [x] 11.1 ~~Create `pqwave/analysis/correlation.py`~~ — **Deferred**: future phase per design.md
 - [x] 11.2 ~~Create `CorrelationMatrixEditor` dialog~~ — **Deferred**: future phase per design.md
 - [x] 11.3 ~~Implement `.model` line parser~~ — **Deferred**: future phase per design.md
-- [x] 11.4 ~~Create `MC Script Generator`~~ — **Deferred**: future phase per design.md
+- [x] 11.4 ~~Create `MC Script Generator`~~ — **Deferred**: future phase per design.md. Outputs: ngspice `.control` script + simulator-agnostic CSV of per-run parameter values + `.param` snippet (per D7).
 - [x] 11.5 ~~Add `mc_correlation_load()`, `mc_correlation_show()`, `mc_generate()`~~ — **Deferred**: future phase per design.md
