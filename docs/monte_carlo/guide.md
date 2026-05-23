@@ -1,6 +1,6 @@
 # Monte Carlo Analysis User Guide
 
-pqwave supports comprehensive Monte Carlo (MC) analysis across three simulators (ngspice, LTspice, QSPICE). This guide has two parts: a **feature reference** for quick lookup, and **worked tutorials** that walk through real analysis workflows using the example files in `docs/monte_carlo/examples/`.
+pqwave supports comprehensive Monte Carlo (MC) analysis for ngspice, LTspice, and QSPICE simulation output. This guide has two parts: a **feature reference** for quick lookup, and **worked tutorials** that walk through real analysis workflows using the example files in `docs/monte_carlo/examples/`.
 
 > All example files are pre-computed. Open them directly — no simulator required.
 
@@ -17,7 +17,8 @@ pqwave supports comprehensive Monte Carlo (MC) analysis across three simulators 
 - [Example Overview](#example-overview)
 - [Example 1: RC Low-Pass Filter](#example-1-rc-low-pass-filter)
 - [Example 2: Ring Oscillator](#example-2-ring-oscillator)
-- [Example 3: LTspice LC Bandpass Filter](#example-3-ltspice-lc-bandpass-filter)
+- [Example 3: Correlation Matrix Editor](#example-3-correlation-matrix-editor)
+- [Example 4: LTspice LC Bandpass Filter](#example-4-ltspice-lc-bandpass-filter)
 - [Standalone Scripting Example](#standalone-scripting-example)
 
 ---
@@ -170,6 +171,7 @@ Three pre-computed example files live in `docs/monte_carlo/examples/`. Each demo
 |---------|------|---------|------|-------------|--------------|
 | RC Filter | `ngspice/rc_filter_mc.raw` + `rc_filter_params.csv` | RC low-pass (R=1k–100k, C=1n–100n), AC 100 Hz–1 MHz | 21 | Pattern (base: `vout`) | Loading, display, parameter annotation, sensitivity, scatter, yield, worst-case, API scripting |
 | Ring Oscillator | `ngspice/MC_ring.raw` | 25-stage CMOS ring oscillator, transient 0–100 ns | 31 | Pattern (base: `vout`) | Envelope display, cross-run statistics, histogram |
+| Correlation Editor | `ngspice/mc_ring_circ.net` | BSIM3 NMOS/PMOS model definitions | — | — | Model parsing, correlation matrix editing, Cholesky-based parameter generation |
 | LTspice LC Filter | `ltspice/MonteCarlo.raw` | LC bandpass filter, AC 300 kHz–10 MHz | 21 | Stepped | Stepped loading, auto-detected parameters |
 
 **Prerequisites:** pqwave installed. No simulator required — all raw files are pre-computed.
@@ -440,7 +442,89 @@ Amplitude ranges from 3.098 V to 3.153 V (mean: 3.126 V). The distribution is ro
 
 ---
 
-### Example 3: LTspice LC Bandpass Filter
+### Example 3: Correlation Matrix Editor
+
+This example demonstrates the correlation tools using the ring oscillator's BSIM3 model file. You will parse a model file, edit a correlation matrix, and generate a correlated parameter set for a new simulation.
+
+**Input:**
+- Model file: `docs/monte_carlo/examples/ngspice/mc_ring_circ.net`
+- Contains: NMOS and PMOS BSIM3 model definitions with `agauss()` distribution functions
+
+#### Step 1: Open the Correlation Editor
+
+1. **Analyze > MC Correlation** to open the Correlation Matrix Editor.
+2. In **Step 1: Load Model File**, click **Browse** and select `docs/monte_carlo/examples/ngspice/mc_ring_circ.net`.
+3. Click **Parse**.
+
+**Expected output:** The status label shows "Parsed 6 parameters from 2 model(s)". The matrix table populates with 6 rows and columns:
+
+| Parameter | Description | Nominal |
+|-----------|-------------|---------|
+| n1_version | NMOS BSIM3 version | 3.3 |
+| n1_Level | NMOS BSIM3 level | 8.0 |
+| n1_Vth0 | NMOS threshold voltage | 0.6 V |
+| p1_version | PMOS BSIM3 version | 3.3 |
+| p1_Level | PMOS BSIM3 level | 8.0 |
+| p1_Vth0 | PMOS threshold voltage | −0.6 V |
+
+The diagonal cells are fixed at 1.0 (self-correlation). Upper-triangle cells are blank (0.0 = uncorrelated by default).
+
+> The `n1_version` and `n1_Level` (and their PMOS counterparts) are constants in the model file — they don't have `agauss()` wrappers and won't vary. The meaningful parameters for correlation are `n1_Vth0` and `p1_Vth0`.
+
+#### Step 2: Set Up Correlations
+
+Suppose you want the NMOS and PMOS threshold voltages to be **positively correlated** — when NMOS Vth0 shifts higher, PMOS Vth0 shifts correspondingly. This models a global process skew.
+
+1. Find the cell at row `n1_Vth0`, column `p1_Vth0` (upper triangle).
+2. Enter **0.7** (moderate positive correlation).
+3. Observe: the mirror cell at `p1_Vth0` × `n1_Vth0` (lower triangle) auto-fills with 0.7.
+
+The matrix now has one off-diagonal correlation:
+
+|   | n1_Vth0 | p1_Vth0 |
+|---|---------|---------|
+| **n1_Vth0** | 1.0 | 0.7 |
+| **p1_Vth0** | 0.7 | 1.0 |
+
+> **Import/Export:** Click **Export Matrix (CSV)** to save this matrix for reuse. Click **Load Matrix (CSV)** to import a pre-computed correlation matrix from another project.
+
+#### Step 3: Generate Correlated Output
+
+1. In **Step 3: Generate Output**:
+   - **MC Runs:** `30`
+   - **Seed:** `12345`
+   - **Format:** `csv — simulator-agnostic (recommended for LTspice/QSPICE)`
+   - **Output:** Browse to a convenient location, e.g. `mc_correlated.csv`
+2. Click **Generate**.
+3. Review the preview dialog — it shows the first 5 rows of generated values.
+4. Click **OK** to write the file.
+
+**Expected output:** A CSV file with 30 rows (+ header) and columns `run, n1_Vth0, p1_Vth0, n1_version, n1_Level, p1_version, p1_Level`. The Vth0 columns vary with the specified correlation (r ≈ 0.7 across runs), while the version/Level columns stay at their nominal values.
+
+#### Step 4: Try Other Formats
+
+Experiment with the other output formats:
+
+| Format | Use case |
+|--------|----------|
+| **ngspice .control** | Generates a complete ngspice script with `altermod` commands and a simulation loop. Requires model name annotations (these are auto-extracted from the parsed model file). |
+| **.param snippet** | Per-run `.param` lines for inclusion in a SPICE netlist. |
+| **TSV** | Tab-separated CSV variant for tools that expect tabs. |
+
+For the ngspice format, enter a simulation command like `tran 15p 200n 0` to include in the generated control script.
+
+> **Under the hood:** The tool computes the Cholesky decomposition *L* of the correlation matrix *R* (where *R = L × L^T*). It generates independent standard normals *Z*, multiplies by *L^T* to produce correlated normals *Zc*, then scales and shifts: *value = nominal + sigma × Zc*. Sigma defaults to 10% of |nominal| for each parameter.
+
+> **Or via API:**
+> ```python
+> api.mc_correlation_load("correlation.csv")
+> api.mc_generate("mc_correlated.csv", output_format="csv", runs=30, seed=12345)
+> api.mc_correlation_show()
+> ```
+
+---
+
+### Example 4: LTspice LC Bandpass Filter
 
 This example demonstrates **stepped loading** — the simplest MC loading mode. The raw file was produced by an LTspice simulation with `.step param X 0 20 1`.
 

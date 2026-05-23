@@ -22,7 +22,7 @@ The system SHALL provide a comprehensive user's guide for the Monte Carlo analys
 #### Scenario: Guide covers correlation tools
 
 - **WHEN** a user reads the guide
-- **THEN** Part 1 describes the three-step correlation workflow and output formats in a compact table with API command references
+- **THEN** Part 1 describes the three-step correlation workflow and output formats in a compact table; Part 2 provides a worked correlation tutorial using the ring oscillator model file
 
 #### Scenario: Guide covers session API / scripting
 
