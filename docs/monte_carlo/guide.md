@@ -8,7 +8,7 @@ pqwave supports comprehensive Monte Carlo (MC) analysis for ngspice, LTspice, an
 
 ### Part 1 — Feature Reference
 - [Loading Modes](#loading-modes)
-- [Display Modes & Control Bar](#display-modes--control-bar)
+- [Display Modes & Control Bar](#display-modes-control-bar)
 - [Statistical Analysis](#statistical-analysis-features)
 - [Correlation Tools](#correlation-tools)
 - [Session API Commands](#session-api-commands)
