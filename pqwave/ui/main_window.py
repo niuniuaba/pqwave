@@ -4455,10 +4455,8 @@ class MainWindow(QMainWindow):
             QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
         )
 
-        # Resolve guide path relative to this source file
-        # pqwave/ui/main_window.py → project root
         from pathlib import Path
-        guide_path = Path(__file__).parent.parent.parent / "docs" / "monte_carlo" / "guide.md"
+        guide_path = Path(__file__).parent.parent.parent / "docs" / "monte_carlo" / "guide.html"
         if not guide_path.exists():
             QMessageBox.warning(
                 self, "Not Found",
@@ -4467,7 +4465,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            markdown = guide_path.read_text(encoding="utf-8")
+            html = guide_path.read_text(encoding="utf-8")
         except OSError as e:
             QMessageBox.warning(
                 self, "Error",
@@ -4481,26 +4479,6 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout(dialog)
         browser = QTextBrowser()
-
-        # Qt's Markdown-to-HTML converter does not generate heading IDs,
-        # so TOC [text](#anchor) links have nothing to navigate to.
-        # Convert via QTextDocument to get HTML, then add heading IDs.
-        from PyQt6.QtGui import QTextDocument
-        import re
-        doc = QTextDocument()
-        doc.setMarkdown(markdown)
-        html = doc.toHtml()
-
-        # Add id="heading-slug" to every h1/h2/h3 based on text content
-        def _slug(text: str) -> str:
-            return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')
-
-        def _add_id(m: re.Match) -> str:
-            tag, body = m.group(1), m.group(2)
-            inner = re.sub(r'<[^>]+>', '', body)
-            return f'<{tag} id="{_slug(inner)}">{body}</{tag}>'
-
-        html = re.sub(r'<(h[123])>(.*?)</\1>', _add_id, html, flags=re.DOTALL)
         browser.setHtml(html)
         layout.addWidget(browser)
 
