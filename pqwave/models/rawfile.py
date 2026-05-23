@@ -311,6 +311,9 @@ def parse_step_header(header_bytes: bytes) -> dict:
 def detect_naming_pattern(trace_names: list) -> dict:
     """Detect MC run naming patterns like vout0..voutN.
 
+    Handles ngspice type wrappers (v(), i(), n(), p()) by stripping them
+    before pattern matching. E.g. v(vout0) → base=vout, idx=0.
+
     Returns:
         dict of {base_name: {"indices": [0,1,...], "count": N}}
         for each detected group. Single names with no numeric suffix
@@ -319,8 +322,13 @@ def detect_naming_pattern(trace_names: list) -> dict:
     import re
     groups = {}
     pattern = re.compile(r"^(.+?)(\d+)$")
+    wrapper = re.compile(r"^[vinp]\((.+)\)$")
 
     for name in trace_names:
+        # Strip ngspice type wrapper: v(vout0) → vout0, i(r1) → r1
+        wm = wrapper.match(name)
+        if wm:
+            name = wm.group(1)
         m = pattern.match(name)
         if not m:
             continue
@@ -585,6 +593,15 @@ class RawFile:
                 for cv in correct_variables
             ]
 
+            # Work around spicelib bug: empty _steps list crashes
+            # set_steps() with IndexError. This happens with some
+            # QSPICE files where step detection produces zero steps.
+            # Setting _steps to None skips the set_steps call safely.
+            plot = self.raw_data._plots[0]
+            if (hasattr(plot, '_steps') and isinstance(plot._steps, list)
+                    and len(plot._steps) == 0):
+                plot._steps = None
+
             # Key optimization: pre-read ALL traces at once so spicelib
             # only reads the binary data section once.  Without this,
             # each get_trace() call re-reads the entire file in Normal
@@ -593,7 +610,7 @@ class RawFile:
             #
             # For FastAccess (column-interleaved) this is also efficient
             # since it batches all reads into a single sequential scan.
-            self.raw_data._plots[0].read_trace_data(all_spicelib_names)
+            plot.read_trace_data(all_spicelib_names)
 
             # Now get_trace() returns from _read_traces cache (zero I/O)
             # Get data for all traces using our correct variable names.
