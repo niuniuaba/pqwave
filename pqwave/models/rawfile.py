@@ -322,7 +322,7 @@ def detect_naming_pattern(trace_names: list) -> dict:
     import re
     groups = {}
     pattern = re.compile(r"^(.+?)(\d+)$")
-    wrapper = re.compile(r"^[vinp]\((.+)\)$")
+    wrapper = re.compile(r"^[vi]\((.+)\)$")
 
     for name in trace_names:
         # Strip ngspice type wrapper: v(vout0) → vout0, i(r1) → r1
