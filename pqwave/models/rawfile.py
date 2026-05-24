@@ -12,10 +12,12 @@ from pqwave.logging_config import get_logger
 
 try:
     from spicelib import RawRead
+    from spicelib.raw.raw_classes import SpiceReadException
     SPICELIB_AVAILABLE = True
 except ImportError:
     SPICELIB_AVAILABLE = False
     RawRead = None
+    SpiceReadException = None
 
 
 logger = get_logger(__name__)
@@ -552,168 +554,177 @@ class RawFile:
 
         try:
             self.raw_data = RawRead(load_path)
-
-            # Save detected dialect before raw_data is released
-            self.detected_format = self.raw_data.dialect
-
-            # Get raw properties from spicelib
-            raw_props = self.raw_data.get_raw_properties()
-
-            # Get trace names from spicelib (may have garbled chars for
-            # multi-byte UTF-8) and build a position-based mapping.
-            # Spicelib may have MORE traces than our header vars due to
-            # aliases being exposed as separate traces.
-            trace_names = self.raw_data.get_trace_names()
-
-            # Build mapping: correct_name -> spicelib_name (by position,
-            # up to the count of our header variables)
-            correct_to_spicelib = {}
-            n_correct = len(correct_variables)
-            for i, correct_var in enumerate(correct_variables):
-                if i < len(trace_names):
-                    correct_to_spicelib[correct_var['name']] = trace_names[i]
-
-            # Store mapping for later use in get_variable_data
-            self._name_map = correct_to_spicelib
-
-            # Create variables list using our correctly-decoded names
-            variables = []
-            for i, correct_var in enumerate(correct_variables):
-                # Use our correct type classification
-                var = {
-                    'index': correct_var['index'],
-                    'name': correct_var['name'],
-                    'type': correct_var['type']
-                }
-                variables.append(var)
-
-            # Build list of spicelib trace names for all variables
-            all_spicelib_names = [
-                correct_to_spicelib.get(cv['name'], cv['name'])
-                for cv in correct_variables
-            ]
-
-            # Work around spicelib bug: empty _steps list crashes
-            # set_steps() with IndexError. This happens with some
-            # QSPICE files where step detection produces zero steps.
-            # Setting _steps to None skips the set_steps call safely.
-            plot = self.raw_data._plots[0]
-            if (hasattr(plot, '_steps') and isinstance(plot._steps, list)
-                    and len(plot._steps) == 0):
-                plot._steps = None
-
-            # Key optimization: pre-read ALL traces at once so spicelib
-            # only reads the binary data section once.  Without this,
-            # each get_trace() call re-reads the entire file in Normal
-            # Access mode (row-interleaved), causing O(N×filesize) I/O
-            # and intermediate buffer accumulation.
-            #
-            # For FastAccess (column-interleaved) this is also efficient
-            # since it batches all reads into a single sequential scan.
-            plot.read_trace_data(all_spicelib_names)
-
-            # Now get_trace() returns from _read_traces cache (zero I/O)
-            # Get data for all traces using our correct variable names.
-            # For large files, use np.memmap to avoid keeping a full
-            # in-memory copy of the column-stacked matrix.
-            data_list = []
-            valid_variables = []
-            ref_dtype = None
-            n_points = None
-
-            for correct_var in correct_variables:
-                name = correct_var['name']
-                sp_name = correct_to_spicelib.get(name, name)
+        except SpiceReadException:
+            # spicelib auto-detect fails for Xyce files without a Command:
+            # header line.  Try ngspice and xyce dialects directly — both
+            # use identical binary layouts (doubles for everything).
+            for dialect in ('ngspice', 'xyce'):
                 try:
-                    trace = self.raw_data.get_trace(sp_name)
-                    if trace is not None:
-                        try:
-                            if hasattr(trace, 'get_wave'):
-                                data = trace.get_wave()
-                            else:
-                                data = np.array(trace)
-
-                            # Downcast to float32 to reduce memory usage
-                            if data.dtype == np.float64:
-                                data = data.astype(np.float32)
-                            elif data.dtype == np.complex128:
-                                data = data.astype(np.complex64)
-
-                            if ref_dtype is None:
-                                ref_dtype = data.dtype
-                                n_points = len(data)
-
-                            # Reclassify type with complex awareness
-                            if is_ac_or_complex:
-                                var_type = 'voltage' if name.lower().startswith('v(') else \
-                                           'current' if name.lower().startswith('i(') else 'unknown'
-                            else:
-                                var_type = correct_var['type']
-
-                            var = {
-                                'index': len(valid_variables),
-                                'name': name,
-                                'type': var_type
-                            }
-                            valid_variables.append(var)
-                            data_list.append(data)
-
-                        except Exception as e:
-                            logger.warning(f"Could not convert trace {name} to numpy array: {e}")
-                except Exception as e:
-                    logger.warning(f"Could not get trace {name}: {e}")
+                    self.raw_data = RawRead(load_path, dialect=dialect)
+                    break
+                except Exception:
                     continue
-
-            # Build the data matrix
-            if data_list:
-                estimated_total = n_points * len(valid_variables) * ref_dtype.itemsize
-                if estimated_total > 500 * 1024 * 1024:
-                    # Use memmap to avoid a second full copy in memory
-                    mmap_fd, mmap_path = tempfile.mkstemp(prefix='pqwave_mmap_')
-                    os.close(mmap_fd)
-                    shape = (n_points, len(valid_variables))
-                    try:
-                        data = np.memmap(mmap_path, dtype=ref_dtype, mode='w+', shape=shape)
-                        for i, arr in enumerate(data_list):
-                            data[:, i] = arr
-                            del arr
-                        data_list.clear()
-                        self._mmap_path = mmap_path
-                    except Exception:
-                        os.unlink(mmap_path)
-                        raise
-                    logger.info(
-                        f"Using memmap for large dataset: {shape}, {estimated_total / 1024**2:.0f} MB"
-                    )
-                else:
-                    data = np.column_stack(data_list)
-                    del data_list  # Release list immediately after stack
             else:
-                data = np.array([])
+                raise
 
-            dataset = {
-                'title': raw_props.get('Title', ''),
-                'date': raw_props.get('Date', ''),
-                'plotname': raw_props.get('Plotname', ''),
-                'flags': raw_props.get('Flags', ''),
-                'variables': valid_variables,
-                'data': data,
-                '_is_ac_or_complex': is_ac_or_complex,
+        # Save detected dialect before raw_data is released
+        self.detected_format = self.raw_data.dialect
+
+        # Get raw properties from spicelib
+        raw_props = self.raw_data.get_raw_properties()
+
+        # Get trace names from spicelib (may have garbled chars for
+        # multi-byte UTF-8) and build a position-based mapping.
+        # Spicelib may have MORE traces than our header vars due to
+        # aliases being exposed as separate traces.
+        trace_names = self.raw_data.get_trace_names()
+
+        # Build mapping: correct_name -> spicelib_name (by position,
+        # up to the count of our header variables)
+        correct_to_spicelib = {}
+        n_correct = len(correct_variables)
+        for i, correct_var in enumerate(correct_variables):
+            if i < len(trace_names):
+                correct_to_spicelib[correct_var['name']] = trace_names[i]
+
+        # Store mapping for later use in get_variable_data
+        self._name_map = correct_to_spicelib
+
+        # Create variables list using our correctly-decoded names
+        variables = []
+        for i, correct_var in enumerate(correct_variables):
+            # Use our correct type classification
+            var = {
+                'index': correct_var['index'],
+                'name': correct_var['name'],
+                'type': correct_var['type']
             }
-            self.datasets.append(dataset)
+            variables.append(var)
 
-            # Extract step metadata from spicelib while raw_data is still alive
-            self._extract_spicelib_step_info()
+        # Build list of spicelib trace names for all variables
+        all_spicelib_names = [
+            correct_to_spicelib.get(cv['name'], cv['name'])
+            for cv in correct_variables
+        ]
 
-            # Release spicelib raw_data to free ~50% of parsed memory.
-            # All data is now in the memmap/column_stack matrix.
-            self.raw_data = None
-            logger.info(
-                f"Released spicelib raw_data; data retained in memmap/column_stack"
-            )
+        # Work around spicelib bug: empty _steps list crashes
+        # set_steps() with IndexError. This happens with some
+        # QSPICE files where step detection produces zero steps.
+        # Setting _steps to None skips the set_steps call safely.
+        plot = self.raw_data._plots[0]
+        if (hasattr(plot, '_steps') and isinstance(plot._steps, list)
+                and len(plot._steps) == 0):
+            plot._steps = None
 
-        except Exception as e:
-            raise Exception(f"Error parsing file {self.filename}: {e}")
+        # Key optimization: pre-read ALL traces at once so spicelib
+        # only reads the binary data section once.  Without this,
+        # each get_trace() call re-reads the entire file in Normal
+        # Access mode (row-interleaved), causing O(N×filesize) I/O
+        # and intermediate buffer accumulation.
+        #
+        # For FastAccess (column-interleaved) this is also efficient
+        # since it batches all reads into a single sequential scan.
+        plot.read_trace_data(all_spicelib_names)
+
+        # Now get_trace() returns from _read_traces cache (zero I/O)
+        # Get data for all traces using our correct variable names.
+        # For large files, use np.memmap to avoid keeping a full
+        # in-memory copy of the column-stacked matrix.
+        data_list = []
+        valid_variables = []
+        ref_dtype = None
+        n_points = None
+
+        for correct_var in correct_variables:
+            name = correct_var['name']
+            sp_name = correct_to_spicelib.get(name, name)
+            try:
+                trace = self.raw_data.get_trace(sp_name)
+                if trace is not None:
+                    try:
+                        if hasattr(trace, 'get_wave'):
+                            data = trace.get_wave()
+                        else:
+                            data = np.array(trace)
+
+                        # Downcast to float32 to reduce memory usage
+                        if data.dtype == np.float64:
+                            data = data.astype(np.float32)
+                        elif data.dtype == np.complex128:
+                            data = data.astype(np.complex64)
+
+                        if ref_dtype is None:
+                            ref_dtype = data.dtype
+                            n_points = len(data)
+
+                        # Reclassify type with complex awareness
+                        if is_ac_or_complex:
+                            var_type = 'voltage' if name.lower().startswith('v(') else \
+                                       'current' if name.lower().startswith('i(') else 'unknown'
+                        else:
+                            var_type = correct_var['type']
+
+                        var = {
+                            'index': len(valid_variables),
+                            'name': name,
+                            'type': var_type
+                        }
+                        valid_variables.append(var)
+                        data_list.append(data)
+
+                    except Exception as e:
+                        logger.warning(f"Could not convert trace {name} to numpy array: {e}")
+            except Exception as e:
+                logger.warning(f"Could not get trace {name}: {e}")
+                continue
+
+        # Build the data matrix
+        if data_list:
+            estimated_total = n_points * len(valid_variables) * ref_dtype.itemsize
+            if estimated_total > 500 * 1024 * 1024:
+                # Use memmap to avoid a second full copy in memory
+                mmap_fd, mmap_path = tempfile.mkstemp(prefix='pqwave_mmap_')
+                os.close(mmap_fd)
+                shape = (n_points, len(valid_variables))
+                try:
+                    data = np.memmap(mmap_path, dtype=ref_dtype, mode='w+', shape=shape)
+                    for i, arr in enumerate(data_list):
+                        data[:, i] = arr
+                        del arr
+                    data_list.clear()
+                    self._mmap_path = mmap_path
+                except Exception:
+                    os.unlink(mmap_path)
+                    raise
+                logger.info(
+                    f"Using memmap for large dataset: {shape}, {estimated_total / 1024**2:.0f} MB"
+                )
+            else:
+                data = np.column_stack(data_list)
+                del data_list  # Release list immediately after stack
+        else:
+            data = np.array([])
+
+        dataset = {
+            'title': raw_props.get('Title', ''),
+            'date': raw_props.get('Date', ''),
+            'plotname': raw_props.get('Plotname', ''),
+            'flags': raw_props.get('Flags', ''),
+            'variables': valid_variables,
+            'data': data,
+            '_is_ac_or_complex': is_ac_or_complex,
+        }
+        self.datasets.append(dataset)
+
+        # Extract step metadata from spicelib while raw_data is still alive
+        self._extract_spicelib_step_info()
+
+        # Release spicelib raw_data to free ~50% of parsed memory.
+        # All data is now in the memmap/column_stack matrix.
+        self.raw_data = None
+        logger.info(
+            f"Released spicelib raw_data; data retained in memmap/column_stack"
+        )
 
     def get_variable_names(self, dataset_idx=0):
         """Get variable names for a dataset"""
