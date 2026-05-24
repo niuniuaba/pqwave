@@ -1,9 +1,7 @@
 """Tests for FstAdapter"""
 import os
 import sys
-import tempfile
-import unittest
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -52,8 +50,6 @@ def test_fst_adapter_custom_tool_path():
     )
 
     def fake_run(args, **kwargs):
-        # Write the VCD to the output file
-        import os
         if args[0] == custom:
             with open(args[3], 'w') as f:
                 f.write(vcd_content)

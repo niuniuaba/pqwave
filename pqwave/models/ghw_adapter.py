@@ -57,6 +57,10 @@ class GhwAdapter:
                     text=True
                 )
             if result.returncode != 0:
+                logger.error(
+                    "ghwdump failed for %s: %s",
+                    self.filename, result.stderr.strip()
+                )
                 raise RuntimeError(
                     f"Failed to convert {self.filename} to VCD: "
                     f"{result.stderr.strip()}"

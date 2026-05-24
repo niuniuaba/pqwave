@@ -52,6 +52,10 @@ class FstAdapter:
                 capture_output=True, text=True
             )
             if result.returncode != 0:
+                logger.error(
+                    "fst2vcd failed for %s: %s",
+                    self.filename, result.stderr.strip()
+                )
                 raise RuntimeError(
                     f"Failed to convert {self.filename} to VCD: {result.stderr.strip()}"
                 )

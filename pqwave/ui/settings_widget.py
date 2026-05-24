@@ -351,7 +351,8 @@ class SettingsWidget(QWidget):
         self._fst2vcd_edit = QLineEdit()
         self._fst2vcd_edit.setPlaceholderText("Use $PATH (e.g. /usr/bin/fst2vcd)")
         self._fst2vcd_edit.setMinimumWidth(200)
-        self._fst2vcd_edit.textChanged.connect(self._on_tool_path_changed)
+        self._fst2vcd_edit.textChanged.connect(
+            lambda text: self._on_tool_path_changed("fst2vcd"))
         tool_paths_layout.addWidget(self._fst2vcd_edit, 0, 1)
 
         fst2vcd_reset = QPushButton("Reset")
@@ -363,7 +364,8 @@ class SettingsWidget(QWidget):
         self._ghwdump_edit = QLineEdit()
         self._ghwdump_edit.setPlaceholderText("Use $PATH (e.g. /usr/local/bin/ghwdump)")
         self._ghwdump_edit.setMinimumWidth(200)
-        self._ghwdump_edit.textChanged.connect(self._on_tool_path_changed)
+        self._ghwdump_edit.textChanged.connect(
+            lambda text: self._on_tool_path_changed("ghwdump"))
         tool_paths_layout.addWidget(self._ghwdump_edit, 1, 1)
 
         ghwdump_reset = QPushButton("Reset")
@@ -864,10 +866,10 @@ class SettingsWidget(QWidget):
 
     # --- Tool path handlers ---
 
-    def _on_tool_path_changed(self) -> None:
-        """Write tool path edits back to ApplicationState."""
-        self.state.tool_paths["fst2vcd"] = self._fst2vcd_edit.text().strip()
-        self.state.tool_paths["ghwdump"] = self._ghwdump_edit.text().strip()
+    def _on_tool_path_changed(self, key: str) -> None:
+        """Write tool path edit back to ApplicationState."""
+        edit = self._fst2vcd_edit if key == "fst2vcd" else self._ghwdump_edit
+        self.state.tool_paths[key] = edit.text().strip()
 
     def _reset_tool_path(self, key: str) -> None:
         """Reset a tool path to default (empty = use $PATH)."""
