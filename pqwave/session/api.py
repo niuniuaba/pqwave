@@ -503,6 +503,10 @@ class SessionAPI:
             info = self._load_project(abs_path)
         elif ext == ".vcd":
             info = self._load_vcd(abs_path)
+        elif ext == ".fst":
+            info = self._load_fst(abs_path)
+        elif ext == ".ghw":
+            info = self._load_ghw(abs_path)
         else:
             info = self._load_raw(abs_path)
 
@@ -549,6 +553,48 @@ class SessionAPI:
 
         return {
             "file_type": "vcd",
+            "n_points": dataset.n_points,
+            "n_variables": dataset.n_variables,
+            "signals": dataset.get_variable_names(),
+        }
+
+    def _load_fst(self, path: str) -> dict:
+        from pqwave.models.fst_adapter import FstAdapter
+        from pqwave.models.dataset import Dataset
+
+        fst = FstAdapter(path)
+        dataset = Dataset(fst, 0)
+        self._state.add_dataset(dataset)
+
+        if not self._state.active_panel_id:
+            self._state.register_panel("panel_0")
+
+        if self._state.datasets:
+            self._state.current_dataset_idx = len(self._state.datasets) - 1
+
+        return {
+            "file_type": "fst",
+            "n_points": dataset.n_points,
+            "n_variables": dataset.n_variables,
+            "signals": dataset.get_variable_names(),
+        }
+
+    def _load_ghw(self, path: str) -> dict:
+        from pqwave.models.ghw_adapter import GhwAdapter
+        from pqwave.models.dataset import Dataset
+
+        ghw = GhwAdapter(path)
+        dataset = Dataset(ghw, 0)
+        self._state.add_dataset(dataset)
+
+        if not self._state.active_panel_id:
+            self._state.register_panel("panel_0")
+
+        if self._state.datasets:
+            self._state.current_dataset_idx = len(self._state.datasets) - 1
+
+        return {
+            "file_type": "ghw",
             "n_points": dataset.n_points,
             "n_variables": dataset.n_variables,
             "signals": dataset.get_variable_names(),
