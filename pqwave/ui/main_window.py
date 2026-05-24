@@ -3930,6 +3930,7 @@ class MainWindow(QMainWindow):
                 'toolbar_visible': self.state.toolbar_visible,
                 'status_bar_visible': self.state.status_bar_visible,
                 'chat_panel_visible': self.state.chat_panel_visible,
+                'tool_paths': dict(self.state.tool_paths),
             }
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -3967,6 +3968,14 @@ class MainWindow(QMainWindow):
         self.state.ui_font = FontConfig.from_dict(data.get('ui_font', {}))
         self.state.repl_font = FontConfig.from_dict(data.get('repl_font', {}))
         self.state.repl_bg = data.get('repl_bg', '')
+        saved_paths = data.get('tool_paths', {})
+        if isinstance(saved_paths, dict):
+            for key in ('fst2vcd', 'ghwdump'):
+                val = saved_paths.get(key, '')
+                if isinstance(val, str) and val.strip():
+                    self.state.tool_paths[key] = val.strip()
+                else:
+                    self.state.tool_paths[key] = ''
         self.plot_widget.apply_fonts(self.state)
         self._apply_ui_font()
         self._apply_repl_settings()
