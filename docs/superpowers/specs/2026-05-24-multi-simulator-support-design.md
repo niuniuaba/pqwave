@@ -100,7 +100,8 @@ Settings are read from `ApplicationState` (existing singleton). Custom paths are
 
 | Failure | Message |
 |---------|---------|
-| Tool not found | `fst2vcd not found. Install gtkwave and make sure fst2vcd is in $PATH or set the location of your gtkwave installation in Edit > Settings` |
+| fst2vcd not found | `fst2vcd not found. Install gtkwave and make sure fst2vcd is in $PATH or set the location of your gtkwave installation in Edit > Settings` |
+| ghwdump not found | `ghwdump not found. Install GHDL and make sure ghwdump is in $PATH or set the location of your GHDL installation in Edit > Settings` |
 | Conversion failed | `Failed to convert <filename> to VCD: <stderr>` |
 | Parse error | Bubble up VcdFile/spicelib error as-is (existing error dialog) |
 
