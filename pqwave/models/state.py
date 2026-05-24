@@ -320,6 +320,12 @@ class ApplicationState:
         self.fft_config: FftConfig = FftConfig()
         self.eye_diagram_config: EyeDiagramConfig = EyeDiagramConfig()
 
+        # Tool paths for external converters (none = use $PATH)
+        self.tool_paths: Dict[str, str] = {
+            "fst2vcd": "",
+            "ghwdump": "",
+        }
+
         # Monte Carlo run collection (None when not in MC mode)
         self.mc_collection = None
 
