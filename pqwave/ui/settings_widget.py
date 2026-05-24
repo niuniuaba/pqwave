@@ -342,6 +342,37 @@ class SettingsWidget(QWidget):
         repl_group.setLayout(repl_layout)
         content_layout.addWidget(repl_group)
 
+        # Tool paths for external converters
+        tool_paths_group = QGroupBox("External Converter Paths")
+        tool_paths_layout = QGridLayout()
+
+        # fst2vcd
+        tool_paths_layout.addWidget(QLabel("fst2vcd:"), 0, 0)
+        self._fst2vcd_edit = QLineEdit()
+        self._fst2vcd_edit.setPlaceholderText("Use $PATH (e.g. /usr/bin/fst2vcd)")
+        self._fst2vcd_edit.setMinimumWidth(200)
+        self._fst2vcd_edit.textChanged.connect(self._on_tool_path_changed)
+        tool_paths_layout.addWidget(self._fst2vcd_edit, 0, 1)
+
+        fst2vcd_reset = QPushButton("Reset")
+        fst2vcd_reset.clicked.connect(lambda: self._reset_tool_path("fst2vcd"))
+        tool_paths_layout.addWidget(fst2vcd_reset, 0, 2)
+
+        # ghwdump
+        tool_paths_layout.addWidget(QLabel("ghwdump:"), 1, 0)
+        self._ghwdump_edit = QLineEdit()
+        self._ghwdump_edit.setPlaceholderText("Use $PATH (e.g. /usr/local/bin/ghwdump)")
+        self._ghwdump_edit.setMinimumWidth(200)
+        self._ghwdump_edit.textChanged.connect(self._on_tool_path_changed)
+        tool_paths_layout.addWidget(self._ghwdump_edit, 1, 1)
+
+        ghwdump_reset = QPushButton("Reset")
+        ghwdump_reset.clicked.connect(lambda: self._reset_tool_path("ghwdump"))
+        tool_paths_layout.addWidget(ghwdump_reset, 1, 2)
+
+        tool_paths_group.setLayout(tool_paths_layout)
+        content_layout.addWidget(tool_paths_group)
+
         content_layout.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
@@ -509,6 +540,14 @@ class SettingsWidget(QWidget):
         self.repl_size_spin.setValue(rf.size)
         self.repl_size_spin.blockSignals(False)
         self._update_repl_color_buttons()
+
+        # Load tool paths
+        self._fst2vcd_edit.blockSignals(True)
+        self._fst2vcd_edit.setText(self.state.tool_paths.get("fst2vcd", ""))
+        self._fst2vcd_edit.blockSignals(False)
+        self._ghwdump_edit.blockSignals(True)
+        self._ghwdump_edit.setText(self.state.tool_paths.get("ghwdump", ""))
+        self._ghwdump_edit.blockSignals(False)
 
         # Load FFT settings
         fft = self.state.fft_config
@@ -822,3 +861,22 @@ class SettingsWidget(QWidget):
             )
         else:
             self.repl_bg_btn.setStyleSheet("")
+
+    # --- Tool path handlers ---
+
+    def _on_tool_path_changed(self) -> None:
+        """Write tool path edits back to ApplicationState."""
+        self.state.tool_paths["fst2vcd"] = self._fst2vcd_edit.text().strip()
+        self.state.tool_paths["ghwdump"] = self._ghwdump_edit.text().strip()
+
+    def _reset_tool_path(self, key: str) -> None:
+        """Reset a tool path to default (empty = use $PATH)."""
+        self.state.tool_paths[key] = ""
+        if key == "fst2vcd":
+            self._fst2vcd_edit.blockSignals(True)
+            self._fst2vcd_edit.setText("")
+            self._fst2vcd_edit.blockSignals(False)
+        elif key == "ghwdump":
+            self._ghwdump_edit.blockSignals(True)
+            self._ghwdump_edit.setText("")
+            self._ghwdump_edit.blockSignals(False)
