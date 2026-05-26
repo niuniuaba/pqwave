@@ -5,8 +5,11 @@ implements `apply()` (transform the netlist string) and `info()` (report what
 would change without modifying).
 """
 
+import logging
 import re
 from typing import Optional
+
+_log = logging.getLogger(__name__)
 
 from pqwave.bridge.schem_bridge import NetlistFix
 
@@ -16,13 +19,14 @@ class StripSlashes(NetlistFix):
 
     name = "Strip leading slashes from net names"
 
-    _slash_re = re.compile(r"/([A-Za-z_]\w*)\b")
+    _slash_re = re.compile(r"(?<![\w])/([A-Za-z_]\w*)\b")
 
     def apply(self, netlist: str, context: Optional[dict] = None) -> str:
         result_lines = []
         for line in netlist.split("\n"):
             stripped = line.strip()
-            if stripped.startswith("*") or stripped.startswith(".subckt"):
+            if stripped.startswith("*") or stripped.startswith(".subckt") \
+                    or stripped.startswith(".param") or stripped.startswith(".func"):
                 result_lines.append(line)
             else:
                 result_lines.append(self._slash_re.sub(r"\1", line))
@@ -32,7 +36,8 @@ class StripSlashes(NetlistFix):
         unique_names: set[str] = set()
         for line in netlist.split("\n"):
             stripped = line.strip()
-            if stripped.startswith("*") or stripped.startswith(".subckt"):
+            if stripped.startswith("*") or stripped.startswith(".subckt") \
+                    or stripped.startswith(".param") or stripped.startswith(".func"):
                 continue
             unique_names.update(self._slash_re.findall(line))
         if not unique_names:
@@ -141,6 +146,10 @@ class FixBJTPins(NetlistFix):
 
             desired = self._get_desired_order(name)
             new_nodes = [pin_to_node.get(p, "NC") for p in desired]
+
+            if new_nodes != original_nodes:
+                _log.warning("FixBJTPins: reordered %s pins to %s (was %s)",
+                             name, " ".join(new_nodes), " ".join(original_nodes))
 
             result_lines.append(
                 f"{name} {new_nodes[0]} {new_nodes[1]} {new_nodes[2]}{suffix}"
