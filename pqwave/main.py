@@ -450,6 +450,13 @@ def main():
         metavar="COMMAND",
         help="Send command to existing xschem server and exit"
     )
+    # KiCad integration arguments
+    parser.add_argument(
+        "--kicad-port",
+        type=int,
+        default=4243,
+        help="TCP port for KiCad cross-probe server (default: 4243)."
+    )
 
     parser.add_argument(
         "files",
@@ -534,6 +541,24 @@ def main():
 
     # Create xschem server and command handler if enabled
     xschem_server = None
+    # Validate no port conflicts between xschem and KiCad cross-probe
+    _ports_used = {}
+    for _name, _port in [
+        ("xschem server (--xschem-port)", args.xschem_port),
+        ("xschem back-annotation (--xschem-ba-port)", args.xschem_ba_port),
+        ("KiCad cross-probe (--kicad-port)", args.kicad_port),
+    ]:
+        if _port == 0:
+            continue
+        if _port in _ports_used:
+            print(
+                f"ERROR: Port conflict: {_name} and {_ports_used[_port]} "
+                f"both use port {_port}. Specify distinct ports and try again.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        _ports_used[_port] = _name
+
     command_handler = None
     xschem_port_busy = False
     if not args.no_xschem_server and args.xschem_port != 0:

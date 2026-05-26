@@ -155,6 +155,12 @@ class MainWindow(QMainWindow):
         self.panel_grid = PanelGrid(self.state, self.color_manager)
         self.control_panel = ControlPanel()
         self.mc_control_bar = None  # Created when MC data is loaded
+        self.kicad_control_bar = None  # Created when KiCad watch starts
+        self._kicad_watcher = None
+        self._kicad_bridge = None
+        self._kicad_cross_probe = None
+        self._kicad_watched_path = None
+        self._kicad_simulating = False
 
         self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
@@ -648,7 +654,157 @@ class MainWindow(QMainWindow):
                 kwargs.get("sigmas"),
             )
 
-    def _update_mc_control_display(self):
+        elif action == "kicad_watch":
+            self._start_kicad_watch(kwargs["path"])
+        elif action == "kicad_simulate":
+            self._on_kicad_simulate()
+        elif action == "kicad_unwatch":
+            self._on_kicad_unwatch()
+        elif action == "kicad_probe_net":
+            if self._kicad_cross_probe:
+                self._kicad_cross_probe.probe_net(kwargs["name"])
+        elif action == "kicad_probe_part":
+            if self._kicad_cross_probe:
+                self._kicad_cross_probe.probe_part(kwargs["ref"], kwargs.get("pin"))
+        elif action == "kicad_clear":
+            if self._kicad_cross_probe:
+                self._kicad_cross_probe.clear()
+
+    # ---- KiCad Bridge handlers ----
+
+    def _on_kicad_watch(self):
+        """File > KiCad Bridge > Watch Schematic."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select KiCad Schematic",
+            os.path.expanduser("~"),
+            "KiCad Schematic (*.kicad_sch);;All Files (*)"
+        )
+        if not path:
+            return
+        self._start_kicad_watch(path)
+
+    def _start_kicad_watch(self, sch_path: str):
+        """Initialize the KiCad bridge and start watching the schematic."""
+        from pqwave.bridge.kicad.bridge import KiCadBridge
+        from pqwave.bridge.kicad.file_watcher import KiCadFileWatcher
+        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
+        from pqwave.bridge.kicad.control_bar import KiCadControlBar
+
+        self._kicad_bridge = KiCadBridge()
+        self._kicad_watcher = KiCadFileWatcher()
+        self._kicad_cross_probe = CrossProbeClient()
+
+        if self.kicad_control_bar is None:
+            self.kicad_control_bar = KiCadControlBar()
+            upper = self._main_splitter.widget(0)
+            if upper and upper.layout():
+                upper.layout().addWidget(self.kicad_control_bar)
+            self.kicad_control_bar.simulate_clicked.connect(self._on_kicad_simulate)
+            self.kicad_control_bar.unwatch_clicked.connect(self._on_kicad_unwatch)
+
+        self._kicad_watcher.file_changed.connect(self._on_kicad_file_changed)
+        self._kicad_watcher.watch(sch_path)
+        self._kicad_watched_path = sch_path
+
+        self._kicad_cross_probe.error_occurred.connect(
+            lambda msg: self.chat_panel.append_output(f"[kicad] {msg}\n")
+        )
+
+        self.kicad_control_bar.setVisible(True)
+        basename = os.path.basename(sch_path)
+        self.kicad_control_bar.set_status(f"watching {basename}")
+
+        self._run_kicad_pipeline(sch_path)
+
+    def _on_kicad_file_changed(self, path: str):
+        """File watcher callback — schematic was saved."""
+        self._run_kicad_pipeline(path)
+
+    def _on_kicad_simulate(self):
+        """Manual simulate button or menu action."""
+        if self._kicad_watched_path:
+            self._run_kicad_pipeline(self._kicad_watched_path)
+
+    def _on_kicad_unwatch(self):
+        """Stop watching the schematic."""
+        if self._kicad_watcher:
+            self._kicad_watcher.unwatch()
+        if self._kicad_cross_probe:
+            self._kicad_cross_probe.disconnect()
+        if self.kicad_control_bar:
+            self.kicad_control_bar.setVisible(False)
+            self.kicad_control_bar.set_status("not watching")
+        self._kicad_watched_path = None
+
+    def _run_kicad_pipeline(self, sch_path: str):
+        """Export → post-process → ngspice → load .raw."""
+        import os as _os
+        if self._kicad_simulating or self._kicad_bridge is None:
+            return
+        self._kicad_simulating = True
+        if self.kicad_control_bar:
+            self.kicad_control_bar.set_simulating(True)
+
+        try:
+            result = self._kicad_bridge.simulate(sch_path)
+
+            from pqwave.bridge.netlist_postprocessor import NetlistPostProcessor
+            processor = NetlistPostProcessor(self._kicad_bridge.get_netlist_fixes())
+            for fix_info in processor.dry_run(result.get("netlist", "")):
+                self.chat_panel.append_output(f"[kicad] {fix_info['detail']}\n")
+
+            if result["returncode"] != 0:
+                self.chat_panel.append_output(
+                    f"[kicad] ngspice error: {result['stderr'][:500]}\n"
+                )
+                if self.kicad_control_bar:
+                    self.kicad_control_bar.set_status("simulation failed")
+                return
+
+            if result.get("raw_file"):
+                from pqwave.session.api import SessionAPI
+                api = SessionAPI(state=self.state)
+                info = api.load(result["raw_file"])
+                self.chat_panel.append_output(
+                    f"[kicad] Simulation complete: {info['n_variables']} signals, "
+                    f"{info['n_points']} points\n"
+                )
+                if self.kicad_control_bar:
+                    basename = _os.path.basename(sch_path)
+                    self.kicad_control_bar.set_status(
+                        f"watching {basename} — {info['n_variables']} signals"
+                    )
+        finally:
+            self._kicad_simulating = False
+            if self.kicad_control_bar:
+                self.kicad_control_bar.set_simulating(False)
+
+    def _on_kicad_probe_selected(self):
+        """Cross-probe the currently active trace's net in KiCad."""
+        if not self._kicad_cross_probe or not self._kicad_cross_probe.is_connected():
+            if self._kicad_cross_probe:
+                self._kicad_cross_probe.connect_to_kicad()
+            else:
+                return
+
+        panel = self._panel_grid.active_panel()
+        if panel is None:
+            return
+        selected = panel._trace_manager.selected_trace_name()
+        if selected is None:
+            return
+
+        net = selected.strip("vV() ")
+        self._kicad_cross_probe.probe_net(net)
+
+    def _on_kicad_clear_probe(self):
+        """Clear cross-probe highlights in KiCad."""
+        if self._kicad_cross_probe and self._kicad_cross_probe.is_connected():
+            self._kicad_cross_probe.clear()
+
+    # ----
         """Refresh MC control bar from current collection state."""
         mc = self.state.mc_collection
         if mc is None or self.mc_control_bar is None:
@@ -1021,6 +1177,11 @@ class MainWindow(QMainWindow):
             'manage_templates': self._on_manage_templates,
             'close_dataset': self._on_close_dataset,
             'open_monte_carlo': self._on_open_monte_carlo,
+            'kicad_watch': self._on_kicad_watch,
+            'kicad_simulate': self._on_kicad_simulate,
+            'kicad_unwatch': self._on_kicad_unwatch,
+            'kicad_probe_selected': self._on_kicad_probe_selected,
+            'kicad_clear_probe': self._on_kicad_clear_probe,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -3970,7 +4131,7 @@ class MainWindow(QMainWindow):
         self.state.repl_bg = data.get('repl_bg', '')
         saved_paths = data.get('tool_paths', {})
         if isinstance(saved_paths, dict):
-            for key in ('fst2vcd', 'ghwdump'):
+            for key in ('fst2vcd', 'ghwdump', 'kicad_cli', 'ngspice'):
                 val = saved_paths.get(key, '')
                 if isinstance(val, str) and val.strip():
                     self.state.tool_paths[key] = val.strip()
