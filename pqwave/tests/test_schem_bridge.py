@@ -1,5 +1,6 @@
 """Tests for the abstract schematic bridge layer."""
 
+import pytest
 from pqwave.bridge.schem_bridge import SchematicBridge, NetlistFix
 
 
@@ -13,7 +14,7 @@ class FakeFix(NetlistFix):
         lines = netlist.split("\n")
         return "\n".join(f"{line}{self.suffix}" for line in lines)
 
-    def info(self, netlist: str) -> list[dict]:
+    def info(self, netlist: str, context=None) -> list[dict]:
         return [{"fix": self.name, "detail": f"added '{self.suffix}' to {len(netlist.split(chr(10)))} lines"}]
 
 
@@ -24,14 +25,13 @@ class FakeCountingFix(NetlistFix):
         lines = netlist.split("\n")
         return "\n".join(f"{i}:{line}" for i, line in enumerate(lines, 1))
 
-    def info(self, netlist: str) -> list[dict]:
+    def info(self, netlist: str, context=None) -> list[dict]:
         count = netlist.count("\n") + 1
         return [{"fix": self.name, "detail": f"numbered {count} lines"}]
 
 
 class TestSchematicBridgeABC:
     def test_cannot_instantiate_abstract(self):
-        import pytest
         with pytest.raises(TypeError):
             SchematicBridge()
 

@@ -1,14 +1,7 @@
 """Abstract base classes for schematic-capture tool integration."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Optional
-
-
-@dataclass
-class NetlistFixResult:
-    name: str
-    detail: str
 
 
 class NetlistFix(ABC):
@@ -19,7 +12,7 @@ class NetlistFix(ABC):
         ...
 
     @abstractmethod
-    def info(self, netlist: str) -> list[dict]:
+    def info(self, netlist: str, context: Optional[dict] = None) -> list[dict]:
         ...
 
 
