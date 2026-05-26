@@ -482,6 +482,89 @@ class SessionAPI:
             data[i, :len(y)] = y
         return data
 
+    # ---- KiCad bridge methods ----
+
+    def kicad_watch(self, path: str) -> dict:
+        path = os.path.abspath(path)
+        if self._on_mutation:
+            self._on_mutation("kicad_watch", path=path)
+            return {"status": "ok", "path": path}
+        self._kicad_watched_path = path
+        return {"status": "ok", "path": path}
+
+    def kicad_simulate(self, sch_path: str | None = None) -> dict:
+        path = sch_path or getattr(self, "_kicad_watched_path", None)
+        if not path:
+            raise ValueError("No .kicad_sch file specified or watched")
+        if self._on_mutation:
+            self._on_mutation("kicad_simulate", path=path)
+            return {"status": "ok", "triggered": True}
+        from pqwave.bridge.kicad.bridge import KiCadBridge
+        bridge = KiCadBridge()
+        result = bridge.simulate(path)
+        if result["raw_file"]:
+            self.load(result["raw_file"])
+        return {"status": "ok", "raw_file": result.get("raw_file", "")}
+
+    def kicad_unwatch(self) -> dict:
+        if self._on_mutation:
+            self._on_mutation("kicad_unwatch")
+            return {"status": "ok"}
+        self._kicad_watched_path = None
+        return {"status": "ok"}
+
+    def kicad_probe_net(self, name: str) -> dict:
+        if self._on_mutation:
+            self._on_mutation("kicad_probe_net", name=name)
+            return {"status": "ok"}
+        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
+        client = CrossProbeClient()
+        if client.connect_to_kicad():
+            client.probe_net(name)
+            client.disconnect()
+            return {"status": "ok", "net": name}
+        return {"status": "error", "message": "KiCad not running"}
+
+    def kicad_probe_part(self, ref: str, pin: str | None = None) -> dict:
+        if self._on_mutation:
+            self._on_mutation("kicad_probe_part", ref=ref, pin=pin)
+            return {"status": "ok"}
+        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
+        client = CrossProbeClient()
+        if client.connect_to_kicad():
+            client.probe_part(ref, pin)
+            client.disconnect()
+            return {"status": "ok", "ref": ref}
+        return {"status": "error", "message": "KiCad not running"}
+
+    def kicad_clear(self) -> dict:
+        if self._on_mutation:
+            self._on_mutation("kicad_clear")
+            return {"status": "ok"}
+        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
+        client = CrossProbeClient()
+        if client.connect_to_kicad():
+            client.clear()
+            client.disconnect()
+            return {"status": "ok"}
+        return {"status": "error", "message": "KiCad not running"}
+
+    def kicad_config(self, key: str, value=None) -> dict:
+        from pqwave.models.state import ApplicationState
+        state = ApplicationState()
+        if not hasattr(state, "_kicad_config"):
+            state._kicad_config = {
+                "auto_simulate": True,
+                "crossprobe_port": 4243,
+                "fix_slashes": True,
+                "fix_diode_pins": True,
+                "fix_bjt_pins": True,
+            }
+        if value is None:
+            return {"status": "ok", key: state._kicad_config.get(key)}
+        state._kicad_config[key] = value
+        return {"status": "ok", key: value}
+
     def load(self, path: str) -> dict:
         """Load a raw, vcd, or json project file into the session."""
         import os
@@ -2059,3 +2142,45 @@ def _cmd_mc_generate(session: SessionAPI, path: str, output_format: str = "csv",
                     sigmas: list[float] | None = None):
     return session.mc_generate(path, output_format=output_format, runs=runs, seed=seed,
                                nominals=nominals, sigmas=sigmas)
+
+
+@api_command("kicad_watch", "kicad_watch(path)",
+             "Watch a .kicad_sch file for changes and auto-simulate on save")
+def _cmd_kicad_watch(session: SessionAPI, path: str):
+    return session.kicad_watch(path)
+
+
+@api_command("kicad_unwatch", "kicad_unwatch()",
+             "Stop watching the KiCad schematic file")
+def _cmd_kicad_unwatch(session: SessionAPI):
+    return session.kicad_unwatch()
+
+
+@api_command("kicad_simulate", "kicad_simulate(sch_path=None)",
+             "Manually trigger KiCad simulation pipeline")
+def _cmd_kicad_simulate(session: SessionAPI, sch_path: str = None):
+    return session.kicad_simulate(sch_path)
+
+
+@api_command("kicad_probe_net", "kicad_probe_net(name)",
+             "Cross-probe: highlight a net in KiCad schematic")
+def _cmd_kicad_probe_net(session: SessionAPI, name: str):
+    return session.kicad_probe_net(name)
+
+
+@api_command("kicad_probe_part", "kicad_probe_part(ref, pin=None)",
+             "Cross-probe: highlight a component or pin in KiCad schematic")
+def _cmd_kicad_probe_part(session: SessionAPI, ref: str, pin: str = None):
+    return session.kicad_probe_part(ref, pin)
+
+
+@api_command("kicad_clear", "kicad_clear()",
+             "Clear all cross-probe highlights in KiCad")
+def _cmd_kicad_clear(session: SessionAPI):
+    return session.kicad_clear()
+
+
+@api_command("kicad_config", "kicad_config(key, value=None)",
+             "Get or set KiCad bridge configuration")
+def _cmd_kicad_config(session: SessionAPI, key: str, value=None):
+    return session.kicad_config(key, value)
