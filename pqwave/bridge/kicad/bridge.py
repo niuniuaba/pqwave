@@ -110,10 +110,11 @@ class KiCadBridge(SchematicBridge):
                 f.write(fixed)
 
             if raw_output is None:
-                _, raw_output = tempfile.mkstemp(
+                fd, raw_output = tempfile.mkstemp(
                     suffix=".raw", prefix="pqwave_kicad_"
                 )
-                os.close(_)
+                os.close(fd)
+                os.unlink(raw_output)  # ngspice -r creates the file fresh
 
             ngspice = self._resolve_ngspice()
             result = subprocess.run(
