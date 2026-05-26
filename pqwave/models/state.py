@@ -324,6 +324,8 @@ class ApplicationState:
         self.tool_paths: Dict[str, str] = {
             "fst2vcd": "",
             "ghwdump": "",
+            "kicad_cli": "",
+            "ngspice": "",
         }
 
         # Monte Carlo run collection (None when not in MC mode)
