@@ -372,6 +372,32 @@ class SettingsWidget(QWidget):
         ghwdump_reset.clicked.connect(lambda: self._reset_tool_path("ghwdump"))
         tool_paths_layout.addWidget(ghwdump_reset, 1, 2)
 
+        # kicad-cli
+        tool_paths_layout.addWidget(QLabel("kicad-cli:"), 2, 0)
+        self._kicad_cli_edit = QLineEdit()
+        self._kicad_cli_edit.setPlaceholderText("Use $PATH (e.g. /usr/bin/kicad-cli)")
+        self._kicad_cli_edit.setMinimumWidth(200)
+        self._kicad_cli_edit.textChanged.connect(
+            lambda text: self._on_tool_path_changed("kicad_cli"))
+        tool_paths_layout.addWidget(self._kicad_cli_edit, 2, 1)
+
+        kicad_cli_reset = QPushButton("Reset")
+        kicad_cli_reset.clicked.connect(lambda: self._reset_tool_path("kicad_cli"))
+        tool_paths_layout.addWidget(kicad_cli_reset, 2, 2)
+
+        # ngspice
+        tool_paths_layout.addWidget(QLabel("ngspice:"), 3, 0)
+        self._ngspice_edit = QLineEdit()
+        self._ngspice_edit.setPlaceholderText("Use $PATH (e.g. /usr/bin/ngspice)")
+        self._ngspice_edit.setMinimumWidth(200)
+        self._ngspice_edit.textChanged.connect(
+            lambda text: self._on_tool_path_changed("ngspice"))
+        tool_paths_layout.addWidget(self._ngspice_edit, 3, 1)
+
+        ngspice_reset = QPushButton("Reset")
+        ngspice_reset.clicked.connect(lambda: self._reset_tool_path("ngspice"))
+        tool_paths_layout.addWidget(ngspice_reset, 3, 2)
+
         tool_paths_group.setLayout(tool_paths_layout)
         content_layout.addWidget(tool_paths_group)
 
@@ -550,6 +576,12 @@ class SettingsWidget(QWidget):
         self._ghwdump_edit.blockSignals(True)
         self._ghwdump_edit.setText(self.state.tool_paths.get("ghwdump", ""))
         self._ghwdump_edit.blockSignals(False)
+        self._kicad_cli_edit.blockSignals(True)
+        self._kicad_cli_edit.setText(self.state.tool_paths.get("kicad_cli", ""))
+        self._kicad_cli_edit.blockSignals(False)
+        self._ngspice_edit.blockSignals(True)
+        self._ngspice_edit.setText(self.state.tool_paths.get("ngspice", ""))
+        self._ngspice_edit.blockSignals(False)
 
         # Load FFT settings
         fft = self.state.fft_config
@@ -868,17 +900,26 @@ class SettingsWidget(QWidget):
 
     def _on_tool_path_changed(self, key: str) -> None:
         """Write tool path edit back to ApplicationState."""
-        edit = self._fst2vcd_edit if key == "fst2vcd" else self._ghwdump_edit
-        self.state.tool_paths[key] = edit.text().strip()
+        edit_map = {
+            "fst2vcd": self._fst2vcd_edit,
+            "ghwdump": self._ghwdump_edit,
+            "kicad_cli": self._kicad_cli_edit,
+            "ngspice": self._ngspice_edit,
+        }
+        if key in edit_map:
+            self.state.tool_paths[key] = edit_map[key].text().strip()
 
     def _reset_tool_path(self, key: str) -> None:
         """Reset a tool path to default (empty = use $PATH)."""
         self.state.tool_paths[key] = ""
-        if key == "fst2vcd":
-            self._fst2vcd_edit.blockSignals(True)
-            self._fst2vcd_edit.setText("")
-            self._fst2vcd_edit.blockSignals(False)
-        elif key == "ghwdump":
-            self._ghwdump_edit.blockSignals(True)
-            self._ghwdump_edit.setText("")
-            self._ghwdump_edit.blockSignals(False)
+        edit_map = {
+            "fst2vcd": self._fst2vcd_edit,
+            "ghwdump": self._ghwdump_edit,
+            "kicad_cli": self._kicad_cli_edit,
+            "ngspice": self._ngspice_edit,
+        }
+        if key in edit_map:
+            edit = edit_map[key]
+            edit.blockSignals(True)
+            edit.setText("")
+            edit.blockSignals(False)

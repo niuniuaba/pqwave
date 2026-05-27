@@ -804,6 +804,23 @@ class MainWindow(QMainWindow):
         if self._kicad_cross_probe and self._kicad_cross_probe.is_connected():
             self._kicad_cross_probe.clear()
 
+    def _kicad_ba_debounced(self):
+        """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
+        if not self._kicad_cross_probe:
+            return
+        if not self._kicad_cross_probe.is_connected():
+            if not self._kicad_cross_probe.connect_to_kicad():
+                return
+        panel = self._panel_grid.active_panel()
+        if panel is None:
+            return
+        # Find trace name from the active panel
+        selected = panel._trace_manager.selected_trace_name()
+        if selected is None:
+            return
+        net = selected.strip("vV() ")
+        self._kicad_cross_probe.probe_net(net)
+
     # ----
         """Refresh MC control bar from current collection state."""
         mc = self.state.mc_collection
@@ -1242,6 +1259,12 @@ class MainWindow(QMainWindow):
         self._xschem_ba_timer.setInterval(250)  # 250ms debounce
         self._xschem_ba_timer.timeout.connect(self._xschem_ba_debounced)
         self._xschem_ba_x = None  # XB cursor value to send when timer fires
+
+        # KiCad cursor back-annotation timer (same debounce pattern)
+        self._kicad_ba_timer = QTimer()
+        self._kicad_ba_timer.setSingleShot(True)
+        self._kicad_ba_timer.setInterval(250)
+        self._kicad_ba_timer.timeout.connect(self._kicad_ba_debounced)
 
     def _rebind_panel_signals(self, panel):
         """Disconnect old panel signals and connect new panel's signals."""
@@ -3733,6 +3756,9 @@ class MainWindow(QMainWindow):
         # Also trigger xschem schematic back-annotation
         self._xschem_ba_x = x_linear
         self._xschem_ba_timer.start()
+
+        # KiCad cross-probe: highlight net corresponding to cursor position
+        self._kicad_ba_timer.start()
 
         self._update_cursor_status()
         self._sync_x_cursor_to_same_domain_panels('XA', value)
