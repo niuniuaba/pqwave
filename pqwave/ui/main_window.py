@@ -792,11 +792,11 @@ class MainWindow(QMainWindow):
         panel = self._panel_grid.active_panel()
         if panel is None:
             return
-        selected = panel._trace_manager.selected_trace_name()
-        if selected is None:
+        selected = panel._trace_manager.get_selected_traces()
+        if not selected:
             return
-
-        net = selected.strip("vV() ")
+        _, trace = selected[0]
+        net = trace.expression.strip("vV() ")
         self._kicad_cross_probe.probe_net(net)
 
     def _on_kicad_clear_probe(self):
@@ -815,10 +815,11 @@ class MainWindow(QMainWindow):
         if panel is None:
             return
         # Find trace name from the active panel
-        selected = panel._trace_manager.selected_trace_name()
-        if selected is None:
+        selected = panel._trace_manager.get_selected_traces()
+        if not selected:
             return
-        net = selected.strip("vV() ")
+        _, trace = selected[0]
+        net = trace.expression.strip("vV() ")
         self._kicad_cross_probe.probe_net(net)
 
     # ----

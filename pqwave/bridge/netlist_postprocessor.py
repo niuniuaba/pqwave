@@ -14,6 +14,8 @@ class NetlistPostProcessor:
 
     def dry_run(self, netlist: str, context: Optional[dict] = None) -> list[dict]:
         results = []
+        current = netlist
         for fix in self._fixes:
-            results.extend(fix.info(netlist, context))
+            results.extend(fix.info(current, context))
+            current = fix.apply(current, context)
         return results
