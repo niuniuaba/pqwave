@@ -140,12 +140,33 @@ class FixBJTPins(NetlistFix):
                     if i < len(original_nodes):
                         pin_to_node[pin_type] = original_nodes[i]
             elif isinstance(device_pins, dict):
-                for pin_type, pos in device_pins.items():
-                    if isinstance(pos, int) and 0 <= pos < len(original_nodes):
-                        pin_to_node[pin_type] = original_nodes[pos]
+                # Two dict formats are supported:
+                #   A) Sim.Pins: {"1": "E", "2": "B"} — key=pin-number, val=pin-name
+                #   B) Direct:   {"E": 0, "B": 1}    — key=pin-name,  val=node-index
+                first_val = next(iter(device_pins.values()), None)
+                if isinstance(first_val, int):
+                    # Format B: model-pin-name -> original-node-index
+                    for pin_name, idx in device_pins.items():
+                        if isinstance(idx, int) and 0 <= idx < len(original_nodes):
+                            pin_to_node[pin_name] = original_nodes[idx]
+                else:
+                    # Format A: symbol-pin-number -> model-pin-name
+                    for sym_pin, model_pin in device_pins.items():
+                        try:
+                            idx = int(sym_pin) - 1
+                        except (ValueError, TypeError):
+                            continue
+                        if 0 <= idx < len(original_nodes):
+                            pin_to_node[model_pin] = original_nodes[idx]
 
             desired = self._get_desired_order(name)
             new_nodes = [pin_to_node.get(p, "NC") for p in desired]
+
+            # If all pins are NC, the Sim.Pins names don't match our SPICE_ORDER
+            # keys.  Leave the device unchanged rather than destroying it.
+            if all(n == "NC" for n in new_nodes):
+                result_lines.append(line)
+                continue
 
             if new_nodes != original_nodes:
                 _log.warning("FixBJTPins: reordered %s pins to %s (was %s)",
