@@ -95,12 +95,16 @@ class KiCadBridge(SchematicBridge):
         """Run the full pipeline: export → post-process → ngspice → .raw.
 
         Returns a dict with keys:
-          returncode, stdout, stderr, raw_file, netlist
+          returncode, stdout, stderr, raw_file, netlist, fix_info
         """
         netlist = self.export_netlist(sch_path)
         context = self._build_context(sch_path)
 
         processor = NetlistPostProcessor(self.get_netlist_fixes())
+        fix_info = [
+            entry["detail"]
+            for entry in processor.dry_run(netlist, context)
+        ]
         fixed = processor.process(netlist, context)
 
         fd, cir_path = tempfile.mkstemp(suffix=".cir", prefix="pqwave_kicad_")
@@ -127,6 +131,7 @@ class KiCadBridge(SchematicBridge):
                 "stderr": result.stderr,
                 "raw_file": raw_output if result.returncode == 0 else None,
                 "netlist": fixed,
+                "fix_info": fix_info,
             }
         finally:
             try:

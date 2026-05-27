@@ -692,6 +692,11 @@ class MainWindow(QMainWindow):
         from pqwave.bridge.kicad.cross_probe import CrossProbeClient
         from pqwave.bridge.kicad.control_bar import KiCadControlBar
 
+        if self._kicad_cross_probe:
+            self._kicad_cross_probe.disconnect()
+        if self._kicad_watcher:
+            self._kicad_watcher.unwatch()
+
         self._kicad_bridge = KiCadBridge()
         self._kicad_watcher = KiCadFileWatcher()
         self._kicad_cross_probe = CrossProbeClient()
@@ -750,10 +755,8 @@ class MainWindow(QMainWindow):
         try:
             result = self._kicad_bridge.simulate(sch_path)
 
-            from pqwave.bridge.netlist_postprocessor import NetlistPostProcessor
-            processor = NetlistPostProcessor(self._kicad_bridge.get_netlist_fixes())
-            for fix_info in processor.dry_run(result.get("netlist", "")):
-                self.chat_panel.append_output(f"[kicad] {fix_info['detail']}\n")
+            for detail in result.get("fix_info", []):
+                self.chat_panel.append_output(f"[kicad] {detail}\n")
 
             if result["returncode"] != 0:
                 self.chat_panel.append_output(
@@ -781,31 +784,8 @@ class MainWindow(QMainWindow):
             if self.kicad_control_bar:
                 self.kicad_control_bar.set_simulating(False)
 
-    def _on_kicad_probe_selected(self):
-        """Cross-probe the currently active trace's net in KiCad."""
-        if not self._kicad_cross_probe or not self._kicad_cross_probe.is_connected():
-            if self._kicad_cross_probe:
-                self._kicad_cross_probe.connect_to_kicad()
-            else:
-                return
-
-        panel = self._panel_grid.active_panel()
-        if panel is None:
-            return
-        selected = panel._trace_manager.get_selected_traces()
-        if not selected:
-            return
-        _, trace = selected[0]
-        net = trace.expression.strip("vV() ")
-        self._kicad_cross_probe.probe_net(net)
-
-    def _on_kicad_clear_probe(self):
-        """Clear cross-probe highlights in KiCad."""
-        if self._kicad_cross_probe and self._kicad_cross_probe.is_connected():
-            self._kicad_cross_probe.clear()
-
-    def _kicad_ba_debounced(self):
-        """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
+    def _kicad_probe_active_trace(self):
+        """Cross-probe the active panel's selected trace net in KiCad."""
         if not self._kicad_cross_probe:
             return
         if not self._kicad_cross_probe.is_connected():
@@ -814,7 +794,6 @@ class MainWindow(QMainWindow):
         panel = self._panel_grid.active_panel()
         if panel is None:
             return
-        # Find trace name from the active panel
         selected = panel._trace_manager.get_selected_traces()
         if not selected:
             return
@@ -822,7 +801,20 @@ class MainWindow(QMainWindow):
         net = trace.expression.strip("vV() ")
         self._kicad_cross_probe.probe_net(net)
 
-    # ----
+    def _on_kicad_probe_selected(self):
+        """Menu action: cross-probe the currently active trace's net in KiCad."""
+        self._kicad_probe_active_trace()
+
+    def _on_kicad_clear_probe(self):
+        """Clear cross-probe highlights in KiCad."""
+        if self._kicad_cross_probe and self._kicad_cross_probe.is_connected():
+            self._kicad_cross_probe.clear()
+
+    def _kicad_ba_debounced(self):
+        """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
+        self._kicad_probe_active_trace()
+
+    def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""
         mc = self.state.mc_collection
         if mc is None or self.mc_control_bar is None:
