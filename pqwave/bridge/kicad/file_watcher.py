@@ -1,14 +1,14 @@
-"""QFileSystemWatcher wrapper for .kicad_sch files."""
+"""File watcher for .kicad_sch files — polls mtime, handles atomic saves."""
 
 import os
-from PyQt6.QtCore import QFileSystemWatcher, QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 
 class KiCadFileWatcher(QObject):
-    """Watch a single .kicad_sch file for changes.
+    """Watch a single .kicad_sch file for changes via mtime polling.
 
-    Handles KiCad's atomic save pattern (delete -> write new -> rename).
-    Emits file_changed(str) when the file is modified.
+    QFileSystemWatcher does not reliably detect KiCad's atomic save (rename
+    temp over target), so we poll mtime every second instead.
 
     Signals:
         file_changed(str): emitted with the watched file path on save
@@ -18,39 +18,44 @@ class KiCadFileWatcher(QObject):
 
     def __init__(self):
         super().__init__()
-        self._watcher = QFileSystemWatcher()
-        self._watcher.fileChanged.connect(self._on_file_changed)
         self._watched_path: str | None = None
-        self._rewatch_timer = QTimer()
-        self._rewatch_timer.setSingleShot(True)
-        self._rewatch_timer.timeout.connect(self._rewatch)
+        self._last_mtime: float = 0
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._poll)
+        self._miss_count = 0
 
     def watch(self, path: str) -> None:
-        """Start watching a .kicad_sch file."""
-        if self._watched_path:
-            self._watcher.removePath(self._watched_path)
+        """Start polling a .kicad_sch file for mtime changes."""
         self._watched_path = os.path.abspath(path)
-        self._watcher.addPath(self._watched_path)
+        self._miss_count = 0
+        try:
+            self._last_mtime = os.path.getmtime(self._watched_path)
+        except OSError:
+            self._last_mtime = 0
+        self._timer.start(1000)
 
     def unwatch(self) -> None:
-        """Stop watching."""
-        if self._watched_path:
-            if self._watched_path in self._watcher.files():
-                self._watcher.removePath(self._watched_path)
-            self._watched_path = None
+        """Stop polling."""
+        self._timer.stop()
+        self._watched_path = None
+        self._last_mtime = 0
 
     @property
     def watched_path(self) -> str | None:
         return self._watched_path
 
-    def _on_file_changed(self, path: str):
-        if not os.path.exists(path):
-            self._rewatch_timer.start(200)
+    def _poll(self):
+        if not self._watched_path:
             return
-        self.file_changed.emit(path)
+        try:
+            mtime = os.path.getmtime(self._watched_path)
+        except OSError:
+            self._miss_count += 1
+            if self._miss_count > 10:
+                self._timer.stop()
+            return
 
-    def _rewatch(self):
-        if self._watched_path and os.path.exists(self._watched_path):
-            if self._watched_path not in self._watcher.files():
-                self._watcher.addPath(self._watched_path)
+        self._miss_count = 0
+        if mtime != self._last_mtime:
+            self._last_mtime = mtime
             self.file_changed.emit(self._watched_path)

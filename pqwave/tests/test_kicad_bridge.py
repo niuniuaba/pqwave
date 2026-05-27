@@ -82,20 +82,21 @@ class TestKiCadBridgeSimulate:
         )
         netlist = ".title test\nR1 1 0 1k\nV1 1 0 DC 1\n.end\n"
         with patch("os.path.isfile", return_value=True):
-            with patch("subprocess.run") as mock_run:
-                mock_run.side_effect = [
-                    MagicMock(returncode=0, stderr=""),
-                    MagicMock(returncode=0, stdout="sim ok", stderr=""),
-                ]
-                with patch("builtins.open", mock_open(read_data=netlist)):
-                    result = bridge.simulate(
-                        "/path/to/circuit.kicad_sch",
-                        raw_output="/tmp/out.raw",
-                    )
-                    assert result["returncode"] == 0
-                    assert result["raw_file"] == "/tmp/out.raw"
-                    assert result["netlist"] == netlist
-                    assert mock_run.call_count == 2
+            with patch("os.path.exists", return_value=True):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.side_effect = [
+                        MagicMock(returncode=0, stderr=""),
+                        MagicMock(returncode=0, stdout="sim ok", stderr=""),
+                    ]
+                    with patch("builtins.open", mock_open(read_data=netlist)):
+                        result = bridge.simulate(
+                            "/path/to/circuit.kicad_sch",
+                            raw_output="/tmp/out.raw",
+                        )
+                        assert result["returncode"] == 0
+                        assert result["raw_file"] == "/tmp/out.raw"
+                        assert result["netlist"] == netlist
+                        assert mock_run.call_count == 2
 
     def test_simulate_ngspice_error(self):
         bridge = KiCadBridge(

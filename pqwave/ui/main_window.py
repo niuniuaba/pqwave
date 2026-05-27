@@ -161,6 +161,9 @@ class MainWindow(QMainWindow):
         self._kicad_cross_probe = None
         self._kicad_watched_path = None
         self._kicad_simulating = False
+        self._kicad_dataset_indices: list[int] = []
+        self._kicad_last_path: str = ""
+        self._kicad_connect_failed: bool = False
 
         self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
@@ -706,12 +709,14 @@ class MainWindow(QMainWindow):
             upper = self._main_splitter.widget(0)
             if upper and upper.layout():
                 upper.layout().addWidget(self.kicad_control_bar)
-            self.kicad_control_bar.simulate_clicked.connect(self._on_kicad_simulate)
+            self.kicad_control_bar.rewatch_clicked.connect(self._on_kicad_rewatch)
             self.kicad_control_bar.unwatch_clicked.connect(self._on_kicad_unwatch)
 
         self._kicad_watcher.file_changed.connect(self._on_kicad_file_changed)
         self._kicad_watcher.watch(sch_path)
         self._kicad_watched_path = sch_path
+        self._kicad_last_path = sch_path
+        self._kicad_connect_failed = False
 
         self._kicad_cross_probe.error_occurred.connect(
             lambda msg: self.chat_panel.append_output(f"[kicad] {msg}\n")
@@ -719,34 +724,48 @@ class MainWindow(QMainWindow):
 
         self.kicad_control_bar.setVisible(True)
         basename = os.path.basename(sch_path)
+        self.statusBar().showMessage(f"Watching {basename} — save in KiCad to auto-simulate")
         self.kicad_control_bar.set_status(f"watching {basename}")
 
         self._run_kicad_pipeline(sch_path)
 
     def _on_kicad_file_changed(self, path: str):
         """File watcher callback — schematic was saved."""
+        if self.kicad_control_bar:
+            self.kicad_control_bar.set_status("change detected, simulating...")
         self._run_kicad_pipeline(path)
 
     def _on_kicad_simulate(self):
-        """Manual simulate button or menu action."""
+        """Menu action: manually re-run simulation on watched file."""
         if self._kicad_watched_path:
             self._run_kicad_pipeline(self._kicad_watched_path)
 
+    def _on_kicad_rewatch(self):
+        """Re-Watch button: resume watching, or re-simulate if already watching."""
+        if self._kicad_watched_path:
+            self._run_kicad_pipeline(self._kicad_watched_path)
+        elif self._kicad_last_path:
+            self._start_kicad_watch(self._kicad_last_path)
+
     def _on_kicad_unwatch(self):
         """Stop watching the schematic."""
+        self._kicad_last_path = self._kicad_watched_path
         if self._kicad_watcher:
             self._kicad_watcher.unwatch()
         if self._kicad_cross_probe:
             self._kicad_cross_probe.disconnect()
         if self.kicad_control_bar:
-            self.kicad_control_bar.setVisible(False)
-            self.kicad_control_bar.set_status("not watching")
+            self.kicad_control_bar.set_status("not watching (click Re-Watch to resume)")
         self._kicad_watched_path = None
 
     def _run_kicad_pipeline(self, sch_path: str):
         """Export → post-process → ngspice → load .raw."""
         import os as _os
-        if self._kicad_simulating or self._kicad_bridge is None:
+        if self._kicad_simulating:
+            self.chat_panel.append_output("[kicad] pipeline skipped (already simulating)\n")
+            return
+        if self._kicad_bridge is None:
+            self.chat_panel.append_output("[kicad] pipeline skipped (no bridge)\n")
             return
         self._kicad_simulating = True
         if self.kicad_control_bar:
@@ -767,18 +786,62 @@ class MainWindow(QMainWindow):
                 return
 
             if result.get("raw_file"):
-                from pqwave.session.api import SessionAPI
-                api = SessionAPI(state=self.state)
-                info = api.load(result["raw_file"])
+                # Save current trace expressions and axes
+                saved: list[tuple[str, str, str]] = []
+                for panel in self.panel_grid.panels.values():
+                    for t in panel.trace_manager._state_traces:
+                        saved.append((t.expression, t.y_axis.value, panel.panel_id))
+
+                # Remove previous kicad datasets and clear traces
+                for idx in sorted(self._kicad_dataset_indices, reverse=True):
+                    self.state.remove_dataset(idx)
+                self._kicad_dataset_indices.clear()
+
+                for panel in self.panel_grid.panels.values():
+                    panel.trace_manager.clear_traces()
+
+                # Load new data
+                old_count = len(self.state.datasets)
+                try:
+                    self._load_raw_file(result["raw_file"])
+                except Exception:
+                    self._kicad_dataset_indices.clear()
+                    raise
+                new_count = len(self.state.datasets)
+                if new_count > old_count:
+                    self._kicad_dataset_indices = list(range(old_count, new_count))
+                else:
+                    self._kicad_dataset_indices.clear()
+
+                # Restore traces
+                x_var = self.state.current_x_var
+                for expr, axis, pid in saved:
+                    panel = self.panel_grid.panels.get(pid)
+                    if panel and x_var:
+                        y_axis = AxisAssignment.Y1 if axis == "Y1" else AxisAssignment.Y2
+                        panel.trace_manager.add_trace(expr, x_var, y_axis)
+                ds = self.state.current_dataset
+                n_vars = ds.n_variables if ds else 0
+                n_pts = ds.n_points if ds else 0
                 self.chat_panel.append_output(
-                    f"[kicad] Simulation complete: {info['n_variables']} signals, "
-                    f"{info['n_points']} points\n"
+                    f"[kicad] Simulation complete: {n_vars} signals, "
+                    f"{n_pts} points\n"
                 )
                 if self.kicad_control_bar:
                     basename = _os.path.basename(sch_path)
                     self.kicad_control_bar.set_status(
-                        f"watching {basename} — {info['n_variables']} signals"
+                        f"watching {basename} — {n_vars} signals"
                     )
+            else:
+                stderr_tail = result.get("stderr", "")[-300:]
+                self.chat_panel.append_output(
+                    f"[kicad] No .raw was produced in the simulation — "
+                    f"no analysis commands in the netlist, or .control block "
+                    f"writes the file to a different path, or ngspice ran into failure.\n"
+                    f"[kicad] stderr: {stderr_tail}\n"
+                )
+                if self.kicad_control_bar:
+                    self.kicad_control_bar.set_status("simulation failed (no output)")
         finally:
             self._kicad_simulating = False
             if self.kicad_control_bar:
@@ -788,10 +851,14 @@ class MainWindow(QMainWindow):
         """Cross-probe the active panel's selected trace net in KiCad."""
         if not self._kicad_cross_probe:
             return
+        if self._kicad_connect_failed:
+            return
         if not self._kicad_cross_probe.is_connected():
             if not self._kicad_cross_probe.connect_to_kicad():
+                self._kicad_connect_failed = True
                 return
-        panel = self._panel_grid.active_panel()
+        self._kicad_connect_failed = False
+        panel = self.panel_grid.active_panel()
         if panel is None:
             return
         selected = panel._trace_manager.get_selected_traces()
@@ -803,6 +870,7 @@ class MainWindow(QMainWindow):
 
     def _on_kicad_probe_selected(self):
         """Menu action: cross-probe the currently active trace's net in KiCad."""
+        self._kicad_connect_failed = False
         self._kicad_probe_active_trace()
 
     def _on_kicad_clear_probe(self):
@@ -1163,6 +1231,7 @@ class MainWindow(QMainWindow):
             'show_repl_help': self._show_repl_help,
             'show_api_help': self._show_api_help,
             'show_mc_guide': self._show_mc_guide,
+            'show_kicad_guide': self._show_kicad_guide,
             'split_horizontal': self._split_panel_horizontal,
             'split_vertical': self._split_panel_vertical,
             'close_panel': self._close_active_panel,
@@ -1189,9 +1258,8 @@ class MainWindow(QMainWindow):
             'open_monte_carlo': self._on_open_monte_carlo,
             'kicad_watch': self._on_kicad_watch,
             'kicad_simulate': self._on_kicad_simulate,
+            'kicad_rewatch': self._on_kicad_rewatch,
             'kicad_unwatch': self._on_kicad_unwatch,
-            'kicad_probe_selected': self._on_kicad_probe_selected,
-            'kicad_clear_probe': self._on_kicad_clear_probe,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -4593,25 +4661,35 @@ class MainWindow(QMainWindow):
         self.axis_manager.set_axis_log_mode(axis_id, not config.log_mode)
 
     def _show_keybindings(self) -> None:
-        """Open the Keybindings help dialog."""
+        """Open the Keybindings help dialog (non-modal)."""
+        from PyQt6.QtCore import Qt
         bindings = self.keybinding_manager.get_all_bindings()
         config_path = self.keybinding_manager._config_path()
         dialog = KeyBindingsDialog(bindings, config_path, self)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.show()
 
     def _show_functions_help(self) -> None:
-        """Open the Functions Reference help dialog."""
+        """Open the Functions Reference help dialog (non-modal)."""
+        from PyQt6.QtCore import Qt
         dialog = FunctionsHelpDialog(self)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.show()
 
     def _show_measures_help(self) -> None:
-        """Open the Measures Reference help dialog."""
+        """Open the Measures Reference help dialog (non-modal)."""
+        from PyQt6.QtCore import Qt
         dialog = MeasuresHelpDialog(self)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.show()
 
     def _show_vector_selection_help(self) -> None:
-        """Open a help dialog explaining the vector selection widget."""
+        """Open a help dialog explaining the vector selection widget (non-modal)."""
         from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtCore import Qt
         msg = (
             "The Vectors selector lets you pick signals from all loaded files.\n\n"
             "  • Check a box to mark a vector for insertion.\n"
@@ -4624,25 +4702,36 @@ class MainWindow(QMainWindow):
             "Checked vectors appear in the Add Trace expression field\n"
             "separated by spaces and can be edited before adding."
         )
-        QMessageBox.information(self, "Help — Select Vectors", msg)
+        box = QMessageBox(QMessageBox.Icon.Information, "Help — Select Vectors", msg,
+                          QMessageBox.StandardButton.Ok, self)
+        box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        box.setModal(False)
+        box.show()
 
     def _show_repl_help(self) -> None:
-        """Show REPL usage help."""
+        """Show REPL usage help (non-modal)."""
+        from PyQt6.QtCore import Qt
         from pqwave.ui.repl_help_dialog import ReplHelpDialog
         dialog = ReplHelpDialog(self)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.show()
 
     def _show_api_help(self) -> None:
-        """Show API command reference."""
+        """Show API command reference (non-modal)."""
+        from PyQt6.QtCore import Qt
         from pqwave.ui.api_help_dialog import ApiHelpDialog
         dialog = ApiHelpDialog(self)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.show()
 
     def _show_mc_guide(self) -> None:
-        """Show the Monte Carlo user guide."""
+        """Show the Monte Carlo user guide (non-modal)."""
         from PyQt6.QtWidgets import (
             QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
         )
+        from PyQt6.QtCore import Qt
 
         from pathlib import Path
         guide_path = Path(__file__).parent.parent.parent / "docs" / "monte_carlo" / "guide.html"
@@ -4672,6 +4761,8 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Monte Carlo Guide")
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
         dialog.resize(780, 620)
 
         layout = QVBoxLayout(dialog)
@@ -4683,7 +4774,55 @@ class MainWindow(QMainWindow):
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
 
-        dialog.exec()
+        dialog.show()
+
+    def _show_kicad_guide(self) -> None:
+        """Show the KiCad integration user guide (non-modal)."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+        )
+        from PyQt6.QtCore import Qt
+
+        from pathlib import Path
+        guide_path = Path(__file__).parent.parent.parent / "docs" / "kicad" / "guide.html"
+        if not guide_path.exists():
+            QMessageBox.warning(
+                self, "Not Found",
+                f"KiCad guide not found at:\n{guide_path}",
+            )
+            return
+
+        try:
+            html = guide_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(
+                self, "Error",
+                f"Failed to read KiCad guide:\n{e}",
+            )
+            return
+
+        # Inject palette-adaptive colors into the HTML template
+        p = self.palette()
+        html = html.replace("__TEXT__", p.color(p.ColorRole.Text).name())
+        html = html.replace("__BASE__", p.color(p.ColorRole.Base).name())
+        html = html.replace("__LINK__", p.color(p.ColorRole.Link).name())
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("KiCad User Guide")
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.resize(780, 620)
+
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setHtml(html)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.show()
 
     @staticmethod
     def _fuzzy_signal_match(expr: str, signals: list[str]) -> str | None:

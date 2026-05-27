@@ -1,6 +1,6 @@
 # KiCad Integration User Guide
 
-pqwave integrates with KiCad Eeschema through a netlist-based pipeline and a bidirectional TCP cross-probe link. This guide covers the integration features and walks through real analysis workflows.
+pqwave integrates with KiCad Eeschema through a netlist-based file-watching pipeline. This guide covers the integration features and walks through real analysis workflows.
 
 > **No KiCad source modifications required.** Everything works with pre-built KiCad binaries (version 8.0+).
 
@@ -10,14 +10,14 @@ pqwave integrates with KiCad Eeschema through a netlist-based pipeline and a bid
 - [Overview: How It Works](#overview-how-it-works)
 - [Netlist Pipeline](#netlist-pipeline)
 - [Netlist Post-Processor](#netlist-post-processor)
-- [Cross-Probe (pqwave → KiCad)](#cross-probe-pqwave--kicad)
+- [Cross-Probe / Back-Annotation (Known Limitation)](#cross-probe--back-annotation-known-limitation)
 - [Session API Commands](#session-api-commands)
 
 ### Part 2 — Worked Tutorials
 - [Example Overview](#example-overview)
 - [Example 1: Full-Wave Bridge Rectifier](#example-1-full-wave-bridge-rectifier)
 - [Example 2: Nonlinear C-V Characterization](#example-2-nonlinear-c-v-characterization)
-- [Example 3: Back-Annotation Workflow](#example-3-back-annotation-workflow)
+- [Example 3: BJT Pin Fix Verification](#example-3-bjt-pin-fix-verification)
 - [Standalone Scripting Example](#standalone-scripting-example)
 
 ---
@@ -38,15 +38,13 @@ Saves (Ctrl+S) ───────────────────►    k
                                          ✓ move .control block
                                        ngspice -b -r result.raw
                                        Loads, displays ALL signals
-
-User clicks trace in pqwave ▼
-localhost:4243  ◄──TCP───────────    $NET: "Vout"
-KiCad highlights net ◄─────────────   Back-annotates
 ```
 
-pqwave runs the simulation externally and uses KiCad's built-in cross-probe server (port 4243) for back-annotation.
+pqwave runs the simulation externally via ngspice and loads the results for analysis. The file watcher detects schematic saves and triggers automatic re-simulation.
 
-> **Design note — why probing starts from pqwave, not KiCad:** Probing starts from pqwave, not KiCad — the user selects signals in pqwave's signal browser rather than clicking nets in the schematic. But clicking a trace in pqwave highlights the net in KiCad. pqwave shows every signal from the simulation at once, the user explores freely, and back-annotates to the schematic when they find something worth investigating. The schematic is the design canvas; pqwave is the analysis cockpit.
+> **Design note — why probing starts from pqwave, not KiCad:** Probing starts from pqwave — the user selects signals in the signal browser rather than clicking nets in the schematic. pqwave shows every signal from the simulation at once, and the user explores freely. The schematic is the design canvas; pqwave is the analysis cockpit.
+>
+> Net/node highlight back-annotation from pqwave to KiCad is a [known limitation](#cross-probe--back-annotation-known-limitation): KiCad's cross-probe channel is a private Eeschema–PcbNew link and is not exposed as a public API for external tools.
 
 The netlist post-processor fixes four known KiCad export issues automatically:
 
@@ -73,7 +71,7 @@ The KiCad Bridge processes schematics through a three-stage pipeline:
 | Auto-simulate | `true` | Run simulation automatically when schematic is saved |
 | Simulator | `ngspice` | SPICE simulator binary (must be in PATH) |
 | Raw output dir | `$PROJECT_DIR` | Where `.raw` files are written |
-| Cross-probe port | `4243` | KiCad Eeschema cross-probe TCP port |
+| Cross-probe port | `4243` | Not yet available (see [known limitation](#cross-probe--back-annotation-known-limitation)) |
 | Netlist fix: strip slashes | `true` | Remove leading `/` from node names |
 | Netlist fix: diode pins | `true` | Swap diode pin order to SPICE convention |
 | Netlist fix: BJT/MOSFET pins | `true` | Reorder transistor pins to SPICE convention |
@@ -124,19 +122,13 @@ KiCad writes schematic text directives in visual order (left-to-right on the she
 
 **Disable individual fixes** via settings if you have manually corrected your schematic or symbol libraries.
 
-### Cross-Probe (pqwave → KiCad)
+### Cross-Probe / Back-Annotation (Known Limitation)
 
-Clicking a trace point in pqwave sends a cross-probe command to KiCad over TCP.
+**What it is:** Cross-probe (also called back-annotation) is the ability to click a signal in pqwave and have KiCad Eeschema highlight the corresponding net or component in the schematic. This is a standard feature in integrated EDA+waveform tools — it lets you quickly navigate between simulation results and the circuit design.
 
-| Trace Click Action | Command Sent | KiCad Behavior |
-|-------------------|-------------|----------------|
-| Click on any trace | `$NET: "netname"` | Highlights the net on all schematic sheets |
-| Click on trace + Shift | `$PART: "refdes"` | Highlights the component symbol |
-| Right-click > Probe Pin | `$PART: "ref" $PAD: "pin"` | Highlights a specific pin |
+**Why it is not yet supported:** KiCad's internal cross-probe mechanism uses a TCP channel on port 4243, but this is a private channel between Eeschema and PcbNew — it is not exposed as a public API for external tools. There is no documented, stable way for a third-party application like pqwave to send highlight commands to Eeschema. Attempts to bridge this gap via KiCad's action plugin system were not viable because the plugin API is focused on PCB operations and offers no schematic highlighting entry point.
 
-KiCad's cross-probe server runs on `localhost:4243` whenever Eeschema is open. No configuration needed — pqwave auto-detects it.
-
-**Schematic → pqwave direction** is handled by the file watcher. When the user saves the schematic in KiCad, pqwave re-exports, re-simulates, and refreshes. All signals from the `.raw` file appear in pqwave's signal browser.
+The auto-watch pipeline provides a partial workaround for the Schematic → pqwave direction: saving the schematic in KiCad triggers a full re-export, post-process, and re-simulation in pqwave. New results appear in the signal browser automatically.
 
 ### Session API Commands
 
@@ -159,13 +151,13 @@ All KiCad Bridge operations are available through the Session API.
 | `kicad_fix_netlist` | `kicad_fix_netlist(netlist_text)` | Apply all post-processing fixes to a netlist string. Returns fixed netlist. |
 | `kicad_fix_info` | `kicad_fix_info(netlist_text)` | Dry-run: report what fixes would be applied without changing anything. |
 
-**Cross-Probe:**
+**Cross-Probe (known limitation — see [above](#cross-probe--back-annotation-known-limitation)):**
 
 | Command | Signature | Description |
 |---------|-----------|-------------|
-| `kicad_probe_net` | `kicad_probe_net(net_name)` | Highlight a net in KiCad schematic. |
-| `kicad_probe_part` | `kicad_probe_part(refdes, pin=None)` | Highlight a component or pin in KiCad schematic. |
-| `kicad_clear` | `kicad_clear()` | Clear all highlights in KiCad. |
+| `kicad_probe_net` | `kicad_probe_net(net_name)` | Not yet functional. |
+| `kicad_probe_part` | `kicad_probe_part(refdes, pin=None)` | Not yet functional. |
+| `kicad_clear` | `kicad_clear()` | Not yet functional. |
 
 **Configuration:**
 
@@ -183,9 +175,9 @@ Every tutorial starts from a `.kicad_sch` file in `docs/kicad/examples/`. Open i
 
 | Example | Schematic File | Circuit | Analysis | Demonstrates |
 |---------|---------------|---------|----------|-------------|
-| Bridge Rectifier | `bridge.kicad_sch` | Full-wave bridge + filter cap | Transient 40 ms, 100 Hz input | Diode pin fix, basic pipeline, cross-probe |
+| Bridge Rectifier | `bridge.kicad_sch` | Full-wave bridge + filter cap | Transient 40 ms, 100 Hz input | Diode pin fix, basic pipeline |
 | C-V Characterization | `cdg.kicad_sch` | Nonlinear Cgd model, B-sources, .PARAM/.FUNC | DC sweep × AC via .control loop | Slash fix, .control placement, B-source expressions, multi-run sweep |
-| Back-Annotation | `back_annotate.kicad_sch` | Two-stage BJT amplifier | Transient 10 ms | BJT pin fix, net/part/pin cross-probe, debug workflow |
+| BJT Amplifier | `bjt_amplifier.kicad_sch` | Two-stage BJT amplifier | Transient 10 ms | BJT pin fix, multi-signal analysis |
 
 **Prerequisites:**
 - KiCad 8.0+ with `kicad-cli` in PATH
@@ -244,20 +236,6 @@ The signal browser lists: `v(ac_p)`, `v(ac_n)`, `v(r1)`, `v(r2)`, `i(v1)`, `time
 - v(r1) ripple: ~2 V pk-pk at 100 Hz
 
 > **Without the post-processor:** v(r1) would read ~−98 V — all four diodes are reversed in KiCad's export, so the bridge produces a negative output. The waveform _looks_ correct (same ripple, same magnitude) but has the wrong sign. Users debugging this in KiCad's built-in simulator would see inverted results and not know why.
-
-#### Step 3: Cross-Probe Back to KiCad
-
-1. Make sure KiCad Eeschema is running with `bridge.kicad_sch` open.
-2. In pqwave, **right-click** the v(r1) trace and select **Cross-Probe Net**.
-3. KiCad highlights the `R1` net — the wire from the bridge output to the filter cap.
-4. **Shift+click** the same trace to highlight the component (e.g., D1) instead.
-
-**Or via API:**
-```python
-api.kicad_probe_net("R1")       # highlight the output net
-api.kicad_probe_part("D1")      # highlight diode D1
-api.kicad_clear()               # clear all highlights
-```
 
 ---
 
@@ -331,11 +309,11 @@ mag(ac_data[cursorB]) / mag(ac_data[cursorA])
 
 ---
 
-### Example 3: Back-Annotation Workflow
+### Example 3: BJT Pin Fix Verification
 
-A complete bidirectional workflow: design a two-stage BJT amplifier in KiCad, simulate in pqwave, find a biasing issue, and back-annotate the problem to the schematic for debugging.
+Verify that the BJT pin reordering fix is working — and see what happens without it.
 
-**Start here:** Open `docs/kicad/examples/back_annotate.kicad_sch` in KiCad Eeschema.
+**Start here:** Open `docs/kicad/examples/bjt_amplifier.kicad_sch` in KiCad Eeschema.
 
 **Circuit:**
 - V1: 1 kHz, 50 mV sinusoidal input
@@ -347,8 +325,8 @@ A complete bidirectional workflow: design a two-stage BJT amplifier in KiCad, si
 
 #### Step 1: Run and Verify the Simulation
 
-1. In pqwave: watch and simulate `back_annotate.kicad_sch`.
-2. The console confirms BJT pin fixes:
+1. In pqwave: watch and simulate `bjt_amplifier.kicad_sch`.
+2. The chat panel confirms BJT pin fixes:
 ```
 [kicad] Fixing Q1 (2N3904): reordered pins to stage1 Net-_Q1-B_ Net-_Q1-E_ (was Net-_Q1-E_ Net-_Q1-B_ stage1)
 [kicad] Fixing Q2 (2N3904): reordered pins to Net-_Q2-C_ Net-_Q2-B_ Net-_Q2-E_ (was Net-_Q2-E_ Net-_Q2-B_ Net-_Q2-C_)
@@ -358,8 +336,8 @@ A complete bidirectional workflow: design a two-stage BJT amplifier in KiCad, si
 
 **Or via API:**
 ```python
-api.kicad_watch("docs/kicad/examples/back_annotate.kicad_sch")
-api.kicad_simulate("docs/kicad/examples/back_annotate.kicad_sch")
+api.kicad_watch("docs/kicad/examples/bjt_amplifier.kicad_sch")
+api.kicad_simulate("docs/kicad/examples/bjt_amplifier.kicad_sch")
 api.select_panel(1)
 api.add_trace("v(in)")
 api.add_trace("v(stage1)")
@@ -371,23 +349,21 @@ api.add_trace("v(out)")
 - v(stage1): inverted, ~111 mV amplitude (gain ~2.2x, 6.9 dB from Q1)
 - v(out): ~12 V amplitude, clipped to supply rail (total gain ~240x, 47.6 dB)
 
-> **What's happening:** Stage 1 provides modest voltage gain (~2.2x) with Rc=5k and Re=1k. Stage 2 amplifies further but the output hits the 12 V supply rail, causing clipping. v(out) is effectively a square wave. Use cross-probing to inspect the bias point at each stage.
+> **What's happening:** Stage 1 provides modest voltage gain (~2.2x) with Rc=5k and Re=1k. Stage 2 amplifies further but the output hits the 12 V supply rail, causing clipping. v(out) is effectively a square wave.
 
-#### Step 2: Debug with Cross-Probing
+#### Step 2: Debug with Cursors
 
 1. v(out) is clipping at the 12 V supply rail — the amplifier is saturating.
 2. Place **cursor A** at the clipped peak of v(out).
-3. **Right-click > Cross-Probe Net** — KiCad highlights the `out` net (Q2's collector).
-4. **Shift+click** the cursor — KiCad highlights Q2 itself.
-5. In KiCad, inspect Q2's biasing. Rc2=5k and Re2=1k provide high gain, but the signal from stage 1 already drives Q2 into saturation.
-6. Now probe v(stage1): place **cursor B** and cross-probe to highlight the `stage1` net at Q1's collector.
+3. Place **cursor B** on v(stage1) to check the intermediate stage.
+4. Use the **Measure** functions to quantify the gain at each stage.
 
 #### Step 3: Verify the BJT Pin Fix
 
 1. Temporarily disable the BJT pin fix to see what happens without it:
 ```python
 api.kicad_config("fix_bjt_pins", False)
-api.kicad_simulate("docs/kicad/examples/back_annotate.kicad_sch")
+api.kicad_simulate("docs/kicad/examples/bjt_amplifier.kicad_sch")
 ```
 2. The output waveform collapses — wrong pin order swaps collector and emitter, destroying the amplifier's gain.
 3. Re-enable:
@@ -436,9 +412,6 @@ api.add_trace("v(in)")
 gain = api.eval_expr("max(v(out)) / max(v(in))", panel=1)
 print(f"Voltage gain: {gain:.2f} ({20 * gain.log10():.1f} dB)")
 
-# Cross-probe the output net back to KiCad
-api.kicad_probe_net("out")
-
 # The file watcher keeps running in background.
 # Save the schematic in KiCad to trigger automatic re-simulation.
 # Press Ctrl+C in the REPL to stop watching.
@@ -472,7 +445,7 @@ api.kicad_config("fix_bjt_pins", False)
 1. Verify KiCad Eeschema is running and a schematic is open.
 2. Verify the port: `api.kicad_config("crossprobe_port")` — default `4243`.
 3. Test manually from terminal: `echo '$NET: "GND"' | nc localhost 4243`.
-4. KiCad versions before 8.0 may use a different cross-probe protocol.
+4. Cross-probe / back-annotation from pqwave to KiCad is a [known limitation](#cross-probe--back-annotation-known-limitation).
 
 ### "kicad-cli not found"
 

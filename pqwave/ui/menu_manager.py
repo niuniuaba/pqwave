@@ -139,9 +139,9 @@ class MenuManager:
         watch_action.triggered.connect(self.callbacks.get("kicad_watch", lambda: None))
         kicad_menu.addAction(watch_action)
 
-        sim_action = QAction("Simulate Now", self.parent)
-        sim_action.triggered.connect(self.callbacks.get("kicad_simulate", lambda: None))
-        kicad_menu.addAction(sim_action)
+        rewatch_action = QAction("Re-Watch", self.parent)
+        rewatch_action.triggered.connect(self.callbacks.get("kicad_rewatch", lambda: None))
+        kicad_menu.addAction(rewatch_action)
 
         kicad_menu.addSeparator()
 
@@ -149,18 +149,6 @@ class MenuManager:
         unwatch_action.triggered.connect(self.callbacks.get("kicad_unwatch", lambda: None))
         kicad_menu.addAction(unwatch_action)
 
-        # Cross-Probe submenu
-        probe_menu = QMenu("Cross-Probe", self.parent)
-
-        probe_net_action = QAction("Probe Selected Net", self.parent)
-        probe_net_action.triggered.connect(self.callbacks.get("kicad_probe_selected", lambda: None))
-        probe_menu.addAction(probe_net_action)
-
-        clear_probe_action = QAction("Clear Highlight", self.parent)
-        clear_probe_action.triggered.connect(self.callbacks.get("kicad_clear_probe", lambda: None))
-        probe_menu.addAction(clear_probe_action)
-
-        kicad_menu.addMenu(probe_menu)
         file_menu.addMenu(kicad_menu)
         file_menu.addSeparator()
 
@@ -522,6 +510,12 @@ class MenuManager:
             self.callbacks.get("show_mc_guide", lambda: None)
         )
         help_menu.addAction(mc_guide_action)
+
+        kicad_guide_action = QAction("KiCad User Guide", self.parent)
+        kicad_guide_action.triggered.connect(
+            self.callbacks.get("show_kicad_guide", lambda: None)
+        )
+        help_menu.addAction(kicad_guide_action)
 
         self.menubar.addMenu(help_menu)
 

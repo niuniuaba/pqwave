@@ -799,6 +799,16 @@
 			(embedded_fonts no)
 		)
 	)
+	(text ".tran 100u 50m"
+		(exclude_from_sim no)
+		(at 98.298 134.62 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "34e07fbc-a8bb-4972-b7e9-99e90679af66")
+	)
 	(text ".model D1N4148 D(Is=2.55e-9 N=1.75 Rs=42e-3 Cj0=42.4e-12 Vj=0.75 M=0.333 Fc=0.5 Tt=4.32e-6 Bv=800 Ibv=80e-6 Af=1 Kf=0)"
 		(exclude_from_sim no)
 		(at 98.298 129.286 0)
@@ -1170,7 +1180,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "47u"
+		(property "Value" "47uF"
 			(at 99.06 93.3449 0)
 			(effects
 				(font

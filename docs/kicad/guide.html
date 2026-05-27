@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body { color: __TEXT__; background-color: __BASE__;
+       font-family: -apple-system, sans-serif; margin: 1.2em; line-height: 1.5; }
+code { background-color: rgba(128,128,128,0.15); padding: 0.15em 0.3em;
+        border-radius: 3px; font-size: 0.92em; }
+pre { background-color: rgba(128,128,128,0.1); padding: 0.8em;
+      border-radius: 4px; overflow-x: auto; font-size: 0.9em; }
+a { color: __LINK__; }
+h2 { border-bottom: 1px solid rgba(128,128,128,0.25); padding-bottom: 0.25em; margin-top: 1.5em; }
+h3 { margin-top: 1.2em; }
+table { border-collapse: collapse; margin: 0.8em 0; }
+th, td { border: 1px solid rgba(128,128,128,0.3); padding: 0.3em 0.6em; }
+th { background-color: rgba(128,128,128,0.15); }
+</style></head><body>
+<h1>KiCad Integration User Guide</h1>
+<p>pqwave integrates with KiCad Eeschema through a netlist-based file-watching pipeline. This guide covers the integration features and walks through real analysis workflows.</p>
+<blockquote>
+<p><strong>No KiCad source modifications required.</strong> Everything works with pre-built KiCad binaries (version 8.0+).</p>
+</blockquote>
+<h2>Table of Contents</h2>
+<h3>Part 1 — Feature Reference</h3>
+<ul>
+<li><a href="#overview-how-it-works">Overview: How It Works</a></li>
+<li><a href="#netlist-pipeline">Netlist Pipeline</a></li>
+<li><a href="#netlist-post-processor">Netlist Post-Processor</a></li>
+<li><a href="#cross-probe--back-annotation-known-limitation">Cross-Probe / Back-Annotation (Known Limitation)</a></li>
+<li><a href="#session-api-commands">Session API Commands</a></li>
+</ul>
+<h3>Part 2 — Worked Tutorials</h3>
+<ul>
+<li><a href="#example-overview">Example Overview</a></li>
+<li><a href="#example-1-full-wave-bridge-rectifier">Example 1: Full-Wave Bridge Rectifier</a></li>
+<li><a href="#example-2-nonlinear-c-v-characterization">Example 2: Nonlinear C-V Characterization</a></li>
+<li><a href="#example-3-bjt-pin-fix-verification">Example 3: BJT Pin Fix Verification</a></li>
+<li><a href="#standalone-scripting-example">Standalone Scripting Example</a></li>
+</ul>
+<hr />
+<h2>Part 1 — Feature Reference</h2>
+<h3>Overview: How It Works</h3>
+<pre><code>KiCad (stock binary)                    pqwave
+───────────────                        ──────
+User edits .kicad_sch                  File watcher detects save
+Saves (Ctrl+S) ───────────────────►    kicad-cli exports netlist
+                                       Post-processor fixes:
+                                         ✓ strip / from nodes
+                                         ✓ fix diode pin order
+                                         ✓ fix BJT/MOSFET pin order
+                                         ✓ move .control block
+                                       ngspice -b -r result.raw
+                                       Loads, displays ALL signals
+</code></pre>
+<p>pqwave runs the simulation externally via ngspice and loads the results for analysis. The file watcher detects schematic saves and triggers automatic re-simulation.</p>
+<blockquote>
+<p><strong>Design note — why probing starts from pqwave, not KiCad:</strong> Probing starts from pqwave — the user selects signals in the signal browser rather than clicking nets in the schematic. pqwave shows every signal from the simulation at once, and the user explores freely. The schematic is the design canvas; pqwave is the analysis cockpit.</p>
+<p>Net/node highlight back-annotation from pqwave to KiCad is a <a href="#cross-probe--back-annotation-known-limitation">known limitation</a>: KiCad's cross-probe channel is a private Eeschema–PcbNew link and is not exposed as a public API for external tools.</p>
+</blockquote>
+<p>The netlist post-processor fixes four known KiCad export issues automatically:</p>
+<ol>
+<li><strong>Node name slashes</strong> — Strips <code>/</code> prefix from root-level net names</li>
+<li><strong>Diode pin ordering</strong> — Reverses anode/cathode to match SPICE convention</li>
+<li><strong>BJT/MOSFET/JFET pin ordering</strong> — Reorders pins to SPICE convention</li>
+<li><strong><code>.control</code> block placement</strong> — Moves to correct position before <code>.end</code></li>
+</ol>
+<h3>Netlist Pipeline</h3>
+<p>The KiCad Bridge processes schematics through a three-stage pipeline:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Action</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Export</td>
+<td><code>kicad-cli sch export netlist --format spice</code></td>
+<td>Generates SPICE netlist from <code>.kicad_sch</code> file</td>
+</tr>
+<tr>
+<td>Post-process</td>
+<td>Fix node names, pin ordering, <code>.control</code> placement</td>
+<td>See <a href="#netlist-post-processor">Netlist Post-Processor</a></td>
+</tr>
+<tr>
+<td>Simulate</td>
+<td><code>ngspice -b -r output.raw circuit.cir</code></td>
+<td>Runs batch simulation, produces standard <code>.raw</code> file</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Configuration</strong> — set via <strong>Settings &gt; KiCad Bridge</strong> or API:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Watch paths</td>
+<td><code>[]</code></td>
+<td>List of directories or <code>.kicad_sch</code> files to monitor</td>
+</tr>
+<tr>
+<td>Auto-simulate</td>
+<td><code>true</code></td>
+<td>Run simulation automatically when schematic is saved</td>
+</tr>
+<tr>
+<td>Simulator</td>
+<td><code>ngspice</code></td>
+<td>SPICE simulator binary (must be in PATH)</td>
+</tr>
+<tr>
+<td>Raw output dir</td>
+<td><code>$PROJECT_DIR</code></td>
+<td>Where <code>.raw</code> files are written</td>
+</tr>
+<tr>
+<td>Cross-probe port</td>
+<td><code>4243</code></td>
+<td>Not yet available (see <a href="#cross-probe--back-annotation-known-limitation">known limitation</a>)</td>
+</tr>
+<tr>
+<td>Netlist fix: strip slashes</td>
+<td><code>true</code></td>
+<td>Remove leading <code>/</code> from node names</td>
+</tr>
+<tr>
+<td>Netlist fix: diode pins</td>
+<td><code>true</code></td>
+<td>Swap diode pin order to SPICE convention</td>
+</tr>
+<tr>
+<td>Netlist fix: BJT/MOSFET pins</td>
+<td><code>true</code></td>
+<td>Reorder transistor pins to SPICE convention</td>
+</tr>
+</tbody>
+</table>
+<h3>Netlist Post-Processor</h3>
+<p>The post-processor applies four categories of fixes to the exported netlist before simulation:</p>
+<h4>1. Node Name Normalization</h4>
+<p>KiCad prefixes root-level net names with <code>/</code> (its internal sheet path separator). ngspice treats <code>/d1</code> and <code>d1</code> as different nodes, which silently breaks behavioral source expressions like <code>V={V(d1)}</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Before (KiCad export)</th>
+<th>After (fixed)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>D1 /d1 /ox D1N4148</code></td>
+<td><code>D1 d1 ox D1N4148</code></td>
+</tr>
+<tr>
+<td><code>V1 /AC_P /AC_N SIN(...)</code></td>
+<td><code>V1 AC_P AC_N SIN(...)</code></td>
+</tr>
+<tr>
+<td><code>B1 /out 0 V=V(/d1)</code></td>
+<td><code>B1 out 0 V=V(d1)</code></td>
+</tr>
+</tbody>
+</table>
+<p>The fix strips leading <code>/</code> from all node references — in component connections and inside <code>V()</code>/<code>I()</code> expressions.</p>
+<blockquote>
+<p><strong>Why this matters for real circuits:</strong> Behavioral sources (B-sources) with expressions like <code>V={V(d1)}</code> silently read 0 V instead of the actual node voltage when the <code>/</code> is present, because <code>V(d1)</code> and node <code>/d1</code> are different names. Without this fix, models using B-sources produce garbage output.</p>
+</blockquote>
+<h4>2. Semiconductor Pin Ordering</h4>
+<p>KiCad symbols follow IPC standard (pin numbering matches physical package). SPICE expects a fixed logical order per device type. <strong>This affects every diode, BJT, MOSFET, and JFET in every schematic.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Device</th>
+<th>KiCad Pin Order</th>
+<th>SPICE Expects</th>
+<th>Fix Applied</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Diode (D)</strong></td>
+<td>Pin 1=K, Pin 2=A (cathode first)</td>
+<td>Anode, Cathode</td>
+<td>Swap pins</td>
+</tr>
+<tr>
+<td><strong>BJT (Q)</strong></td>
+<td>Varies by package (TO-92, SOT-23, etc.)</td>
+<td>Collector, Base, Emitter</td>
+<td>Reorder to C-B-E</td>
+</tr>
+<tr>
+<td><strong>MOSFET (M)</strong></td>
+<td>Varies by package</td>
+<td>Drain, Gate, Source</td>
+<td>Reorder to D-G-S</td>
+</tr>
+<tr>
+<td><strong>JFET (J)</strong></td>
+<td>Varies by package</td>
+<td>Drain, Gate, Source</td>
+<td>Reorder to D-G-S</td>
+</tr>
+</tbody>
+</table>
+<p>The post-processor reads <code>Sim.Pins</code> from the <code>.kicad_sch</code> file to determine the actual symbol pin mapping, then reorders the netlist lines accordingly. A warning is logged to the console for each fixed device.</p>
+<blockquote>
+<p><strong>Why this happens:</strong> KiCad's primary purpose is PCB layout, so its symbols follow IPC-7351 (pin 1 = cathode for diodes, pin numbering matches physical package footprints for transistors). SPICE was created in 1971 for circuit simulation and uses a different pin ordering convention. KiCad has an "Alternate Node Sequence" field to bridge this gap, but it's buried in a dialog, resets when changing models, and must be set manually per-symbol. pqwave's post-processor handles it automatically.</p>
+</blockquote>
+<h4>3. <code>.control</code> Block Placement</h4>
+<p>KiCad writes schematic text directives in visual order (left-to-right on the sheet), which can place <code>.control</code>/<code>.endc</code> blocks before circuit elements. The post-processor moves any <code>.control</code>...<code>.endc</code> block to just before <code>.end</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Before (KiCad export)</th>
+<th>After (fixed)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.control</code> / <code>run</code> / <code>write</code> / <code>.endc</code></td>
+<td><code>.PARAM ...</code></td>
+</tr>
+<tr>
+<td><code>.PARAM ...</code></td>
+<td><code>R1 ... C1 ... V1 ...</code></td>
+</tr>
+<tr>
+<td><code>R1 ... C1 ... V1 ...</code></td>
+<td><code>.control</code> / <code>run</code> / <code>write</code> / <code>.endc</code></td>
+</tr>
+<tr>
+<td><code>.end</code></td>
+<td><code>.end</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Disable individual fixes</strong> via settings if you have manually corrected your schematic or symbol libraries.</p>
+<h3>Cross-Probe / Back-Annotation (Known Limitation)</h3>
+<p><strong>What it is:</strong> Cross-probe (also called back-annotation) is the ability to click a signal in pqwave and have KiCad Eeschema highlight the corresponding net or component in the schematic. This is a standard feature in integrated EDA+waveform tools — it lets you quickly navigate between simulation results and the circuit design.</p>
+<p><strong>Why it is not yet supported:</strong> KiCad's internal cross-probe mechanism uses a TCP channel on port 4243, but this is a private channel between Eeschema and PcbNew — it is not exposed as a public API for external tools. There is no documented, stable way for a third-party application like pqwave to send highlight commands to Eeschema. Attempts to bridge this gap via KiCad's action plugin system were not viable because the plugin API is focused on PCB operations and offers no schematic highlighting entry point.</p>
+<p>The auto-watch pipeline provides a partial workaround for the Schematic → pqwave direction: saving the schematic in KiCad triggers a full re-export, post-process, and re-simulation in pqwave. New results appear in the signal browser automatically.</p>
+<h3>Session API Commands</h3>
+<p>All KiCad Bridge operations are available through the Session API.</p>
+<p><strong>Pipeline Control:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Signature</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kicad_watch</code></td>
+<td><code>kicad_watch(paths)</code></td>
+<td>Add schematic files or directories to the watch list. Returns watch status.</td>
+</tr>
+<tr>
+<td><code>kicad_unwatch</code></td>
+<td><code>kicad_unwatch(path)</code></td>
+<td>Remove a path from the watch list.</td>
+</tr>
+<tr>
+<td><code>kicad_watched</code></td>
+<td><code>kicad_watched()</code></td>
+<td>List all watched paths and their status.</td>
+</tr>
+<tr>
+<td><code>kicad_simulate</code></td>
+<td><code>kicad_simulate(sch_path)</code></td>
+<td>Manually trigger export → post-process → simulate for a schematic.</td>
+</tr>
+<tr>
+<td><code>kicad_export</code></td>
+<td><code>kicad_export(sch_path, output=None)</code></td>
+<td>Export netlist only (no simulation). Returns the netlist text.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Post-Processor Control:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Signature</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kicad_fix_netlist</code></td>
+<td><code>kicad_fix_netlist(netlist_text)</code></td>
+<td>Apply all post-processing fixes to a netlist string. Returns fixed netlist.</td>
+</tr>
+<tr>
+<td><code>kicad_fix_info</code></td>
+<td><code>kicad_fix_info(netlist_text)</code></td>
+<td>Dry-run: report what fixes would be applied without changing anything.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Cross-Probe (known limitation — see <a href="#cross-probe--back-annotation-known-limitation">above</a>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Signature</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kicad_probe_net</code></td>
+<td><code>kicad_probe_net(net_name)</code></td>
+<td>Not yet functional.</td>
+</tr>
+<tr>
+<td><code>kicad_probe_part</code></td>
+<td><code>kicad_probe_part(refdes, pin=None)</code></td>
+<td>Not yet functional.</td>
+</tr>
+<tr>
+<td><code>kicad_clear</code></td>
+<td><code>kicad_clear()</code></td>
+<td>Not yet functional.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Configuration:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Signature</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kicad_config</code></td>
+<td><code>kicad_config(key, value=None)</code></td>
+<td>Get or set bridge configuration. Keys: <code>watch_paths</code>, <code>auto_simulate</code>, <code>simulator</code>, <code>raw_output_dir</code>, <code>crossprobe_port</code>, <code>fix_slashes</code>, <code>fix_diode_pins</code>, <code>fix_bjt_pins</code>.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Part 2 — Worked Tutorials</h2>
+<h3>Example Overview</h3>
+<p>Every tutorial starts from a <code>.kicad_sch</code> file in <code>docs/kicad/examples/</code>. Open it in KiCad Eeschema to follow along.</p>
+<table>
+<thead>
+<tr>
+<th>Example</th>
+<th>Schematic File</th>
+<th>Circuit</th>
+<th>Analysis</th>
+<th>Demonstrates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bridge Rectifier</td>
+<td><code>bridge.kicad_sch</code></td>
+<td>Full-wave bridge + filter cap</td>
+<td>Transient 40 ms, 100 Hz input</td>
+<td>Diode pin fix, basic pipeline</td>
+</tr>
+<tr>
+<td>C-V Characterization</td>
+<td><code>cdg.kicad_sch</code></td>
+<td>Nonlinear Cgd model, B-sources, .PARAM/.FUNC</td>
+<td>DC sweep × AC via .control loop</td>
+<td>Slash fix, .control placement, B-source expressions, multi-run sweep</td>
+</tr>
+<tr>
+<td>BJT Amplifier</td>
+<td><code>bjt_amplifier.kicad_sch</code></td>
+<td>Two-stage BJT amplifier</td>
+<td>Transient 10 ms</td>
+<td>BJT pin fix, multi-signal analysis</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Prerequisites:</strong>
+- KiCad 8.0+ with <code>kicad-cli</code> in PATH
+- ngspice 42+ in PATH
+- pqwave installed</p>
+<hr />
+<h3>Example 1: Full-Wave Bridge Rectifier</h3>
+<p>A simple circuit with a common but silently-breaking KiCad export bug. The pipeline catches and fixes diode pin ordering, turning a wrong negative output into the correct rectified waveform.</p>
+<p><strong>Start here:</strong> Open <code>docs/kicad/examples/bridge.kicad_sch</code> in KiCad Eeschema.</p>
+<p><strong>Circuit:</strong>
+- V1: 100 V, 100 Hz sinusoidal AC source
+- D1–D4: 1N4148 diodes in full-wave bridge configuration
+- C1: 47 µF filter capacitor
+- R1+R2: 2 kΩ resistive load (voltage divider)</p>
+<p><strong>Key fix:</strong> All four diodes — KiCad exports them cathode-first (K, A) but SPICE reads anode-first (A, K).</p>
+<h4>Step 1: Set Up and Simulate</h4>
+<ol>
+<li>In pqwave: <strong>File &gt; KiCad Bridge &gt; Watch Schematic</strong>.</li>
+<li>Select <strong><code>docs/kicad/examples/bridge.kicad_sch</code></strong>.</li>
+<li>The bridge status bar shows: <strong>Watching 1 schematic</strong>.</li>
+<li>In KiCad: open the schematic, verify it looks correct, press <strong>Ctrl+S</strong> to save.</li>
+<li>pqwave auto-detects the save, runs the pipeline, and loads results.</li>
+</ol>
+<p><strong>Or via API:</strong></p>
+<pre><code class="language-python">api.kicad_watch(&quot;docs/kicad/examples/bridge.kicad_sch&quot;)
+api.kicad_simulate(&quot;docs/kicad/examples/bridge.kicad_sch&quot;)
+</code></pre>
+<p><strong>Expected output:</strong> The console shows four diode pin fixes:</p>
+<pre><code>[kicad] Fixing D1: swapped pins (K-A → A-K)
+[kicad] Fixing D2: swapped pins (K-A → A-K)
+[kicad] Fixing D3: swapped pins (K-A → A-K)
+[kicad] Fixing D4: swapped pins (K-A → A-K)
+[kicad] Simulation complete: 6 signals loaded
+</code></pre>
+<p>The signal browser lists: <code>v(ac_p)</code>, <code>v(ac_n)</code>, <code>v(r1)</code>, <code>v(r2)</code>, <code>i(v1)</code>, <code>time</code>.</p>
+<h4>Step 2: View the Rectified Output</h4>
+<ol>
+<li>Double-click <strong>v(r1)</strong> in the signal browser.</li>
+<li>Double-click <strong>v(ac_p)</strong> to overlay.</li>
+<li>v(r1) shows a positive DC level (~98 V) with small ripple, overlaid on the sinusoidal v(ac_p).</li>
+</ol>
+<p><strong>Expected output:</strong>
+- v(r1) mean: ~+98 V DC (100 V peak − 2 × Vf diode drop)
+- v(r1) ripple: ~2 V pk-pk at 100 Hz</p>
+<blockquote>
+<p><strong>Without the post-processor:</strong> v(r1) would read ~−98 V — all four diodes are reversed in KiCad's export, so the bridge produces a negative output. The waveform <em>looks</em> correct (same ripple, same magnitude) but has the wrong sign. Users debugging this in KiCad's built-in simulator would see inverted results and not know why.</p>
+</blockquote>
+<hr />
+<h3>Example 2: Nonlinear C-V Characterization</h3>
+<p>A realistic semiconductor characterization case: sweep the DC bias across a nonlinear Cgd capacitance model, run an AC analysis at each bias point, and extract the C-V curve. Demonstrates the netlist post-processor handling a complex case with all four fix categories active simultaneously.</p>
+<p><strong>Start here:</strong> Open <code>docs/kicad/examples/cdg.kicad_sch</code> in KiCad Eeschema.</p>
+<p><strong>Circuit:</strong>
+- Vd1g1: DC bias source, swept 0–500 V in 1 V steps via <code>.control</code> loop
+- B_Edg1, B_Edg2: Behavioral voltage sources implementing a nonlinear capacitance model
+- Cdg1, Cdg2: Capacitors representing Cgd components
+- 14 <code>.PARAM</code> definitions + a <code>.FUNC</code> defining the Q-V relationship
+- <code>.control</code> block: <code>while</code> loop performing <code>alter</code> → <code>ac</code> → measure → <code>destroy</code> at 501 bias points</p>
+<p><strong>Key fixes active:</strong>
+1. <strong>Node slashes</strong> — all 8+ node references (<code>/d1</code>, <code>/ox</code>, <code>/ox2</code>) stripped
+2. <strong><code>.control</code> placement</strong> — moved from before <code>.PARAM</code> block to before <code>.end</code>
+3. <strong>B-source expressions</strong> — <code>V={V(d1)}</code> references fixed to match de-slashed node names</p>
+<h4>Step 1: Open and Inspect the Netlist Fixes</h4>
+<ol>
+<li>In pqwave: <strong>File &gt; KiCad Bridge &gt; Watch Schematic</strong>.</li>
+<li>Select <strong><code>docs/kicad/examples/cdg.kicad_sch</code></strong>.</li>
+<li>Click <strong>Simulate Now</strong>.</li>
+</ol>
+<p><strong>Or via API:</strong></p>
+<pre><code class="language-python">api.kicad_watch(&quot;docs/kicad/examples/cdg.kicad_sch&quot;)
+result = api.kicad_simulate(&quot;docs/kicad/examples/cdg.kicad_sch&quot;)
+
+# See everything the post-processor fixed
+for fix in api.kicad_fix_info(result[&quot;netlist&quot;]):
+    print(f&quot;  {fix['type']}: {fix['detail']}&quot;)
+</code></pre>
+<p><strong>Expected output:</strong></p>
+<pre><code>[kicad] Stripped '/' from 3 node names: /d1→d1, /ox→ox, /ox2→ox2
+[kicad] Moved .control block from line 2 to line 38 (before .end)
+[kicad] B-source B_Edg1: fixed 2 V() references to match de-slashed nodes
+[kicad] B-source B_Edg2: fixed 1 V() reference to match de-slashed nodes
+[kicad] Simulation complete: 2 signals loaded, 501 sweep points
+</code></pre>
+<h4>Step 2: Browse the C-V Sweep</h4>
+<ol>
+<li>The <code>.control</code> loop sweeps Vd1g1 from 0 to 500 V and records <code>ac_data[index]</code> — the small-signal admittance at each bias.</li>
+<li>Double-click <strong>ac_data</strong> to plot. The signal browser shows 501 data points.</li>
+<li>The curve shows the nonlinear Cgd(V) characteristic: flat at low bias, transitioning through a knee, then linear at high bias.</li>
+</ol>
+<blockquote>
+<p><strong>Under the hood:</strong> The <code>.control</code> block runs <code>ac lin 1 250k 250k</code> at each DC bias point, measures <code>Vd1g1#branch</code> (the AC current through the voltage source), and stores the complex admittance. This is a standard technique for C-V extraction from SPICE simulations — the <code>.control</code> scripting language makes it possible to automate what would otherwise require 501 separate simulation runs.</p>
+</blockquote>
+<h4>Step 3: Extract the C-V Parameters</h4>
+<ol>
+<li>Place <strong>cursor A</strong> at the low-bias plateau (~0–50 V region).</li>
+<li>Place <strong>cursor B</strong> at a high-bias point (~200 V).</li>
+<li>Use <strong>Analyze &gt; Expression</strong> to compute the capacitance ratio:</li>
+</ol>
+<pre><code>mag(ac_data[cursorB]) / mag(ac_data[cursorA])
+</code></pre>
+<p><strong>Expected output:</strong>
+- Low-bias capacitance (Cdg1 + Cdg2): ~82 pF (constant)
+- C-V curve shows the transition where Cdg1 becomes nonlinear at ~50 V
+- High-bias capacitance approaches Cdg2 alone (~82 pF at a=15.9)</p>
+<blockquote>
+<p><strong>Without the post-processor:</strong> The B-sources <code>V={V(d1)}</code> would reference node <code>d1</code> while the actual netlist node is <code>/d1</code>. ngspice silently reads 0 V for the nonexistent <code>d1</code> node. Every B-source expression evaluates to zero. The ac_data vector would contain nothing but zeros across all 501 bias points — a completely flat line indistinguishable from a wiring error.</p>
+</blockquote>
+<hr />
+<h3>Example 3: BJT Pin Fix Verification</h3>
+<p>Verify that the BJT pin reordering fix is working — and see what happens without it.</p>
+<p><strong>Start here:</strong> Open <code>docs/kicad/examples/bjt_amplifier.kicad_sch</code> in KiCad Eeschema.</p>
+<p><strong>Circuit:</strong>
+- V1: 1 kHz, 50 mV sinusoidal input
+- Q1, Q2: 2N3904 NPN BJTs in common-emitter configuration
+- Two-stage amplification with capacitive coupling
+- 12 V DC supply</p>
+<p><strong>Key fix:</strong> BJT pin ordering — KiCad's 2N3904 symbol (TO-92 package) has pins E-B-C, but SPICE expects C-B-E.</p>
+<h4>Step 1: Run and Verify the Simulation</h4>
+<ol>
+<li>In pqwave: watch and simulate <code>bjt_amplifier.kicad_sch</code>.</li>
+<li>The chat panel confirms BJT pin fixes:</li>
+</ol>
+<pre><code>[kicad] Fixing Q1 (2N3904): reordered pins to stage1 Net-_Q1-B_ Net-_Q1-E_ (was Net-_Q1-E_ Net-_Q1-B_ stage1)
+[kicad] Fixing Q2 (2N3904): reordered pins to Net-_Q2-C_ Net-_Q2-B_ Net-_Q2-E_ (was Net-_Q2-E_ Net-_Q2-B_ Net-_Q2-C_)
+[kicad] Simulation complete: 13 signals loaded
+</code></pre>
+<ol>
+<li>Plot: double-click <strong>v(in)</strong>, <strong>v(stage1)</strong>, <strong>v(out)</strong>.</li>
+</ol>
+<p><strong>Or via API:</strong></p>
+<pre><code class="language-python">api.kicad_watch(&quot;docs/kicad/examples/bjt_amplifier.kicad_sch&quot;)
+api.kicad_simulate(&quot;docs/kicad/examples/bjt_amplifier.kicad_sch&quot;)
+api.select_panel(1)
+api.add_trace(&quot;v(in)&quot;)
+api.add_trace(&quot;v(stage1)&quot;)
+api.add_trace(&quot;v(out)&quot;)
+</code></pre>
+<p><strong>Expected output:</strong>
+- v(in): 50 mV amplitude, 1 kHz sine
+- v(stage1): inverted, ~111 mV amplitude (gain ~2.2x, 6.9 dB from Q1)
+- v(out): ~12 V amplitude, clipped to supply rail (total gain ~240x, 47.6 dB)</p>
+<blockquote>
+<p><strong>What's happening:</strong> Stage 1 provides modest voltage gain (~2.2x) with Rc=5k and Re=1k. Stage 2 amplifies further but the output hits the 12 V supply rail, causing clipping. v(out) is effectively a square wave.</p>
+</blockquote>
+<h4>Step 2: Debug with Cursors</h4>
+<ol>
+<li>v(out) is clipping at the 12 V supply rail — the amplifier is saturating.</li>
+<li>Place <strong>cursor A</strong> at the clipped peak of v(out).</li>
+<li>Place <strong>cursor B</strong> on v(stage1) to check the intermediate stage.</li>
+<li>Use the <strong>Measure</strong> functions to quantify the gain at each stage.</li>
+</ol>
+<h4>Step 3: Verify the BJT Pin Fix</h4>
+<ol>
+<li>Temporarily disable the BJT pin fix to see what happens without it:</li>
+</ol>
+<pre><code class="language-python">api.kicad_config(&quot;fix_bjt_pins&quot;, False)
+api.kicad_simulate(&quot;docs/kicad/examples/bjt_amplifier.kicad_sch&quot;)
+</code></pre>
+<ol>
+<li>The output waveform collapses — wrong pin order swaps collector and emitter, destroying the amplifier's gain.</li>
+<li>Re-enable:</li>
+</ol>
+<pre><code class="language-python">api.kicad_config(&quot;fix_bjt_pins&quot;, True)
+</code></pre>
+<blockquote>
+<p><strong>Real-world impact:</strong> Every BJT in every KiCad schematic has this issue unless the user manually set Alternate Node Sequence in the SPICE Model dialog. A two-transistor amplifier is simple — imagine a chip with 50 BJTs.</p>
+</blockquote>
+<hr />
+<h3>Standalone Scripting Example</h3>
+<p>A complete Python script that integrates KiCad schematic editing with pqwave simulation and analysis:</p>
+<pre><code class="language-python">import pqwave.session as session
+
+api = session.SessionAPI()
+
+# Configure the KiCad bridge
+api.kicad_config(&quot;watch_paths&quot;, [&quot;/home/user/projects/amplifier/amplifier.kicad_sch&quot;])
+api.kicad_config(&quot;auto_simulate&quot;, True)
+api.kicad_config(&quot;simulator&quot;, &quot;ngspice&quot;)
+api.kicad_config(&quot;fix_slashes&quot;, True)
+api.kicad_config(&quot;fix_diode_pins&quot;, True)
+api.kicad_config(&quot;fix_bjt_pins&quot;, True)
+
+# Watch and run initial simulation
+api.kicad_watch(&quot;/home/user/projects/amplifier/amplifier.kicad_sch&quot;)
+result = api.kicad_simulate(&quot;/home/user/projects/amplifier/amplifier.kicad_sch&quot;)
+
+print(f&quot;Simulation loaded: {result['signal_count']} signals&quot;)
+
+# Inspect what the post-processor fixed
+fixes = api.kicad_fix_info(result[&quot;netlist&quot;])
+for fix in fixes:
+    print(f&quot;  {fix['type']}: {fix['detail']}&quot;)
+
+# Plot key signals
+api.select_panel(1)
+api.add_trace(&quot;v(out)&quot;)
+api.add_trace(&quot;v(in)&quot;)
+
+# Measure gain
+gain = api.eval_expr(&quot;max(v(out)) / max(v(in))&quot;, panel=1)
+print(f&quot;Voltage gain: {gain:.2f} ({20 * gain.log10():.1f} dB)&quot;)
+
+# The file watcher keeps running in background.
+# Save the schematic in KiCad to trigger automatic re-simulation.
+# Press Ctrl+C in the REPL to stop watching.
+</code></pre>
+<p><strong>Expected output:</strong></p>
+<pre><code>Simulation loaded: 12 signals
+  fix_diode: D1 — swapped pins (K-A → A-K)
+  fix_bjt: Q1 (2N3904) — reordered E-B-C → C-B-E
+  fix_bjt: Q2 (2N3904) — reordered E-B-C → C-B-E
+  fix_slashes: stripped '/' from 5 node names
+Voltage gain: 239.80 (47.6 dB)
+</code></pre>
+<hr />
+<h2>Troubleshooting</h2>
+<h3>Simulation produces inverted or zero output</h3>
+<p>The post-processor may have misidentified a device. Run <code>kicad_fix_info(netlist)</code> to see all applied fixes. Temporarily disable individual fixes to isolate:</p>
+<pre><code class="language-python">api.kicad_config(&quot;fix_diode_pins&quot;, False)
+api.kicad_config(&quot;fix_bjt_pins&quot;, False)
+</code></pre>
+<h3>Cross-probe doesn't highlight in KiCad</h3>
+<ol>
+<li>Verify KiCad Eeschema is running and a schematic is open.</li>
+<li>Verify the port: <code>api.kicad_config("crossprobe_port")</code> — default <code>4243</code>.</li>
+<li>Test manually from terminal: <code>echo '$NET: "GND"' | nc localhost 4243</code>.</li>
+<li>Cross-probe / back-annotation from pqwave to KiCad is a <a href="#cross-probe--back-annotation-known-limitation">known limitation</a>.</li>
+</ol>
+<h3>"kicad-cli not found"</h3>
+<p>KiCad's CLI tools ship with the main package. On Linux:</p>
+<pre><code class="language-bash"># Typically at:
+export PATH=&quot;/usr/lib/kicad/bin:$PATH&quot;
+# Or via package manager:
+which kicad-cli
+</code></pre>
+<p>On Windows, add <code>C:\Program Files\KiCad\bin</code> to PATH.</p>
+<h3>Behavioral sources (B-sources) produce flat lines or zero</h3>
+<p>This is almost always the node slash issue. Check that <code>fix_slashes</code> is enabled:</p>
+<pre><code class="language-python">api.kicad_config(&quot;fix_slashes&quot;, True)
+</code></pre>
+<p>The fix strips <code>/</code> prefixes from all node names. Without it, <code>V={V(d1)}</code> references a nonexistent node while the actual node is <code>/d1</code>.</p>
+<h3>Schematic labels have slashes in them</h3>
+<p>Use <strong>global labels</strong> instead of local labels in KiCad. Global labels have no sheet path prefix and export cleanly. If you must use local labels, the slash-stripping fix handles the exported netlist.</p>
+</body></html>

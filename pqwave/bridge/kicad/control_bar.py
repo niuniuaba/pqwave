@@ -12,11 +12,11 @@ class KiCadControlBar(QWidget):
     dynamically inserted into upper_layout.
 
     Signals:
-        simulate_clicked(): user requested manual re-simulation
+        rewatch_clicked(): user wants to resume watching the last file
         unwatch_clicked(): user wants to stop watching
     """
 
-    simulate_clicked = pyqtSignal()
+    rewatch_clicked = pyqtSignal()
     unwatch_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -33,10 +33,10 @@ class KiCadControlBar(QWidget):
 
         layout.addSpacing(15)
 
-        self._simulate_btn = QPushButton("Simulate Now")
-        self._simulate_btn.setMinimumWidth(110)
-        self._simulate_btn.clicked.connect(self.simulate_clicked.emit)
-        layout.addWidget(self._simulate_btn)
+        self._rewatch_btn = QPushButton("Re-Watch")
+        self._rewatch_btn.setMinimumWidth(110)
+        self._rewatch_btn.clicked.connect(self.rewatch_clicked.emit)
+        layout.addWidget(self._rewatch_btn)
 
         self._unwatch_btn = QPushButton("Stop Watching")
         self._unwatch_btn.setMinimumWidth(110)
@@ -52,6 +52,6 @@ class KiCadControlBar(QWidget):
         self._status_label.setText(f"KiCad: {text}")
 
     def set_simulating(self, active: bool):
-        self._simulate_btn.setEnabled(not active)
+        self._rewatch_btn.setEnabled(not active)
         if active:
             self.set_status("simulating...")

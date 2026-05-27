@@ -125,11 +125,12 @@ class KiCadBridge(SchematicBridge):
                 [ngspice, "-b", "-r", raw_output, cir_path],
                 capture_output=True, text=True, timeout=300,
             )
+            raw_ok = result.returncode == 0 and os.path.exists(raw_output)
             return {
                 "returncode": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
-                "raw_file": raw_output if result.returncode == 0 else None,
+                "raw_file": raw_output if raw_ok else None,
                 "netlist": fixed,
                 "fix_info": fix_info,
             }
