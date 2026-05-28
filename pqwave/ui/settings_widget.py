@@ -385,18 +385,31 @@ class SettingsWidget(QWidget):
         kicad_cli_reset.clicked.connect(lambda: self._reset_tool_path("kicad_cli"))
         tool_paths_layout.addWidget(kicad_cli_reset, 2, 2)
 
+        # lepton-netlist
+        tool_paths_layout.addWidget(QLabel("lepton-netlist:"), 3, 0)
+        self._lepton_netlist_edit = QLineEdit()
+        self._lepton_netlist_edit.setPlaceholderText("Use $PATH (e.g. /usr/bin/lepton-netlist)")
+        self._lepton_netlist_edit.setMinimumWidth(200)
+        self._lepton_netlist_edit.textChanged.connect(
+            lambda text: self._on_tool_path_changed("lepton_netlist"))
+        tool_paths_layout.addWidget(self._lepton_netlist_edit, 3, 1)
+
+        lepton_netlist_reset = QPushButton("Reset")
+        lepton_netlist_reset.clicked.connect(lambda: self._reset_tool_path("lepton_netlist"))
+        tool_paths_layout.addWidget(lepton_netlist_reset, 3, 2)
+
         # ngspice
-        tool_paths_layout.addWidget(QLabel("ngspice:"), 3, 0)
+        tool_paths_layout.addWidget(QLabel("ngspice:"), 4, 0)
         self._ngspice_edit = QLineEdit()
         self._ngspice_edit.setPlaceholderText("Use $PATH (e.g. /usr/bin/ngspice)")
         self._ngspice_edit.setMinimumWidth(200)
         self._ngspice_edit.textChanged.connect(
             lambda text: self._on_tool_path_changed("ngspice"))
-        tool_paths_layout.addWidget(self._ngspice_edit, 3, 1)
+        tool_paths_layout.addWidget(self._ngspice_edit, 4, 1)
 
         ngspice_reset = QPushButton("Reset")
         ngspice_reset.clicked.connect(lambda: self._reset_tool_path("ngspice"))
-        tool_paths_layout.addWidget(ngspice_reset, 3, 2)
+        tool_paths_layout.addWidget(ngspice_reset, 4, 2)
 
         tool_paths_group.setLayout(tool_paths_layout)
         content_layout.addWidget(tool_paths_group)
@@ -579,6 +592,9 @@ class SettingsWidget(QWidget):
         self._kicad_cli_edit.blockSignals(True)
         self._kicad_cli_edit.setText(self.state.tool_paths.get("kicad_cli", ""))
         self._kicad_cli_edit.blockSignals(False)
+        self._lepton_netlist_edit.blockSignals(True)
+        self._lepton_netlist_edit.setText(self.state.tool_paths.get("lepton_netlist", ""))
+        self._lepton_netlist_edit.blockSignals(False)
         self._ngspice_edit.blockSignals(True)
         self._ngspice_edit.setText(self.state.tool_paths.get("ngspice", ""))
         self._ngspice_edit.blockSignals(False)
@@ -904,6 +920,7 @@ class SettingsWidget(QWidget):
             "fst2vcd": self._fst2vcd_edit,
             "ghwdump": self._ghwdump_edit,
             "kicad_cli": self._kicad_cli_edit,
+            "lepton_netlist": self._lepton_netlist_edit,
             "ngspice": self._ngspice_edit,
         }
         if key in edit_map:
@@ -916,6 +933,7 @@ class SettingsWidget(QWidget):
             "fst2vcd": self._fst2vcd_edit,
             "ghwdump": self._ghwdump_edit,
             "kicad_cli": self._kicad_cli_edit,
+            "lepton_netlist": self._lepton_netlist_edit,
             "ngspice": self._ngspice_edit,
         }
         if key in edit_map:

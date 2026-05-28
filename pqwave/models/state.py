@@ -325,6 +325,7 @@ class ApplicationState:
             "fst2vcd": "",
             "ghwdump": "",
             "kicad_cli": "",
+            "lepton_netlist": "",
             "ngspice": "",
         }
 
