@@ -73,7 +73,6 @@ class LeptonControlBar(QWidget):
     def set_simulating(self, active: bool):
         self._simulate_btn.setEnabled(not active)
         self._rewatch_btn.setEnabled(not active)
-        self._annotate_btn.setEnabled(False)
         if active:
             self.set_status("simulating...")
 

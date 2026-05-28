@@ -183,6 +183,7 @@ class LeptonCrossProbeClient(QObject):
                 break
         if self._running:
             self._running = False
+            self._sock = None
             self.disconnected.emit()
 
     def _handle_message(self, msg: str):

@@ -119,7 +119,7 @@ class LeptonBridge(SchematicBridge):
 
     def annotate_label(self, netname: str, text: str, x: int, y: int) -> None:
         cp = self._ensure_cross_probe()
-        cp.send_command(f"$ANNOTATE:LABEL {netname} {text} {x} {y}")
+        cp.send_command(f"$ANNOTATE:LABEL|{netname}|{text}|{x}|{y}")
 
     def clear_annotations(self) -> None:
         self._ensure_cross_probe().send_command("$CLEAR:ANNOTATIONS")

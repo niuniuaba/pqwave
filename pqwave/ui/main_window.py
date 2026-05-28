@@ -1063,9 +1063,11 @@ class MainWindow(QMainWindow):
                 self.lepton_control_bar.set_simulating(False)
 
     def _on_lepton_annotate_dc(self, voltages: dict[str, float] | None = None):
-        if not self._lepton_cross_probe or not self._lepton_cross_probe.is_connected():
+        if self._lepton_cross_probe is None:
+            return
+        if not self._lepton_cross_probe.is_connected():
             self._lepton_cross_probe.connect_to_server()
-        if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
+        if self._lepton_cross_probe.is_connected():
             if voltages is None:
                 voltages = self._extract_dc_voltages()
             for netname, voltage in voltages.items():
@@ -1077,9 +1079,11 @@ class MainWindow(QMainWindow):
             )
 
     def _on_lepton_clear_annotations(self):
-        if not self._lepton_cross_probe or not self._lepton_cross_probe.is_connected():
+        if self._lepton_cross_probe is None:
+            return
+        if not self._lepton_cross_probe.is_connected():
             self._lepton_cross_probe.connect_to_server()
-        if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
+        if self._lepton_cross_probe.is_connected():
             self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
             self._lepton_cross_probe.send_command("$CLEAR:DC")
             self.chat_panel.append_output("[lepton] Annotations cleared\n")
@@ -1087,6 +1091,31 @@ class MainWindow(QMainWindow):
     def _on_lepton_net_selected(self, netname: str):
         """Reverse cross-probe: user clicked a net in lepton-schematic."""
         self.chat_panel.append_output(f"[lepton] Selected net: {netname}\n")
+        state = self.state
+        if not state.datasets:
+            return
+        panel = self.panel_grid.get_active_panel()
+        if not panel:
+            return
+        ds_idx = panel.trace_manager.current_dataset
+        if ds_idx < 0 or ds_idx >= len(state.datasets):
+            return
+        ds = state.datasets[ds_idx]
+        candidates = [f"v({netname})", netname]
+        for c in candidates:
+            for var in ds.variables:
+                if var.name.lower() == c.lower():
+                    panel_state = state.panels.get(panel.panel_id)
+                    if panel_state:
+                        for trace in panel_state.traces:
+                            if trace.expression == f'"{var.name}"':
+                                return  # already plotted
+                    x_var = self.state.current_x_var or "time"
+                    panel.trace_manager.add_trace_from_variable(var.name, x_var)
+                    self.chat_panel.append_output(
+                        f"[lepton] Plotted trace: {var.name}\n"
+                    )
+                    return
 
     def _extract_dc_voltages(self) -> dict[str, float]:
         """Extract DC voltages from the most recent simulation dataset."""

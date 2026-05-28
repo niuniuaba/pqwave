@@ -152,7 +152,8 @@
          (pqwave-find-nets-by-name page netname))))))
 
 (define (pqwave-annotate-label cmd)
-  (let* ((parts (string-split cmd #\space))
+  ;; Format: $ANNOTATE:LABEL|<netname>|<text>|<x>|<y>
+  (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
          (text (if (> (length parts) 2) (list-ref parts 2) "?"))
          (x-str (if (> (length parts) 3) (list-ref parts 3) "0"))
