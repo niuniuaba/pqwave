@@ -674,6 +674,12 @@ class SessionAPI:
             from pqwave.bridge.lepton.cross_probe import install_scheme_server
             return install_scheme_server()
 
+        if key == "port":
+            if value is not None:
+                reserved = {4243: "KiCad", 2026: "xschem (server)", 2021: "xschem (back-annotation)"}
+                if int(value) in reserved:
+                    return {"status": "error", "message": f"Port {value} conflicts with {reserved[int(value)]}"}
+
         from pqwave.models.state import ApplicationState
         state = ApplicationState()
         if not hasattr(state, "_lepton_config"):

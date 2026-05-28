@@ -18,6 +18,7 @@ class LeptonFileWatcher(QObject):
         super().__init__()
         self._watched_path: str | None = None
         self._last_mtime: float = 0
+        self._last_size: int = 0
         self._timer = QTimer()
         self._timer.timeout.connect(self._poll)
         self._miss_count = 0
@@ -35,6 +36,7 @@ class LeptonFileWatcher(QObject):
         self._timer.stop()
         self._watched_path = None
         self._last_mtime = 0
+        self._last_size = 0
 
     @property
     def watched_path(self) -> str | None:
@@ -45,12 +47,15 @@ class LeptonFileWatcher(QObject):
             return
         try:
             mtime = os.path.getmtime(self._watched_path)
+            size = os.path.getsize(self._watched_path)
         except OSError:
             self._miss_count += 1
             if self._miss_count > 10:
                 self._timer.stop()
             return
         self._miss_count = 0
-        if mtime != self._last_mtime:
+        changed = (mtime != self._last_mtime) or (size != self._last_size)
+        if changed:
             self._last_mtime = mtime
+            self._last_size = size
             self.file_changed.emit(self._watched_path)
