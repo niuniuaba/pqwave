@@ -189,6 +189,6 @@ class LeptonCrossProbeClient(QObject):
         if msg.startswith("$SELECTED:net "):
             self.net_selected.emit(msg[14:].strip())
         elif msg.startswith("$SELECTED:part "):
-            self.part_selected.emit(msg[16:].strip())
+            self.part_selected.emit(msg[15:].strip())
         else:
             self.error_occurred.emit(f"Unknown message from server: {msg[:80]}")
