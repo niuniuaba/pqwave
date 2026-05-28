@@ -152,6 +152,56 @@ class MenuManager:
         file_menu.addMenu(kicad_menu)
         file_menu.addSeparator()
 
+        # Lepton-EDA Bridge submenu
+        lepton_menu = QMenu("Lepton Bridge", self.parent)
+
+        watch_action = QAction("Watch Schematic...", self.parent)
+        watch_action.triggered.connect(self.callbacks.get("lepton_watch", lambda: None))
+        lepton_menu.addAction(watch_action)
+
+        simulate_action = QAction("Simulate Now", self.parent)
+        simulate_action.triggered.connect(self.callbacks.get("lepton_simulate", lambda: None))
+        lepton_menu.addAction(simulate_action)
+
+        lepton_menu.addSeparator()
+
+        annotate_action = QAction("Annotate DC", self.parent)
+        annotate_action.triggered.connect(
+            self.callbacks.get("lepton_annotate_dc", lambda: None)
+        )
+        lepton_menu.addAction(annotate_action)
+
+        clear_action = QAction("Clear Annotations", self.parent)
+        clear_action.triggered.connect(
+            self.callbacks.get("lepton_clear_annotations", lambda: None)
+        )
+        lepton_menu.addAction(clear_action)
+
+        lepton_menu.addSeparator()
+
+        cross_probe_menu = QMenu("Cross-Probe", self.parent)
+        probe_action = QAction("Probe Selected Net", self.parent)
+        probe_action.triggered.connect(
+            self.callbacks.get("lepton_probe_net", lambda: None)
+        )
+        cross_probe_menu.addAction(probe_action)
+        clear_probe = QAction("Clear Highlight", self.parent)
+        clear_probe.triggered.connect(
+            self.callbacks.get("lepton_clear", lambda: None)
+        )
+        cross_probe_menu.addAction(clear_probe)
+        lepton_menu.addMenu(cross_probe_menu)
+
+        lepton_menu.addSeparator()
+        unwatch_action = QAction("Stop Watching", self.parent)
+        unwatch_action.triggered.connect(
+            self.callbacks.get("lepton_unwatch", lambda: None)
+        )
+        lepton_menu.addAction(unwatch_action)
+
+        file_menu.addMenu(lepton_menu)
+        file_menu.addSeparator()
+
         open_file_action = QAction("Open File...", self.parent)
         open_file_action.triggered.connect(self.callbacks.get("open_file", lambda: None))
         self._set_action_shortcut(open_file_action, "open_file")
@@ -516,6 +566,12 @@ class MenuManager:
             self.callbacks.get("show_kicad_guide", lambda: None)
         )
         help_menu.addAction(kicad_guide_action)
+
+        lepton_guide_action = QAction("Lepton-EDA User Guide", self.parent)
+        lepton_guide_action.triggered.connect(
+            self.callbacks.get("show_lepton_guide", lambda: None)
+        )
+        help_menu.addAction(lepton_guide_action)
 
         self.menubar.addMenu(help_menu)
 
