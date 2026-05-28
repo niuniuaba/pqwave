@@ -1140,10 +1140,12 @@ class MainWindow(QMainWindow):
         if not state.datasets:
             return voltages
         ds = state.datasets[-1]
-        # Only extract from DC analyses
-        analysis = getattr(ds, 'analysis_type', '')
-        if analysis and analysis not in ('op', 'dc', 'DC', 'OP'):
-            return voltages
+        # Only extract from DC analyses (plotname set by raw file parser)
+        plotname = getattr(ds, 'plotname', '').lower()
+        if plotname:
+            is_dc = 'dc' in plotname or 'operating' in plotname or 'transfer' in plotname
+            if not is_dc:
+                return voltages
         for var in ds.variables:
             m = re.match(r'^v\((.+)\)$', var.name, re.IGNORECASE)
             if m and var.data is not None and len(var.data) > 0:
