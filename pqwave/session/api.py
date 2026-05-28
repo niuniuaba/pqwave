@@ -565,6 +565,124 @@ class SessionAPI:
         state._kicad_config[key] = value
         return {"status": "ok", key: value}
 
+    # ---- Lepton-EDA bridge methods ----
+
+    def lepton_watch(self, path: str) -> dict:
+        """Start watching a .sch file for changes."""
+        if self._on_mutation:
+            self._on_mutation("lepton_watch", path=path)
+            return {"status": "ok"}
+        self._lepton_watched_path = path
+        return {"status": "ok"}
+
+    def lepton_simulate(self, sch_path: str | None = None) -> dict:
+        """Run export -> post-process -> ngspice pipeline."""
+        path = sch_path or getattr(self, "_lepton_watched_path", None)
+        if not path:
+            raise ValueError("No .sch file specified or watched")
+        if self._on_mutation:
+            self._on_mutation("lepton_simulate", path=path)
+            return {"status": "ok"}
+        from pqwave.bridge.lepton.bridge import LeptonBridge
+        bridge = LeptonBridge()
+        return bridge.simulate(path)
+
+    def lepton_unwatch(self) -> dict:
+        """Stop watching the schematic."""
+        if self._on_mutation:
+            self._on_mutation("lepton_unwatch")
+            return {"status": "ok"}
+        self._lepton_watched_path = None
+        return {"status": "ok"}
+
+    def lepton_probe_net(self, name: str) -> dict:
+        """Highlight a net in lepton-schematic."""
+        if self._on_mutation:
+            self._on_mutation("lepton_probe_net", name=name)
+            return {"status": "ok"}
+        from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+        client = LeptonCrossProbeClient()
+        if client.connect_to_server():
+            client.probe_net(name)
+            client.disconnect()
+            return {"status": "ok"}
+        return {"status": "error", "message": "lepton-schematic not running or pqwave server not active"}
+
+    def lepton_probe_part(self, ref: str, pin: str | None = None) -> dict:
+        """Highlight a component in lepton-schematic."""
+        if self._on_mutation:
+            self._on_mutation("lepton_probe_part", ref=ref, pin=pin)
+            return {"status": "ok"}
+        from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+        client = LeptonCrossProbeClient()
+        if client.connect_to_server():
+            client.probe_part(ref, pin)
+            client.disconnect()
+            return {"status": "ok"}
+        return {"status": "error", "message": "lepton-schematic not running"}
+
+    def lepton_clear(self) -> dict:
+        """Clear all lepton-schematic highlights."""
+        if self._on_mutation:
+            self._on_mutation("lepton_clear")
+            return {"status": "ok"}
+        from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+        client = LeptonCrossProbeClient()
+        if client.connect_to_server():
+            client.clear()
+            client.disconnect()
+            return {"status": "ok"}
+        return {"status": "error", "message": "lepton-schematic not running"}
+
+    def lepton_annotate_dc(self, voltages: dict[str, float] | None = None) -> dict:
+        """Stamp DC voltages onto lepton-schematic netname attributes."""
+        if self._on_mutation:
+            self._on_mutation("lepton_annotate_dc", voltages=voltages)
+            return {"status": "ok"}
+        from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+        client = LeptonCrossProbeClient()
+        if client.connect_to_server():
+            for netname, voltage in (voltages or {}).items():
+                client.send_command(f"$ANNOTATE:DC {netname} {voltage}")
+            client.disconnect()
+            return {"status": "ok"}
+        return {"status": "error", "message": "lepton-schematic not running"}
+
+    def lepton_clear_annotations(self) -> dict:
+        """Clear all floating labels and DC stamps from lepton-schematic."""
+        if self._on_mutation:
+            self._on_mutation("lepton_clear_annotations")
+            return {"status": "ok"}
+        from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+        client = LeptonCrossProbeClient()
+        if client.connect_to_server():
+            client.send_command("$CLEAR:ANNOTATIONS")
+            client.send_command("$CLEAR:DC")
+            client.disconnect()
+            return {"status": "ok"}
+        return {"status": "error", "message": "lepton-schematic not running"}
+
+    def lepton_config(self, key: str, value=None) -> dict:
+        """Get or set lepton-eda bridge configuration.
+
+        Keys:
+            port: int -- TCP port for cross-probe server (default 9424)
+            auto_simulate: bool -- auto-simulate on file save (default True)
+            install_server: (write-only) -- install pqwave-server.scm to autoload dir
+        """
+        if key == "install_server":
+            from pqwave.bridge.lepton.cross_probe import install_scheme_server
+            return install_scheme_server()
+
+        from pqwave.models.state import ApplicationState
+        state = ApplicationState()
+        if not hasattr(state, "_lepton_config"):
+            state._lepton_config = {"port": 9424, "auto_simulate": True}
+        if value is None:
+            return {"status": "ok", "data": state._lepton_config.get(key)}
+        state._lepton_config[key] = value
+        return {"status": "ok"}
+
     def load(self, path: str) -> dict:
         """Load a raw, vcd, or json project file into the session."""
         import os
