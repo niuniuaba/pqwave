@@ -964,6 +964,17 @@ class MainWindow(QMainWindow):
                         f"[lepton] Install failed: {result['message']}\n"
                     )
 
+        # Check for port conflicts
+        from pqwave.models.state import ApplicationState as _AS
+        st = _AS()
+        lepton_port = getattr(st, '_lepton_config', {}).get('port', 9424)
+        reserved = {4243: "KiCad cross-probe", 2026: "xschem server", 2021: "xschem back-annotation"}
+        if lepton_port in reserved:
+            self.chat_panel.append_output(
+                f"[lepton] WARNING: Port {lepton_port} conflicts with {reserved[lepton_port]}. "
+                "Cross-probe may not work. Use lepton_config('port', <new_port>) to change.\n"
+            )
+
         if self._lepton_cross_probe:
             self._lepton_cross_probe.disconnect()
         if self._lepton_watcher:
@@ -1118,13 +1129,21 @@ class MainWindow(QMainWindow):
                     return
 
     def _extract_dc_voltages(self) -> dict[str, float]:
-        """Extract DC voltages from the most recent simulation dataset."""
+        """Extract DC operating point voltages from the most recent dataset.
+
+        Only extracts from DC operating point (.op) or DC sweep (.dc) analyses.
+        Returns empty dict for AC, TRAN, or other analysis types.
+        """
         import re
         voltages = {}
         state = self.state
         if not state.datasets:
             return voltages
         ds = state.datasets[-1]
+        # Only extract from DC analyses
+        analysis = getattr(ds, 'analysis_type', '')
+        if analysis and analysis not in ('op', 'dc', 'DC', 'OP'):
+            return voltages
         for var in ds.variables:
             m = re.match(r'^v\((.+)\)$', var.name, re.IGNORECASE)
             if m and var.data is not None and len(var.data) > 0:

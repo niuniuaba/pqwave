@@ -1,7 +1,28 @@
 """Abstract base classes for schematic-capture tool integration."""
 
+import os
+import shutil
 from abc import ABC, abstractmethod
 from typing import Optional
+
+from pqwave.models.state import ApplicationState
+
+
+def resolve_ngspice(custom_path: str = "") -> str:
+    """Resolve ngspice path with priority: custom_path > tool_paths setting > PATH."""
+    if custom_path and os.path.isfile(custom_path):
+        return custom_path
+    state = ApplicationState()
+    configured = state.tool_paths.get("ngspice", "")
+    if configured and os.path.isfile(configured):
+        return configured
+    found = shutil.which("ngspice")
+    if found:
+        return found
+    raise FileNotFoundError(
+        "ngspice not found. Install ngspice or set the path in "
+        "Settings > External Converter Paths."
+    )
 
 
 class NetlistFix(ABC):

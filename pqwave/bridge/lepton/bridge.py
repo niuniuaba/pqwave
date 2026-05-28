@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from typing import Optional
 
-from pqwave.bridge.schem_bridge import SchematicBridge, NetlistFix
+from pqwave.bridge.schem_bridge import SchematicBridge, NetlistFix, resolve_ngspice
 from pqwave.bridge.netlist_postprocessor import NetlistPostProcessor
 from pqwave.models.state import ApplicationState
 
@@ -145,19 +145,7 @@ class LeptonBridge(SchematicBridge):
         )
 
     def _resolve_ngspice(self) -> str:
-        if self._ngspice and os.path.isfile(self._ngspice):
-            return self._ngspice
-        state = ApplicationState()
-        custom = state.tool_paths.get("ngspice", "")
-        if custom and os.path.isfile(custom):
-            return custom
-        found = shutil.which("ngspice")
-        if found:
-            return found
-        raise FileNotFoundError(
-            "ngspice not found. Install ngspice or set the path in "
-            "Settings > External Converter Paths."
-        )
+        return resolve_ngspice(self._ngspice)
 
     def _ensure_cross_probe(self):
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient

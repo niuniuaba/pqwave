@@ -68,7 +68,7 @@ The pipeline SHALL:
 
 ### Requirement: Lepton-EDA file watching
 
-The system SHALL watch `.sch` files for changes using `QFileSystemWatcher`.
+The system SHALL watch `.sch` files for changes using mtime+size polling via `QTimer` at 1-second intervals.
 
 The `LeptonFileWatcher` class in `pqwave/bridge/lepton/file_watcher.py` SHALL:
 - Emit a `file_changed(str)` signal when the watched file is modified
