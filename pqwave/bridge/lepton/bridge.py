@@ -103,6 +103,7 @@ class LeptonBridge(SchematicBridge):
                 "stderr": result.stderr,
                 "raw_file": raw_output if raw_ok else None,
                 "netlist": fixed,
+                "fix_info": [],
             }
         finally:
             try:

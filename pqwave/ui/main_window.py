@@ -964,16 +964,16 @@ class MainWindow(QMainWindow):
                         f"[lepton] Install failed: {result['message']}\n"
                     )
 
-        # Check for port conflicts
+        # Check for port conflicts before starting bridge
         from pqwave.models.state import ApplicationState as _AS
-        st = _AS()
-        lepton_port = getattr(st, '_lepton_config', {}).get('port', 9424)
+        lepton_port = getattr(_AS(), '_lepton_config', {}).get('port', 9424)
         reserved = {4243: "KiCad cross-probe", 2026: "xschem server", 2021: "xschem back-annotation"}
         if lepton_port in reserved:
             self.chat_panel.append_output(
-                f"[lepton] WARNING: Port {lepton_port} conflicts with {reserved[lepton_port]}. "
-                "Cross-probe may not work. Use lepton_config('port', <new_port>) to change.\n"
+                f"[lepton] ERROR: Port {lepton_port} conflicts with {reserved[lepton_port]}. "
+                "Bridge not started. Use lepton_config('port', <new_port>) to change.\n"
             )
+            return
 
         if self._lepton_cross_probe:
             self._lepton_cross_probe.disconnect()
@@ -1129,10 +1129,11 @@ class MainWindow(QMainWindow):
                     return
 
     def _extract_dc_voltages(self) -> dict[str, float]:
-        """Extract DC operating point voltages from the most recent dataset.
+        """Extract mean voltages from v(node) variables in the last dataset.
 
-        Only extracts from DC operating point (.op) or DC sweep (.dc) analyses.
-        Returns empty dict for AC, TRAN, or other analysis types.
+        Computes np.mean() of each v(node) variable. Best used with DC
+        operating point or DC sweep data. For AC or TRAN data, the mean
+        may not represent a meaningful operating point.
         """
         import re
         voltages = {}
