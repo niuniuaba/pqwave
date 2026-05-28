@@ -165,6 +165,15 @@ class MainWindow(QMainWindow):
         self._kicad_last_path: str = ""
         self._kicad_connect_failed: bool = False
 
+        # Lepton-EDA bridge (lazy, same pattern as KiCad)
+        self.lepton_control_bar = None
+        self._lepton_watcher = None
+        self._lepton_bridge = None
+        self._lepton_cross_probe = None
+        self._lepton_watched_path = None
+        self._lepton_simulating = False
+        self._lepton_last_path = ""
+
         self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
         self.menu_manager = MenuManager(self, callbacks, keybinding_manager=self.keybinding_manager)
@@ -672,6 +681,25 @@ class MainWindow(QMainWindow):
         elif action == "kicad_clear":
             if self._kicad_cross_probe:
                 self._kicad_cross_probe.clear()
+        elif action == "lepton_watch":
+            self._start_lepton_watch(kwargs["path"])
+        elif action == "lepton_simulate":
+            self._on_lepton_simulate()
+        elif action == "lepton_unwatch":
+            self._on_lepton_unwatch()
+        elif action == "lepton_probe_net":
+            if self._lepton_cross_probe:
+                self._lepton_cross_probe.probe_net(kwargs["name"])
+        elif action == "lepton_probe_part":
+            if self._lepton_cross_probe:
+                self._lepton_cross_probe.probe_part(kwargs["ref"], kwargs.get("pin"))
+        elif action == "lepton_clear":
+            if self._lepton_cross_probe:
+                self._lepton_cross_probe.clear()
+        elif action == "lepton_annotate_dc":
+            self._on_lepton_annotate_dc(kwargs.get("voltages", {}))
+        elif action == "lepton_clear_annotations":
+            self._on_lepton_clear_annotations()
 
     # ---- KiCad Bridge handlers ----
 
@@ -881,6 +909,196 @@ class MainWindow(QMainWindow):
     def _kicad_ba_debounced(self):
         """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
         self._kicad_probe_active_trace()
+
+    # ---- Lepton-EDA Bridge handlers ----
+
+    def _on_lepton_watch(self):
+        """File > Lepton Bridge > Watch Schematic."""
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Lepton-EDA Schematic",
+            os.path.expanduser("~"),
+            "Schematic (*.sch);;All Files (*)"
+        )
+        if not path:
+            return
+        self._start_lepton_watch(path)
+
+    def _start_lepton_watch(self, sch_path: str):
+        from PyQt6.QtWidgets import QMessageBox
+        from pqwave.bridge.lepton.bridge import LeptonBridge
+        from pqwave.bridge.lepton.file_watcher import LeptonFileWatcher
+        from pqwave.bridge.lepton.cross_probe import (
+            LeptonCrossProbeClient, check_scheme_server, install_scheme_server
+        )
+        from pqwave.bridge.lepton.control_bar import LeptonControlBar
+
+        # Check if Scheme server is installed
+        status = check_scheme_server()
+        if not status["installed"] or status["needs_update"]:
+            action = "update" if status["installed"] else "install"
+            reply = QMessageBox.question(
+                self,
+                "Lepton-EDA Bridge Setup",
+                f"The Lepton-EDA bridge needs to {action} a companion script "
+                f"to enable cross-probe and back-annotation.\n\n"
+                f"Install to:\n{status['target_path']}\n\n"
+                f"lepton-schematic will load this script automatically on startup. "
+                f"You only need to do this once.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                self.chat_panel.append_output(
+                    "[lepton] Bridge setup cancelled. Cross-probe and back-annotation "
+                    "will not be available.\n"
+                )
+            else:
+                result = install_scheme_server()
+                if result["status"] == "ok":
+                    self.chat_panel.append_output(
+                        f"[lepton] Server installed to {result['target_path']}. "
+                        "Restart lepton-schematic for changes to take effect.\n"
+                    )
+                else:
+                    self.chat_panel.append_output(
+                        f"[lepton] Install failed: {result['message']}\n"
+                    )
+
+        if self._lepton_cross_probe:
+            self._lepton_cross_probe.disconnect()
+        if self._lepton_watcher:
+            self._lepton_watcher.unwatch()
+
+        self._lepton_bridge = LeptonBridge()
+        self._lepton_watcher = LeptonFileWatcher()
+        self._lepton_cross_probe = LeptonCrossProbeClient()
+
+        if self.lepton_control_bar is None:
+            self.lepton_control_bar = LeptonControlBar()
+            upper = self._main_splitter.widget(0)
+            if upper and upper.layout():
+                upper.layout().addWidget(self.lepton_control_bar)
+            self.lepton_control_bar.simulate_clicked.connect(self._on_lepton_simulate)
+            self.lepton_control_bar.annotate_dc_clicked.connect(
+                lambda: self._on_lepton_annotate_dc()
+            )
+            self.lepton_control_bar.clear_annotations_clicked.connect(
+                self._on_lepton_clear_annotations
+            )
+            self.lepton_control_bar.unwatch_clicked.connect(self._on_lepton_unwatch)
+
+        self._lepton_watcher.file_changed.connect(self._on_lepton_file_changed)
+        self._lepton_watcher.watch(sch_path)
+        self._lepton_watched_path = sch_path
+        self._lepton_last_path = sch_path
+
+        self._lepton_cross_probe.net_selected.connect(self._on_lepton_net_selected)
+        self._lepton_cross_probe.error_occurred.connect(
+            lambda msg: self.chat_panel.append_output(f"[lepton] {msg}\n")
+        )
+
+        self.lepton_control_bar.setVisible(True)
+        basename = os.path.basename(sch_path)
+        self.statusBar().showMessage(
+            f"Watching {basename} — save in lepton-schematic to auto-simulate"
+        )
+        self.lepton_control_bar.set_status(f"watching {basename}")
+        self._run_lepton_pipeline(sch_path)
+
+    def _on_lepton_file_changed(self, path: str):
+        if self.lepton_control_bar:
+            self.lepton_control_bar.set_status("change detected, simulating...")
+        self._run_lepton_pipeline(path)
+
+    def _on_lepton_simulate(self):
+        if self._lepton_watched_path:
+            self._run_lepton_pipeline(self._lepton_watched_path)
+
+    def _on_lepton_unwatch(self):
+        self._lepton_last_path = self._lepton_watched_path
+        if self._lepton_watcher:
+            self._lepton_watcher.unwatch()
+        if self._lepton_cross_probe:
+            self._lepton_cross_probe.disconnect()
+        if self.lepton_control_bar:
+            self.lepton_control_bar.set_status("not watching")
+        self._lepton_watched_path = None
+
+    def _run_lepton_pipeline(self, sch_path: str):
+        if self._lepton_simulating:
+            self.chat_panel.append_output("[lepton] pipeline skipped (already simulating)\n")
+            return
+        if self._lepton_bridge is None:
+            return
+        self._lepton_simulating = True
+        if self.lepton_control_bar:
+            self.lepton_control_bar.set_simulating(True)
+        try:
+            result = self._lepton_bridge.simulate(sch_path)
+            if result["returncode"] != 0:
+                self.chat_panel.append_output(
+                    f"[lepton] Simulation failed (code {result['returncode']}):\n"
+                    f"{result['stderr']}\n"
+                )
+                return
+            if result["raw_file"]:
+                self._load_raw_file(result["raw_file"])
+                self.chat_panel.append_output(
+                    f"[lepton] Simulation complete: "
+                    f"{len(self.state.datasets[-1].variables)} signals loaded\n"
+                )
+                if self.lepton_control_bar:
+                    self.lepton_control_bar.set_simulation_complete()
+        except (FileNotFoundError, RuntimeError) as e:
+            self.chat_panel.append_output(f"[lepton] {e}\n")
+        finally:
+            self._lepton_simulating = False
+            if self.lepton_control_bar:
+                self.lepton_control_bar.set_simulating(False)
+
+    def _on_lepton_annotate_dc(self, voltages: dict[str, float] | None = None):
+        if not self._lepton_cross_probe or not self._lepton_cross_probe.is_connected():
+            self._lepton_cross_probe.connect_to_server()
+        if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
+            if voltages is None:
+                voltages = self._extract_dc_voltages()
+            for netname, voltage in voltages.items():
+                self._lepton_cross_probe.send_command(
+                    f"$ANNOTATE:DC {netname} {voltage}"
+                )
+            self.chat_panel.append_output(
+                f"[lepton] DC annotations stamped: {len(voltages)} nets\n"
+            )
+
+    def _on_lepton_clear_annotations(self):
+        if not self._lepton_cross_probe or not self._lepton_cross_probe.is_connected():
+            self._lepton_cross_probe.connect_to_server()
+        if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
+            self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
+            self._lepton_cross_probe.send_command("$CLEAR:DC")
+            self.chat_panel.append_output("[lepton] Annotations cleared\n")
+
+    def _on_lepton_net_selected(self, netname: str):
+        """Reverse cross-probe: user clicked a net in lepton-schematic."""
+        self.chat_panel.append_output(f"[lepton] Selected net: {netname}\n")
+
+    def _extract_dc_voltages(self) -> dict[str, float]:
+        """Extract DC voltages from the most recent simulation dataset."""
+        import re
+        voltages = {}
+        state = ApplicationState()
+        if not state.datasets:
+            return voltages
+        ds = state.datasets[-1]
+        for var in ds.variables:
+            m = re.match(r'^v\((.+)\)$', var.name, re.IGNORECASE)
+            if m and var.data is not None and len(var.data) > 0:
+                try:
+                    import numpy as np
+                    voltages[m.group(1)] = float(np.mean(var.data))
+                except (TypeError, ValueError):
+                    pass
+        return voltages
 
     def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""
@@ -1260,6 +1478,9 @@ class MainWindow(QMainWindow):
             'kicad_simulate': self._on_kicad_simulate,
             'kicad_rewatch': self._on_kicad_rewatch,
             'kicad_unwatch': self._on_kicad_unwatch,
+            'lepton_watch': self._on_lepton_watch,
+            'lepton_simulate': self._on_lepton_simulate,
+            'lepton_unwatch': self._on_lepton_unwatch,
         }
 
     # --- Delegate properties (route to active panel) ---
