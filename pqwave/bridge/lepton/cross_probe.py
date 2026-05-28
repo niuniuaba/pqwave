@@ -174,7 +174,11 @@ class LeptonCrossProbeClient(QObject):
                 buf += data
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
-                    self._handle_message(line.decode("utf-8").strip())
+                    try:
+                        msg = line.decode("utf-8").strip()
+                        self._handle_message(msg)
+                    except UnicodeDecodeError as e:
+                        self.error_occurred.emit(f"Decode error: {e}")
             except OSError:
                 break
         if self._running:
@@ -186,3 +190,5 @@ class LeptonCrossProbeClient(QObject):
             self.net_selected.emit(msg[14:].strip())
         elif msg.startswith("$SELECTED:part "):
             self.part_selected.emit(msg[16:].strip())
+        else:
+            self.error_occurred.emit(f"Unknown message from server: {msg[:80]}")

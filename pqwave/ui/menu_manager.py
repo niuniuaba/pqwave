@@ -159,6 +159,10 @@ class MenuManager:
         watch_action.triggered.connect(self.callbacks.get("lepton_watch", lambda: None))
         lepton_menu.addAction(watch_action)
 
+        rewatch_action = QAction("Re-Watch", self.parent)
+        rewatch_action.triggered.connect(self.callbacks.get("lepton_rewatch", lambda: None))
+        lepton_menu.addAction(rewatch_action)
+
         simulate_action = QAction("Simulate Now", self.parent)
         simulate_action.triggered.connect(self.callbacks.get("lepton_simulate", lambda: None))
         lepton_menu.addAction(simulate_action)

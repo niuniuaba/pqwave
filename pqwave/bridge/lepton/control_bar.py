@@ -19,6 +19,7 @@ class LeptonControlBar(QWidget):
     """
 
     simulate_clicked = pyqtSignal()
+    rewatch_clicked = pyqtSignal()
     annotate_dc_clicked = pyqtSignal()
     clear_annotations_clicked = pyqtSignal()
     unwatch_clicked = pyqtSignal()
@@ -52,6 +53,11 @@ class LeptonControlBar(QWidget):
         self._clear_annotations_btn.clicked.connect(self.clear_annotations_clicked.emit)
         layout.addWidget(self._clear_annotations_btn)
 
+        self._rewatch_btn = QPushButton("Re-Watch")
+        self._rewatch_btn.setMinimumWidth(90)
+        self._rewatch_btn.clicked.connect(self.rewatch_clicked.emit)
+        layout.addWidget(self._rewatch_btn)
+
         self._unwatch_btn = QPushButton("Stop Watching")
         self._unwatch_btn.setMinimumWidth(110)
         self._unwatch_btn.clicked.connect(self.unwatch_clicked.emit)
@@ -66,6 +72,7 @@ class LeptonControlBar(QWidget):
 
     def set_simulating(self, active: bool):
         self._simulate_btn.setEnabled(not active)
+        self._rewatch_btn.setEnabled(not active)
         self._annotate_btn.setEnabled(False)
         if active:
             self.set_status("simulating...")

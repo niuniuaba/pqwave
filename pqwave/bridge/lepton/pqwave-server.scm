@@ -254,4 +254,4 @@
 (add-menu "_Wave View" '(("pqwave" &wave-pqwave "gtk-execute")))
 
 ;; Start the server
-(pqwave-start-server 9424)
+(pqwave-start-server pqwave-port)

@@ -31,11 +31,14 @@ class TestLeptonBridge:
 
 class TestLeptonBridgeNetlistExport:
     def test_export_two_stage_amp(self):
+        import os
         bridge = LeptonBridge()
         sch = "/home/wing/Apps/lepton-eda.git/examples/TwoStageAmp/TwoStageAmp.sch"
+        if not os.path.exists(sch):
+            pytest.skip("TwoStageAmp example not available")
         netlist = bridge.export_netlist(sch)
         assert ".end" in netlist
-        assert "/Vbase1" not in netlist  # no leading slashes
+        assert "/Vbase1" not in netlist
         assert "Q1" in netlist or "Q2" in netlist
 
     @pytest.mark.skip(reason="requires full filesystem access")

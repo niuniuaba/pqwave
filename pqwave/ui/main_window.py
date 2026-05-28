@@ -986,6 +986,7 @@ class MainWindow(QMainWindow):
                 self._on_lepton_clear_annotations
             )
             self.lepton_control_bar.unwatch_clicked.connect(self._on_lepton_unwatch)
+            self.lepton_control_bar.rewatch_clicked.connect(self._on_lepton_rewatch)
 
         self._lepton_watcher.file_changed.connect(self._on_lepton_file_changed)
         self._lepton_watcher.watch(sch_path)
@@ -1023,6 +1024,11 @@ class MainWindow(QMainWindow):
         if self.lepton_control_bar:
             self.lepton_control_bar.set_status("not watching")
         self._lepton_watched_path = None
+
+    def _on_lepton_rewatch(self):
+        """Re-Watch button / menu: resume watching the last path."""
+        if self._lepton_last_path:
+            self._start_lepton_watch(self._lepton_last_path)
 
     def _run_lepton_pipeline(self, sch_path: str):
         if self._lepton_simulating:
@@ -1086,7 +1092,7 @@ class MainWindow(QMainWindow):
         """Extract DC voltages from the most recent simulation dataset."""
         import re
         voltages = {}
-        state = ApplicationState()
+        state = self.state
         if not state.datasets:
             return voltages
         ds = state.datasets[-1]
@@ -1481,6 +1487,7 @@ class MainWindow(QMainWindow):
             'lepton_watch': self._on_lepton_watch,
             'lepton_simulate': self._on_lepton_simulate,
             'lepton_unwatch': self._on_lepton_unwatch,
+            'lepton_rewatch': self._on_lepton_rewatch,
         }
 
     # --- Delegate properties (route to active panel) ---
