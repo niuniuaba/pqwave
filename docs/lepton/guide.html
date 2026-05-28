@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lepton-EDA Bridge User Guide — pqwave</title>
+<style>
+:root {
+  --text: #1a1a2e;
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --border: #d0d0d8;
+  --code-bg: #f0f0f4;
+  --pre-bg: #f4f4f8;
+  --link: #2563eb;
+  --link-hover: #1d4ed8;
+  --th-bg: #e8e8ee;
+  --note-bg: #eef2ff;
+  --note-border: #c7d2fe;
+  --note-text: #3730a3;
+  --warn-bg: #fef3c7;
+  --warn-border: #fcd34d;
+  --warn-text: #92400e;
+  --tag-bg: #e0e7ff;
+  --tag-text: #3730a3;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  color: var(--text);
+  background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+               Ubuntu, Cantarell, sans-serif;
+  line-height: 1.65;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2em 1.5em 4em;
+}
+
+h1 {
+  font-size: 1.9em;
+  margin-bottom: 0.3em;
+  color: #111;
+}
+
+h2 {
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 0.25em;
+  margin: 2em 0 0.6em;
+  font-size: 1.4em;
+  color: #1e1e2e;
+}
+
+h3 {
+  margin: 1.5em 0 0.5em;
+  font-size: 1.15em;
+  color: #2d2d42;
+}
+
+h4 {
+  margin: 1.2em 0 0.4em;
+  font-size: 1.05em;
+  color: #3b3b52;
+}
+
+p { margin: 0.6em 0; }
+
+a { color: var(--link); text-decoration: none; }
+a:hover { color: var(--link-hover); text-decoration: underline; }
+
+code {
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-size: 0.92em;
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", "JetBrains Mono",
+               Consolas, monospace;
+}
+
+pre {
+  background: var(--pre-bg);
+  padding: 0.8em 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.88em;
+  line-height: 1.5;
+  margin: 0.8em 0;
+  border: 1px solid var(--border);
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+  font-size: 0.94em;
+}
+
+th, td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.7em;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--th-bg);
+  font-weight: 600;
+}
+
+tr:nth-child(even) td { background: rgba(128,128,160,0.03); }
+
+ul, ol { margin: 0.5em 0; padding-left: 1.8em; }
+li { margin: 0.25em 0; }
+
+blockquote {
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  border-left: 3px solid var(--border);
+  color: #555;
+  font-size: 0.94em;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+
+/* ---- Notes ---- */
+.note {
+  background: var(--note-bg);
+  border-left: 4px solid var(--note-border);
+  padding: 0.5em 1em;
+  margin: 0.8em 0;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.94em;
+  color: var(--note-text);
+}
+
+.note strong { color: var(--note-text); }
+
+.warn {
+  background: var(--warn-bg);
+  border-left: 4px solid var(--warn-border);
+  padding: 0.5em 1em;
+  margin: 0.8em 0;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.94em;
+  color: var(--warn-text);
+}
+
+/* ---- Screenshot placeholders ---- */
+.screenshot {
+  background: #f8f8fc;
+  border: 2px dashed #c0c0d0;
+  border-radius: 6px;
+  padding: 2em;
+  text-align: center;
+  color: #888;
+  font-style: italic;
+  margin: 1em 0;
+}
+
+/* ---- Diagram ---- */
+.diagram {
+  background: var(--pre-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1em;
+  margin: 0.8em 0;
+  font-family: "SF Mono", "Cascadia Code", monospace;
+  font-size: 0.88em;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* ---- Tag ---- */
+.tag {
+  display: inline-block;
+  background: var(--tag-bg);
+  color: var(--tag-text);
+  padding: 0.05em 0.5em;
+  border-radius: 3px;
+  font-size: 0.82em;
+  font-weight: 600;
+}
+
+/* ---- API table ---- */
+.api-table td:first-child { white-space: nowrap; font-family: monospace; font-size: 0.92em; }
+.api-table td:nth-child(2) { white-space: nowrap; font-family: monospace; font-size: 0.87em; }
+
+/* ---- TOC ---- */
+.toc-section { margin: 0.5em 0; }
+.toc-section h4 { margin: 0.2em 0; font-size: 0.96em; color: #555; }
+.toc-section ul { list-style: none; padding-left: 0; }
+.toc-section li { margin: 0.15em 0; }
+
+/* ---- Flow chart ---- */
+.flow-arrow { color: #888; font-weight: bold; }
+
+/* ---- Step icons ---- */
+.step { font-weight: 700; color: var(--link); }
+</style>
+</head>
+<body>
+
+<h1>Lepton-EDA Bridge User Guide</h1>
+
+<p>
+pqwave integrates with lepton-eda through a netlist-based file-watching
+pipeline and a companion Guile Scheme server that enables bidirectional
+cross-probe, back-annotation, and in-schematic menus. This guide covers
+every feature and walks through real analysis workflows.
+</p>
+
+<blockquote>
+<p><strong>No source modifications required.</strong> Everything works with
+a stock lepton-eda installation. A single companion Scheme script
+(<code>pqwave-server.scm</code>) is installed once into the lepton-eda
+autoload directory — it is loaded automatically by lepton-schematic on
+startup.</p>
+</blockquote>
+
+<!-- ===== Table of Contents ===== -->
+<h2>Table of Contents</h2>
+
+<div class="toc-section">
+<h4>Part 1 — Feature Reference</h4>
+<ul>
+<li><a href="#overview">Overview: How It Works</a></li>
+<li><a href="#netlist-pipeline">Netlist Pipeline</a></li>
+<li><a href="#in-schematic-menus">In-Schematic Menus</a></li>
+<li><a href="#cross-probe">Bidirectional Cross-Probe</a></li>
+<li><a href="#back-annotation">Back-Annotation</a></li>
+<li><a href="#session-api">Session API Commands</a></li>
+<li><a href="#scheme-server">Scheme Server Installation</a></li>
+</ul>
+</div>
+
+<div class="toc-section">
+<h4>Part 2 — Worked Tutorials</h4>
+<ul>
+<li><a href="#tutorial-1">Tutorial 1: TwoStageAmp — Complete Workflow</a></li>
+<li><a href="#tutorial-2">Tutorial 2: Bidirectional Cross-Probe</a></li>
+<li><a href="#tutorial-3">Tutorial 3: DC Back-Annotation</a></li>
+<li><a href="#scripting">Standalone Scripting Example</a></li>
+</ul>
+</div>
+
+<div class="toc-section">
+<h4>Part 3 — Troubleshooting</h4>
+<ul>
+<li><a href="#troubleshooting">Common Issues and Solutions</a></li>
+</ul>
+</div>
+
+<hr>
+
+<!-- ===== PART 1: FEATURE REFERENCE ===== -->
+
+<h2 id="part1">Part 1 — Feature Reference</h2>
+
+<!-- ---- Overview ---- -->
+<h3 id="overview">Overview: How It Works</h3>
+
+<div class="diagram">lepton-schematic                        pqwave
+----------------                        ------
+User opens a .sch file                  File watcher detects save (mtime poll)
+User edits &amp; saves (Ctrl+S) ───────►    lepton-netlist -g spice-sdb exports
+                                           clean SPICE — <em>zero fixes needed</em>
+                                          ngspice -b -r result.raw circuit.cir
+                                          Loads and displays ALL signals
+
+In-schematic menus (optional):          Reverse cross-probe:
+  Netlist &gt; SPICE ─────────────────►     Click net in schematic ───────►
+  Simulation &gt; ngspice ────────────►       trace plotted in pqwave
+  Wave View &gt; pqwave ──────────────►
+                                        Forward cross-probe:
+Bidirectional highlight via TCP :9424    Select trace in pqwave ─────────►
+                                            net highlighted in schematic</div>
+
+<div class="note">
+<p><strong>Design note — why probing starts from pqwave, not the
+schematic:</strong> pqwave displays every signal from the simulation at
+once in the signal browser. The user explores freely, plotting multiple
+traces and using cursors to measure. The schematic is the design canvas;
+pqwave is the analysis cockpit. Cross-probe lets you navigate between
+the two in both directions on demand.</p>
+</div>
+
+<p>Key features of the lepton-eda bridge:</p>
+
+<ol>
+  <li><strong>Netlist pipeline</strong> — automatic export via
+    <code>lepton-netlist -g spice-sdb</code>, which produces clean
+    SPICE requiring no post-processing (unlike KiCad).</li>
+  <li><strong>Bidirectional cross-probe</strong> — highlight nets in
+    either direction using a TCP channel (port 9424) between pqwave and
+    the companion Scheme server running inside lepton-schematic.</li>
+  <li><strong>DC back-annotation</strong> — stamp simulated operating
+    point voltages directly onto the schematic as netname attributes or
+    floating text labels.</li>
+  <li><strong>In-schematic menus</strong> — Netlist, Simulation, and
+    Wave View actions available directly from lepton-schematic's menu
+    bar, enabling the complete simulation workflow without leaving the
+    schematic editor.</li>
+  <li><strong>Pure Scheme plugin</strong> — no patches or recompilation
+    of lepton-eda required. All cross-probe and menu logic is
+    implemented in a single <code>pqwave-server.scm</code> file that
+    lepton-schematic loads at startup via its autoload mechanism.</li>
+</ol>
+
+<!-- ---- Netlist Pipeline ---- -->
+<h3 id="netlist-pipeline">Netlist Pipeline</h3>
+
+<p>The bridge processes schematics through a two-stage pipeline:</p>
+
+<table>
+<thead>
+<tr><th>Stage</th><th>Action</th><th>Details</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td>Export</td>
+  <td><code>lepton-netlist -g spice-sdb -o - file.sch</code></td>
+  <td>Generates SPICE netlist from <code>.sch</code> file using the
+    spice-sdb backend. Output is written to stdout.</td>
+</tr>
+<tr>
+  <td>Simulate</td>
+  <td><code>ngspice -b -r output.raw circuit.cir</code></td>
+  <td>Runs batch simulation, produces a standard <code>.raw</code> file
+    that pqwave loads directly.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">
+<p><strong>Why zero fixes are needed:</strong> lepton-eda's
+<code>spice-sdb</code> backend is purpose-built for SPICE netlisting. It
+understands SPICE device semantics and produces correct output by
+default. This contrasts with KiCad, whose SPICE exporter is layered on
+top of a general-purpose netlist generator and requires post-processing
+to fix node name slashes, semiconductor pin ordering, and
+<code>.control</code> block placement.</p>
+</div>
+
+<p><strong>Configuration</strong> — set via
+<strong>Settings &gt; External Converter Paths</strong> or the Session API:</p>
+
+<table>
+<thead>
+<tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>lepton_netlist</code></td>
+  <td>Auto-detect from <code>$PATH</code></td>
+  <td>Path to <code>lepton-netlist</code> binary</td>
+</tr>
+<tr>
+  <td><code>ngspice</code></td>
+  <td>Auto-detect from <code>$PATH</code></td>
+  <td>Path to <code>ngspice</code> binary</td>
+</tr>
+<tr>
+  <td>port</td>
+  <td><code>9424</code></td>
+  <td>TCP port for cross-probe communication</td>
+</tr>
+<tr>
+  <td>auto_simulate</td>
+  <td><code>true</code></td>
+  <td>Run simulation automatically when schematic is saved</td>
+</tr>
+</tbody>
+</table>
+
+<!-- ---- In-Schematic Menus ---- -->
+<h3 id="in-schematic-menus">In-Schematic Menus</h3>
+
+<p>
+Once <code>pqwave-server.scm</code> is installed, lepton-schematic gains
+three new top-level menus. These allow you to run the complete simulation
+workflow without leaving the schematic editor:
+</p>
+
+<table>
+<thead>
+<tr><th>Menu</th><th>Action</th><th>What It Does</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><strong>Netlist</strong></td>
+  <td>SPICE</td>
+  <td>Runs <code>lepton-netlist -g spice-sdb -o &lt;base&gt;.cir</code> on the
+    active schematic. Produces a <code>.cir</code> file in the same
+    directory.</td>
+</tr>
+<tr>
+  <td><strong>Simulation</strong></td>
+  <td>ngspice</td>
+  <td>Generates the <code>.cir</code> file, then runs
+    <code>ngspice -b -r &lt;base&gt;.raw &lt;base&gt;.cir</code>.
+    Produces a <code>.raw</code> file for pqwave.</td>
+</tr>
+<tr>
+  <td><strong>Wave View</strong></td>
+  <td>pqwave</td>
+  <td>Launches <code>pqwave &lt;base&gt;.raw</code> — assumes the
+    <code>.cir</code> and <code>.raw</code> files already exist in the
+    same directory as the schematic.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">
+<p><strong>Menu registration is automatic.</strong> The menus appear as
+soon as lepton-schematic starts with <code>pqwave-server.scm</code> in
+the autoload directory. They do not require any manual configuration or
+menu editing. The registration happens via
+<code>add-menu</code> calls in the script, which lepton-schematic's
+<code>gafrc</code> mechanism executes before the main menu is built.</p>
+</div>
+
+<div class="screenshot">[SCREENSHOT: lepton-schematic menu bar showing Netlist, Simulation, and
+Wave View menus with SPICE, ngspice, and pqwave actions visible]</div>
+
+<p><strong>Complete workflow from lepton-schematic:</strong></p>
+
+<ol>
+  <li>Open your <code>.sch</code> schematic in lepton-schematic.</li>
+  <li><strong>Netlist &gt; SPICE</strong> — generates the <code>.cir</code> file.</li>
+  <li><strong>Simulation &gt; ngspice</strong> — runs the simulation and
+    produces the <code>.raw</code> file.</li>
+  <li><strong>Wave View &gt; pqwave</strong> — launches pqwave with the
+    <code>.raw</code> results.</li>
+</ol>
+
+<!-- ---- Bidirectional Cross-Probe ---- -->
+<h3 id="cross-probe">Bidirectional Cross-Probe</h3>
+
+<p>
+Cross-probe lets you navigate between pqwave's analysis views and the
+schematic in lepton-schematic. Communication happens over a TCP channel
+on port 9424 between pqwave and <code>pqwave-server.scm</code>.
+</p>
+
+<h4>pqwave to schematic (Forward)</h4>
+
+<p>Select a trace in pqwave, then navigate to
+<strong>File &gt; Lepton Bridge &gt; Cross-Probe &gt; Probe Selected Net</strong>.
+The corresponding net is selected and zoomed-to in lepton-schematic.</p>
+
+<table>
+<thead>
+<tr><th>Action</th><th>Menu Path</th><th>TCP Command</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td>Probe net</td>
+  <td>File &gt; Lepton Bridge &gt; Cross-Probe &gt; Probe Selected Net</td>
+  <td><code>$NET: "netname"</code></td>
+</tr>
+<tr>
+  <td>Probe component</td>
+  <td>(via API: <code>lepton_probe_part</code>)</td>
+  <td><code>$PART: "refdes"</code></td>
+</tr>
+<tr>
+  <td>Clear highlight</td>
+  <td>File &gt; Lepton Bridge &gt; Cross-Probe &gt; Clear Highlight</td>
+  <td><code>$CLEAR</code></td>
+</tr>
+</tbody>
+</table>
+
+<h4>schematic to pqwave (Reverse)</h4>
+
+<p>
+When a net is selected in lepton-schematic (clicked), the Scheme server
+sends a <code>$SELECTED:net</code> message to pqwave via the TCP
+channel. pqwave receives this and can automatically plot the
+corresponding trace.
+</p>
+
+<div class="note">
+<p><strong>Debounce:</strong> Cursor-driven cross-probe is debounced at
+250ms to avoid flooding the TCP channel when scrubbing through waveform
+data. Direct probe (menu click) is sent immediately.</p>
+</div>
+
+<h4>Cursor-Driven Cross-Probe</h4>
+
+<p>
+When you track through a waveform with the X cursor in pqwave, the
+bridge can continuously update the schematic highlight to follow the
+active trace. This is controlled by the 250ms debounce timer — as you
+drag the cursor, the most recent position is sent after a quarter-second
+pause.
+</p>
+
+<div class="note">
+<p><strong>Connection lifecycle:</strong> The TCP connection is
+established when the bridge is activated (File &gt; Lepton Bridge &gt;
+Watch Schematic). It persists for the duration of the watch session.
+Disconnecting (Stop Watching) closes the TCP connection and removes the
+control bar.</p>
+</div>
+
+<!-- ---- Back-Annotation ---- -->
+<h3 id="back-annotation">Back-Annotation</h3>
+
+<p>
+The bridge can write simulation results back into the schematic.
+Two types of annotation are supported:
+</p>
+
+<h4>1. DC Bias Stamps</h4>
+
+<p>
+Click <strong>Annotate DC</strong> in the Lepton control bar (or
+navigate to <strong>File &gt; Lepton Bridge &gt; Annotate DC</strong>).
+pqwave extracts the mean voltage of every <code>v(netname)</code> signal
+from the current dataset and stamps each as a suffix on the
+corresponding netname attribute:
+</p>
+
+<div class="diagram">Before:  netname = "VDD"
+After:   netname = "VDD [DC:5.0 V]"</div>
+
+<p>
+<strong>Persistence:</strong> DC stamps modify the
+<code>netname</code> attribute text. If you save the schematic after
+annotating, the stamps persist in the <code>.sch</code> file. Use
+<strong>Clear Annotations</strong> to strip the <code>[DC:...]</code>
+suffix from all netname attributes, restoring the clean net names.
+</p>
+
+<h4>2. Floating Labels</h4>
+
+<p>
+Voltage labels can be placed as temporary text objects near net segments
+using the <code>$ANNOTATE:LABEL</code> command (available via the API).
+These labels are purely visual and are removed when lepton-schematic
+closes or when <strong>Clear Annotations</strong> is invoked.
+</p>
+
+<div class="warn">
+<p><strong>Persistence behavior:</strong> DC stamps modify netname
+attributes and will persist in the <code>.sch</code> file if saved.
+Floating labels are held in memory by the Scheme server and are lost
+when lepton-schematic exits. Use Clear Annotations before saving if you
+want to keep the schematic clean.</p>
+</div>
+
+<div class="screenshot">[SCREENSHOT: lepton-schematic showing a circuit with DC voltage stamps
+appended to netname attributes, e.g. VDD [DC:5.0 V], Vbias [DC:1.2 V]]</div>
+
+<!-- ---- Session API Commands ---- -->
+<h3 id="session-api">Session API Commands</h3>
+
+<p>All bridge operations are available through the Session API for
+scripting and headless use.</p>
+
+<h4>Pipeline Control</h4>
+
+<table class="api-table">
+<thead>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>lepton_watch</code></td>
+  <td><code>lepton_watch(path)</code></td>
+  <td>Start watching a <code>.sch</code> file. Installs the Scheme server
+    if needed, connects cross-probe, and runs initial simulation.</td>
+</tr>
+<tr>
+  <td><code>lepton_simulate</code></td>
+  <td><code>lepton_simulate(sch_path=None)</code></td>
+  <td>Run export to ngspice pipeline. Uses the watched path if
+    <code>sch_path</code> is <code>None</code>.</td>
+</tr>
+<tr>
+  <td><code>lepton_unwatch</code></td>
+  <td><code>lepton_unwatch()</code></td>
+  <td>Stop watching. Disconnects the cross-probe client and stops the
+    file watcher.</td>
+</tr>
+</tbody>
+</table>
+
+<h4>Cross-Probe</h4>
+
+<table class="api-table">
+<thead>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>lepton_probe_net</code></td>
+  <td><code>lepton_probe_net(name)</code></td>
+  <td>Highlight a net in lepton-schematic by name. Selects and zooms to
+    the net object.</td>
+</tr>
+<tr>
+  <td><code>lepton_probe_part</code></td>
+  <td><code>lepton_probe_part(ref, pin=None)</code></td>
+  <td>Highlight a component in lepton-schematic by reference designator.
+    Optionally specify a pin.</td>
+</tr>
+<tr>
+  <td><code>lepton_clear</code></td>
+  <td><code>lepton_clear()</code></td>
+  <td>Clear all selection highlights in lepton-schematic.</td>
+</tr>
+</tbody>
+</table>
+
+<h4>Back-Annotation</h4>
+
+<table class="api-table">
+<thead>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>lepton_annotate_dc</code></td>
+  <td><code>lepton_annotate_dc(voltages=None)</code></td>
+  <td>Stamp DC voltage annotations onto netname attributes. If
+    <code>voltages</code> is <code>None</code>, auto-extracts from the
+    current simulation dataset.</td>
+</tr>
+<tr>
+  <td><code>lepton_clear_annotations</code></td>
+  <td><code>lepton_clear_annotations()</code></td>
+  <td>Clear all floating labels and DC stamps from the schematic. Restores
+    netname attributes to their original values.</td>
+</tr>
+</tbody>
+</table>
+
+<h4>Configuration</h4>
+
+<table class="api-table">
+<thead>
+<tr><th>Command</th><th>Signature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>lepton_config</code></td>
+  <td><code>lepton_config(key, value=None)</code></td>
+  <td>Get or set bridge configuration. Keys: <code>port</code>
+    (default <code>9424</code>), <code>auto_simulate</code> (default
+    <code>true</code>), <code>install_server</code> (write-only — installs
+    <code>pqwave-server.scm</code> to the autoload directory).</td>
+</tr>
+</tbody>
+</table>
+
+<!-- ---- Scheme Server Installation ---- -->
+<h3 id="scheme-server">Scheme Server Installation</h3>
+
+<h4>What is pqwave-server.scm?</h4>
+
+<p>
+<code>pqwave-server.scm</code> is a Guile Scheme script bundled with pqwave
+that provides three capabilities inside lepton-schematic:
+</p>
+
+<ol>
+  <li><strong>TCP server</strong> on port 9424 — receives cross-probe
+    and back-annotation commands from pqwave.</li>
+  <li><strong>Reverse cross-probe</strong> — hooks into
+    lepton-schematic's <code>select-objects-hook</code> to send
+    <code>$SELECTED:net</code> events back to pqwave when the user clicks
+    a net.</li>
+  <li><strong>In-schematic menus</strong> — registers Netlist &gt; SPICE,
+    Simulation &gt; ngspice, and Wave View &gt; pqwave menu actions.</li>
+</ol>
+
+<h4>Installation</h4>
+
+<p>The script lives at:</p>
+<pre><code>pqwave/bridge/lepton/pqwave-server.scm          (bundled with pqwave)</code></pre>
+
+<p>It must be copied to the lepton-eda autoload directory:</p>
+<pre><code>~/.config/lepton-eda/scheme/autoload/pqwave-server.scm    (installed)</code></pre>
+
+<p><strong>GUI installation:</strong> When you first use
+<strong>File &gt; Lepton Bridge &gt; Watch Schematic</strong>, pqwave
+checks whether the script is installed. If not (or if the bundled
+version is newer), a dialog asks whether to install or update it.
+Click <strong>Yes</strong>, and pqwave copies the file. Restart
+lepton-schematic for the changes to take effect.</p>
+
+<p><strong>Headless installation:</strong></p>
+<pre><code class="language-python">api.lepton_config("install_server")</code></pre>
+
+<p>This copies <code>pqwave-server.scm</code> to the autoload directory
+without a GUI prompt. Returns <code>{"status": "ok", "target_path": "..."}</code>
+on success or <code>{"status": "error", "message": "..."}</code> on failure.</p>
+
+<h4>Update Detection</h4>
+
+<p>
+pqwave compares the modification time of the bundled script against the
+installed copy. If the bundled version is newer (e.g., after upgrading
+pqwave), it offers to update. This ensures the Scheme server stays in
+sync with new bridge features.
+</p>
+
+<h4>How It Loads</h4>
+
+<p>
+lepton-schematic loads all <code>.scm</code> files in the autoload
+directory at startup via the <code>system-gafrc</code> mechanism.
+No manual configuration is needed — once the file is present,
+lepton-schematic automatically:
+</p>
+
+<ol>
+  <li>Loads the script and starts the TCP server on port 9424.</li>
+  <li>Registers the Netlist, Simulation, and Wave View menus.</li>
+  <li>Installs the <code>select-objects-hook</code> for reverse
+    cross-probe.</li>
+</ol>
+
+<div class="note">
+<p><strong>Port check:</strong> To verify the server is running, check
+that lepton-schematic is listening on port 9424:</p>
+<pre><code class="language-bash">ss -tlnp | grep 9424
+# or
+lsof -i :9424</code></pre>
+<p>If the port is not listening, verify the file is installed and restart
+lepton-schematic.</p>
+</div>
+
+<h4>Troubleshooting Scheme Server</h4>
+
+<table>
+<thead>
+<tr><th>Symptom</th><th>Likely Cause</th><th>Solution</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td>Cross-probe commands have no effect</td>
+  <td>Server not installed or not running</td>
+  <td>Verify <code>~/.config/lepton-eda/scheme/autoload/pqwave-server.scm</code>
+    exists. Restart lepton-schematic.</td>
+</tr>
+<tr>
+  <td>Port 9424 already in use</td>
+  <td>Another instance of lepton-schematic is running</td>
+  <td>This is expected — only one instance can bind the port. Connect to
+    the running instance.</td>
+</tr>
+<tr>
+  <td>Menus don't appear</td>
+  <td>Script installed in wrong directory</td>
+  <td>Check <code>$XDG_CONFIG_HOME</code>. The path must be:
+    <code>$XDG_CONFIG_HOME/lepton-eda/scheme/autoload/</code>
+    (defaults to <code>~/.config/lepton-eda/scheme/autoload/</code>).</td>
+</tr>
+<tr>
+  <td>"lepton-schematic not running"</td>
+  <td>Schema server TCP connection refused</td>
+  <td>Ensure lepton-schematic is running with the server loaded. Check
+    for errors in lepton-schematic's stderr output.</td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ===== PART 2: WORKED TUTORIALS ===== -->
+
+<h2 id="part2">Part 2 — Worked Tutorials</h2>
+
+<h3 id="tutorial-1">Tutorial 1: TwoStageAmp — Complete Workflow</h3>
+
+<p>
+Follow the full simulation pipeline from a lepton-eda schematic through
+to waveform analysis in pqwave.
+</p>
+
+<p><strong>Prerequisites:</strong></p>
+<ul>
+  <li>lepton-eda installed with <code>lepton-netlist</code> in PATH</li>
+  <li>ngspice 42+ in PATH</li>
+  <li>pqwave installed</li>
+  <li>A TwoStageAmp.sch schematic (or any SPICE-ready schematic)</li>
+</ul>
+
+<h4>Step 1: Open the Schematic</h4>
+
+<ol>
+  <li>Launch lepton-schematic: <code>lepton-schematic TwoStageAmp.sch</code>.</li>
+  <li>Verify the circuit: a two-stage BJT amplifier with V1 (input),
+    VCC (supply), Q1/Q2 (transistors), R1–R6 (biasing and load), and
+    C1–C3 (coupling capacitors).</li>
+  <li>Confirm SPICE analysis directives are present on the schematic:
+    <code>.tran 0.1u 5m</code> and <code>.model</code> statements.</li>
+</ol>
+
+<div class="screenshot">[SCREENSHOT: TwoStageAmp.sch in lepton-schematic showing the complete
+circuit with transistors, resistors, capacitors, and SPICE directives]</div>
+
+<h4>Step 2: Generate the Netlist</h4>
+
+<ol>
+  <li>In lepton-schematic, select <strong>Netlist &gt; SPICE</strong>.</li>
+  <li>A <code>TwoStageAmp.cir</code> file is created in the schematic's directory.</li>
+  <li>The status bar confirms: "SPICE netlist written: TwoStageAmp.cir".</li>
+</ol>
+
+<p><strong>Or via command line:</strong></p>
+<pre><code class="language-bash">lepton-netlist -g spice-sdb -o TwoStageAmp.cir TwoStageAmp.sch</code></pre>
+
+<h4>Step 3: Run the Simulation</h4>
+
+<ol>
+  <li>In lepton-schematic, select <strong>Simulation &gt; ngspice</strong>.</li>
+  <li>This regenerates the <code>.cir</code> and runs ngspice in batch mode.</li>
+  <li>A <code>TwoStageAmp.raw</code> file is produced.</li>
+</ol>
+
+<p><strong>Or via command line:</strong></p>
+<pre><code class="language-bash">ngspice -b -r TwoStageAmp.raw TwoStageAmp.cir</code></pre>
+
+<h4>Step 4: View Results in pqwave</h4>
+
+<ol>
+  <li>In lepton-schematic, select <strong>Wave View &gt; pqwave</strong>.</li>
+  <li>Alternatively, in pqwave: <strong>File &gt; Lepton Bridge &gt; Watch
+    Schematic</strong>, select <code>TwoStageAmp.sch</code>.</li>
+  <li>The bridge runs the pipeline and loads the <code>.raw</code>
+    results. The signal browser populates with all available signals.</li>
+</ol>
+
+<h4>Step 5: Browse and Analyze Signals</h4>
+
+<ol>
+  <li>Double-click <strong>v(in)</strong> — the 1 kHz input sine wave.</li>
+  <li>Double-click <strong>v(stage1)</strong> — the output of the first
+    common-emitter stage (inverted, amplified).</li>
+  <li>Double-click <strong>v(out)</strong> — the final output through
+    the coupling capacitor (DC offset removed).</li>
+</ol>
+
+<div class="screenshot">[SCREENSHOT: pqwave showing three traces — v(in), v(stage1), v(out) —
+plotted on a shared time axis. v(in) is a small sine, v(stage1) is
+inverted and ~10x larger, v(out) is inverted and ~100x larger.]</div>
+
+<h4>Step 6: Measure Gain with Cursors</h4>
+
+<ol>
+  <li>Enable <strong>Cursor A</strong> (press <code>A</code>) and place it on
+    v(out) at a peak of the sine wave.</li>
+  <li>Enable <strong>Cursor B</strong> (press <code>B</code>) and place it
+    on v(in) at the corresponding peak.</li>
+  <li>The status bar shows the voltages at both cursor positions.</li>
+  <li>Gain = v(out) at cursor A / v(in) at cursor B.</li>
+</ol>
+
+<p><strong>Expected results:</strong></p>
+<ul>
+  <li>Stage 1 gain: approximately 10x (20 dB) from the common-emitter
+    configuration.</li>
+  <li>Stage 2 gain: similar, for a total gain of approximately 100x (40 dB).</li>
+  <li>v(out) is AC-coupled (no DC offset) through the output capacitor.</li>
+</ul>
+
+<div class="note">
+<p><strong>Auto-simulate:</strong> After the initial watch, you can edit
+the schematic (e.g., change a resistor value) and press
+<strong>Ctrl+S</strong> to save. pqwave detects the file change (via
+1-second mtime polling), re-runs the pipeline, and reloads the results
+automatically. The control bar shows the watch and simulation status.</p>
+</div>
+
+<p><strong>Full workflow via Session API:</strong></p>
+<pre><code class="language-python">import pqwave.session as session
+
+api = session.SessionAPI()
+
+# Watch and simulate
+api.lepton_watch("/home/user/projects/TwoStageAmp.sch")
+api.lepton_simulate("/home/user/projects/TwoStageAmp.sch")
+
+# Plot key signals
+api.select_panel(1)
+api.add_trace("v(in)")
+api.add_trace("v(stage1)")
+api.add_trace("v(out)")
+
+# Measure gain
+gain_db = api.eval_expr("20*log10(abs(max(v(out))/max(v(in))))", panel=1)
+print(f"Voltage gain: {gain_db:.1f} dB")
+</code></pre>
+
+<!-- ---- Tutorial 2 ---- -->
+<h3 id="tutorial-2">Tutorial 2: Bidirectional Cross-Probe</h3>
+
+<p>
+This tutorial demonstrates navigation between pqwave's waveform display
+and lepton-schematic's circuit view in both directions.
+</p>
+
+<p><strong>Prerequisites:</strong></p>
+<ul>
+  <li><code>pqwave-server.scm</code> installed in the autoload directory</li>
+  <li>lepton-schematic running with a schematic open</li>
+  <li>pqwave watching the same schematic</li>
+  <li>Simulation completed (results loaded)</li>
+</ul>
+
+<h4>Direction 1: pqwave to Schematic (Forward Cross-Probe)</h4>
+
+<ol>
+  <li>In pqwave, double-click <strong>v(out)</strong> in the signal
+    browser to plot it.</li>
+  <li>Click on the trace to select it (it becomes highlighted).</li>
+  <li>Navigate to <strong>File &gt; Lepton Bridge &gt; Cross-Probe &gt;
+    Probe Selected Net</strong>.</li>
+  <li>In lepton-schematic, the net named <strong>out</strong> is
+    selected and the view zooms to show it.</li>
+</ol>
+
+<div class="screenshot">[SCREENSHOT: Side-by-side — pqwave on the left showing v(out) trace
+selected, lepton-schematic on the right showing the "out" net
+highlighted in the selection color]</div>
+
+<h4>Direction 2: Schematic to pqwave (Reverse Cross-Probe)</h4>
+
+<ol>
+  <li>In lepton-schematic, click on the <strong>VCC</strong> net
+    (the power supply rail).</li>
+  <li>The Scheme server sends <code>$SELECTED:net VCC</code> to
+    pqwave over the TCP channel.</li>
+  <li>pqwave's chat panel logs: <code>[lepton] Selected net: VCC</code>.</li>
+</ol>
+
+<p><strong>API-driven reverse cross-probe handling:</strong></p>
+<pre><code class="language-python"># When a net is clicked in lepton-schematic, you can script the response:
+# The main_window handler (_on_lepton_net_selected) receives the net name.
+# Use the API to programmatically plot it:
+
+def on_net_selected(netname):
+    signal_name = f"v({netname})"
+    api.add_trace(signal_name)
+</code></pre>
+
+<h4>Cursor-Driven Cross-Probe</h4>
+
+<ol>
+  <li>Select a trace in pqwave.</li>
+  <li>Drag <strong>Cursor XA</strong> along the waveform.</li>
+  <li>After a 250ms debounce pause, pqwave sends the net highlight to
+    lepton-schematic.</li>
+  <li>As the cursor moves through different parts of the waveform, the
+    corresponding net stays highlighted.</li>
+</ol>
+
+<h4>Status Bar Feedback</h4>
+
+<p>
+The Lepton control bar in pqwave shows the current watch and connection
+status:
+</p>
+
+<table>
+<thead><tr><th>Status Text</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>Lepton: not watching</code></td><td>No schematic is being watched.</td></tr>
+<tr><td><code>Lepton: watching TwoStageAmp.sch</code></td><td>File watcher active; waiting for saves.</td></tr>
+<tr><td><code>Lepton: simulating...</code></td><td>Pipeline is running (export or ngspice).</td></tr>
+<tr><td><code>Lepton: simulation complete</code></td><td>Results loaded; Annotate DC available.</td></tr>
+</tbody>
+</table>
+
+<!-- ---- Tutorial 3 ---- -->
+<h3 id="tutorial-3">Tutorial 3: DC Back-Annotation</h3>
+
+<p>
+Back-annotation lets you verify DC operating points directly on the
+schematic. This is useful for checking bias voltages, identifying
+deviation from the expected design, and documenting the operating point
+for review.
+</p>
+
+<h4>Step 1: Run the Simulation</h4>
+
+<ol>
+  <li>Watch and simulate a schematic (as in Tutorial 1).</li>
+  <li>Ensure the simulation includes a <code>.op</code> or
+    <code>.tran</code> analysis that produces DC operating point data.</li>
+</ol>
+
+<h4>Step 2: Annotate DC Voltages</h4>
+
+<ol>
+  <li>In pqwave's Lepton control bar, click
+    <strong>Annotate DC</strong> (or navigate to
+    <strong>File &gt; Lepton Bridge &gt; Annotate DC</strong>).</li>
+  <li>pqwave extracts the mean value of every <code>v(netname)</code>
+    signal and sends <code>$ANNOTATE:DC</code> commands to
+    lepton-schematic.</li>
+</ol>
+
+<p><strong>What happens in the schematic:</strong></p>
+
+<div class="diagram">Net: "VCC"      →  "VCC [DC:12.0 V]"
+Net: "Vbias"    →  "Vbias [DC:1.65 V]"
+Net: "in"       →  "in [DC:0.0 V]"
+Net: "stage1"   →  "stage1 [DC:6.2 V]"
+Net: "out"      →  "out [DC:6.0 V]"</div>
+
+<div class="screenshot">[SCREENSHOT: lepton-schematic showing DC voltage stamps appended to
+netname attributes across the TwoStageAmp schematic. Each net label
+displays its simulated DC voltage in brackets.]</div>
+
+<h4>Step 3: Verify Against Design</h4>
+
+<ol>
+  <li>Check the bias point of Q1: V(stage1) should be approximately
+    VCC/2 (6 V for a 12 V supply). A value of 6.2 V indicates good
+    biasing.</li>
+  <li>Check V(in) = 0.0 V — the input is AC-coupled, so the DC level at
+    the base should be 0 V relative to ground.</li>
+  <li>If any voltage deviates significantly, adjust the corresponding
+    resistor value, re-simulate, and re-annotate.</li>
+</ol>
+
+<h4>Step 4: Clear Annotations</h4>
+
+<ol>
+  <li>Click <strong>Clear Annotations</strong> in the Lepton control bar
+    (or navigate to <strong>File &gt; Lepton Bridge &gt; Clear
+    Annotations</strong>).</li>
+  <li>All <code>[DC:... V]</code> suffixes are stripped from netname
+    attributes.</li>
+  <li>All floating text labels are removed from the page.</li>
+  <li>The schematic returns to its clean, pre-annotation state.</li>
+</ol>
+
+<div class="warn">
+<p><strong>Important:</strong> If you save the <code>.sch</code> file
+while DC stamps are present, the <code>[DC:... V]</code> suffixes will
+be written into the file and will persist across sessions. Always use
+Clear Annotations before saving if you want to keep the schematic clean.
+Floating labels are in-memory only and are always lost when
+lepton-schematic closes.</p>
+</div>
+
+<p><strong>API example:</strong></p>
+<pre><code class="language-python"># Annotate with auto-extracted voltages
+api.lepton_annotate_dc()
+
+# Annotate with explicit voltages
+api.lepton_annotate_dc({
+    "VCC": 12.0,
+    "Vbias": 1.65,
+    "in": 0.0,
+    "stage1": 6.2,
+    "out": 6.0,
+})
+
+# Clear everything
+api.lepton_clear_annotations()
+</code></pre>
+
+<!-- ---- Scripting Example ---- -->
+<h3 id="scripting">Standalone Scripting Example</h3>
+
+<p>
+A complete Python script that integrates lepton-eda schematic editing
+with pqwave simulation and analysis — all from a headless script:
+</p>
+
+<pre><code class="language-python">import pqwave.session as session
+
+api = session.SessionAPI()
+
+# Step 1: Install the Scheme server (first time only)
+result = api.lepton_config("install_server")
+if result["status"] == "ok":
+    print(f"Server installed to {result['target_path']}")
+    print("Restart lepton-schematic for the changes to take effect.")
+
+# Step 2: Configure the bridge
+api.lepton_config("port", 9424)
+api.lepton_config("auto_simulate", True)
+
+# Step 3: Watch and simulate
+sch_path = "/home/user/projects/TwoStageAmp.sch"
+api.lepton_watch(sch_path)
+result = api.lepton_simulate(sch_path)
+
+print(f"Return code: {result['returncode']}")
+print(f"Raw file: {result['raw_file']}")
+
+# Step 4: Plot key signals
+api.select_panel(1)
+api.add_trace("v(in)")
+api.add_trace("v(stage1)")
+api.add_trace("v(out)")
+
+# Step 5: Back-annotate DC operating point to the schematic
+api.lepton_annotate_dc()
+
+# Step 6: Cross-probe the output net
+api.lepton_probe_net("out")
+
+# Step 7: Measure stage gains
+gain1 = api.eval_expr("max(v(stage1)) / max(v(in))", panel=1)
+gain2 = api.eval_expr("max(v(out)) / max(v(stage1))", panel=1)
+print(f"Stage 1 gain: {gain1:.2f} ({20*gain1.log10():.1f} dB)")
+print(f"Stage 2 gain: {gain2:.2f} ({20*gain2.log10():.1f} dB)")
+
+# Step 8: Clean up — clear annotations before saving
+api.lepton_clear_annotations()
+
+# The file watcher keeps running in the background.
+# Save the schematic in lepton-schematic to trigger automatic
+# re-simulation. Press Ctrl+C in the REPL to stop.
+</code></pre>
+
+<p><strong>Expected output:</strong></p>
+<pre><code>Return code: 0
+Raw file: /tmp/pqwave_lepton_XXXXXX.raw
+Stage 1 gain: 9.87 (19.9 dB)
+Stage 2 gain: 12.34 (21.8 dB)
+</code></pre>
+
+<div class="screenshot">[SCREENSHOT: pqwave window showing three traces plotted from the
+script — v(in), v(stage1), and v(out) — with the cursor status bar
+showing measurement values]</div>
+
+<hr>
+
+<!-- ===== PART 3: TROUBLESHOOTING ===== -->
+
+<h2 id="troubleshooting">Part 3 — Troubleshooting</h2>
+
+<h3>lepton-netlist not found</h3>
+
+<p><strong>Symptom:</strong>
+<code>FileNotFoundError: lepton-netlist not found</code>.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>Verify lepton-eda is installed:
+    <pre><code class="language-bash">which lepton-netlist</code></pre>
+  </li>
+  <li>If not found, install lepton-eda:
+    <pre><code class="language-bash"># Debian/Ubuntu
+sudo apt install lepton-eda
+
+# Or build from source:
+git clone https://github.com/lepton-eda/lepton-eda.git
+cd lepton-eda &amp;&amp; mkdir build &amp;&amp; cd build
+cmake .. &amp;&amp; make &amp;&amp; sudo make install</code></pre>
+  </li>
+  <li>If installed but not in PATH, set the path in pqwave:
+    <strong>Settings &gt; External Converter Paths &gt;
+    lepton-netlist</strong> and enter the full path (e.g.,
+    <code>/usr/local/bin/lepton-netlist</code>).</li>
+</ol>
+
+<h3>ngspice simulation errors</h3>
+
+<p><strong>Symptom:</strong> Simulation fails with a non-zero return code.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>Check the ngspice error output in pqwave's chat panel. Common
+    causes:
+    <ul>
+      <li><strong>Missing model:</strong> The <code>.sch</code> references
+        a <code>.model</code> that is not embedded in the file. Add the
+        model to the schematic as a SPICE directive block.</li>
+      <li><strong>Floating node:</strong> A net has no DC path to ground.
+        Add a large-value resistor (e.g., 1G) to ground.</li>
+      <li><strong>Timestep too small:</strong> The transient analysis
+        requires a smaller timestep than ngspice can handle. Adjust
+        <code>.tran</code> parameters.</li>
+    </ul>
+  </li>
+  <li>Manually run the pipeline to isolate the issue:
+    <pre><code class="language-bash">lepton-netlist -g spice-sdb -o test.cir schematic.sch
+ngspice -b -r test.raw test.cir</code></pre>
+    Inspect <code>test.cir</code> for issues and review ngspice's
+    stderr output.</li>
+</ol>
+
+<h3>Scheme server not connecting</h3>
+
+<p><strong>Symptom:</strong>
+<code>Cannot connect to lepton-schematic on localhost:9424</code>.
+Cross-probe and back-annotation have no effect.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>Verify the server is installed:
+    <pre><code class="language-bash">ls -la ~/.config/lepton-eda/scheme/autoload/pqwave-server.scm</code></pre>
+    Or check <code>$XDG_CONFIG_HOME</code> if set.</li>
+  <li>Verify the port is listening:
+    <pre><code class="language-bash">ss -tlnp | grep 9424
+# Expected: LISTEN  127.0.0.1:9424</code></pre>
+  </li>
+  <li>If not installed, run the GUI install (File &gt; Lepton Bridge &gt;
+    Watch Schematic) or headless:
+    <pre><code class="language-python">api.lepton_config("install_server")</code></pre>
+  </li>
+  <li>Restart lepton-schematic after installation. The script is only
+    loaded at startup via the autoload mechanism.</li>
+  <li>Check for errors in lepton-schematic's terminal output. Start it
+    from a terminal to see Scheme errors:
+    <pre><code class="language-bash">lepton-schematic schematic.sch</code></pre>
+  </li>
+</ol>
+
+<h3>Cross-probe not working</h3>
+
+<p><strong>Symptom:</strong> Probe Selected Net does nothing, or
+schematic-to-pqwave events are not received.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>Verify bidirectional connectivity — test the TCP channel manually:
+    <pre><code class="language-bash">echo '$NET: "VCC"' | nc localhost 9424</code></pre>
+    The VCC net should highlight in lepton-schematic if the server is
+    running.</li>
+  <li>Verify lepton-schematic is running with the server loaded. The
+    server starts automatically when the script is loaded at startup.</li>
+  <li>In pqwave, check the chat panel for error messages — connection
+    errors are logged with the <code>[lepton]</code> prefix.</li>
+  <li>If using the API, ensure the cross-probe client is connected:
+    <pre><code class="language-python"># The GUI connects automatically when watching.
+# For standalone API use, ensure connect:
+from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+client = LeptonCrossProbeClient()
+client.connect_to_server()
+client.probe_net("VCC")</code></pre>
+  </li>
+</ol>
+
+<h3>Port conflicts</h3>
+
+<p><strong>Symptom:</strong> Cannot start the Scheme server because
+port 9424 is already in use.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>Check what is using the port:
+    <pre><code class="language-bash">ss -tlnp | grep 9424</code></pre>
+  </li>
+  <li>If another instance of lepton-schematic is running, this is
+    expected — only one instance can bind the port. Connect to the
+    running instance.</li>
+  <li>If a different application is using port 9424, change the port:
+    <pre><code class="language-python">api.lepton_config("port", 9425)</code></pre>
+    You must also edit <code>pqwave-server.scm</code> to match (change
+    the <code>pqwave-port</code> variable at the top of the file), then
+    reinstall it:
+    <pre><code class="language-python">api.lepton_config("install_server")</code></pre>
+  </li>
+</ol>
+
+<h3>DC annotations show wrong voltages</h3>
+
+<p><strong>Symptom:</strong> The <code>[DC:... V]</code> stamps show
+incorrect values.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>Ensure the simulation includes DC analysis. For transient-only
+    simulations, pqwave uses the mean of the entire waveform, which may
+    not represent the true DC operating point if the signal is not
+    symmetric around its DC level.</li>
+  <li>Add a <code>.op</code> analysis to your schematic to get an
+    explicit operating point:
+    <pre><code>.op
+.tran 0.1u 5m</code></pre>
+  </li>
+  <li>Manually pass explicit voltages for known nets:
+    <pre><code class="language-python">api.lepton_annotate_dc({"VCC": 12.0, "out": 6.0})</code></pre>
+  </li>
+</ol>
+
+<h3>File watcher not detecting saves</h3>
+
+<p><strong>Symptom:</strong> Saving the schematic in lepton-schematic
+does not trigger re-simulation in pqwave.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>The file watcher uses 1-second mtime polling. Wait at least 1
+    second after saving for the poll to detect the change.</li>
+  <li>Verify the watched path is correct — the control bar shows the
+    basename of the watched file.</li>
+  <li>If the file is on a network filesystem, mtime may not update
+    reliably. Use a local filesystem.</li>
+  <li>Manually trigger simulation with the <strong>Simulate Now</strong>
+    button in the control bar as a workaround.</li>
+  <li>Check the chat panel for <code>[lepton]</code> messages — file
+    change and pipeline events are logged there.</li>
+</ol>
+
+<h3>ngspice not found</h3>
+
+<p><strong>Symptom:</strong>
+<code>FileNotFoundError: ngspice not found</code>.</p>
+
+<p><strong>Solution:</strong></p>
+<ol>
+  <li>Install ngspice:
+    <pre><code class="language-bash"># Debian/Ubuntu
+sudo apt install ngspice</code></pre>
+  </li>
+  <li>Set the path in Settings: <strong>Settings &gt; External Converter
+    Paths &gt; ngspice</strong>.</li>
+</ol>
+
+</body>
+</html>
