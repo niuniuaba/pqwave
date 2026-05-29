@@ -737,13 +737,23 @@ lepton-schematic automatically:
 </ol>
 
 <div class="note">
-<p><strong>Port check:</strong> To verify the server is running, check
-that lepton-schematic is listening on port 9424:</p>
-<pre><code class="language-bash">ss -tlnp | grep 9424
-# or
-lsof -i :9424</code></pre>
-<p>If the port is not listening, verify the file is installed and restart
-lepton-schematic.</p>
+<p><strong>Architecture note:</strong> Port 9424 is served by
+<strong>lepton-schematic</strong> (the Scheme script), not by pqwave.
+pqwave is the TCP <em>client</em> — it connects out to lepton-schematic.
+Both conditions must be true for the port to be visible:</p>
+<ol>
+  <li><code>pqwave-server.scm</code> is installed in the autoload directory</li>
+  <li>lepton-schematic is running (restart it after install)</li>
+</ol>
+<p><strong>Verify:</strong></p>
+<pre><code class="language-bash"># Check the script is installed
+ls ~/.config/lepton-eda/scheme/autoload/pqwave-server.scm
+
+# Check lepton-schematic is running and listening
+ss -tlnp | grep 9424
+# or: lsof -i :9424</code></pre>
+<p>If nothing is listening on 9424, either the script is not installed
+or lepton-schematic has not been restarted since installing it.</p>
 </div>
 
 <h4>Troubleshooting Scheme Server</h4>
