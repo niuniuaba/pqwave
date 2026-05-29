@@ -96,16 +96,25 @@ def install_scheme_server() -> dict:
         shutil.copy2(_get_package_scm_path(), scm_target)
 
         gafrc_path = _get_gafrc_path()
-        load_line = f'(load (string-append (dirname (current-filename)) "/pqwave-server.scm"))\n'
+        gafrc_content = (
+            ';; Load pqwave cross-probe server (lepton-schematic GUI only).\n'
+            ';; Guarded because gafrc is loaded by ALL lepton-eda tools,\n'
+            ';; but (schematic builtins) only exists in lepton-schematic.\n'
+            '(catch #t\n'
+            '  (lambda ()\n'
+            '    (resolve-module \'(schematic builtins))\n'
+            '    (load (string-append (dirname (current-filename)) "/pqwave-server.scm")))\n'
+            '  (lambda _ #f))\n'
+        )
         if os.path.exists(gafrc_path):
             with open(gafrc_path, "r") as f:
                 existing = f.read()
             if "pqwave-server.scm" not in existing:
                 with open(gafrc_path, "a") as f:
-                    f.write("\n" + load_line)
+                    f.write("\n" + gafrc_content)
         else:
             with open(gafrc_path, "w") as f:
-                f.write(load_line)
+                f.write(gafrc_content)
 
         return {"status": "ok", "scm_target": scm_target, "gafrc_path": gafrc_path}
     except OSError as e:
