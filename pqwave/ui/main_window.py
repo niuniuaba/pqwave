@@ -1501,6 +1501,7 @@ class MainWindow(QMainWindow):
             'show_api_help': self._show_api_help,
             'show_mc_guide': self._show_mc_guide,
             'show_kicad_guide': self._show_kicad_guide,
+            'show_lepton_guide': self._show_lepton_guide,
             'split_horizontal': self._split_panel_horizontal,
             'split_vertical': self._split_panel_vertical,
             'close_panel': self._close_active_panel,
@@ -5082,6 +5083,53 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("KiCad User Guide")
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.resize(780, 620)
+
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setHtml(html)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.show()
+
+    def _show_lepton_guide(self) -> None:
+        """Show the Lepton-EDA integration user guide (non-modal)."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+        )
+        from PyQt6.QtCore import Qt
+
+        from pathlib import Path
+        guide_path = Path(__file__).parent.parent.parent / "docs" / "lepton" / "guide.html"
+        if not guide_path.exists():
+            QMessageBox.warning(
+                self, "Not Found",
+                f"Lepton-EDA guide not found at:\n{guide_path}",
+            )
+            return
+
+        try:
+            html = guide_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(
+                self, "Error",
+                f"Failed to read Lepton-EDA guide:\n{e}",
+            )
+            return
+
+        p = self.palette()
+        html = html.replace("__TEXT__", p.color(p.ColorRole.Text).name())
+        html = html.replace("__BASE__", p.color(p.ColorRole.Base).name())
+        html = html.replace("__LINK__", p.color(p.ColorRole.Link).name())
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Lepton-EDA User Guide")
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setModal(False)
         dialog.resize(780, 620)
