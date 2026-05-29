@@ -56,7 +56,8 @@ class TestSchemeServerDeployment:
         from pqwave.bridge.lepton.cross_probe import check_scheme_server
         status = check_scheme_server()
         assert "installed" in status
-        assert "target_path" in status
+        assert "scm_target" in status
+        assert "gafrc_path" in status
         assert "bundled_version_mtime" in status
         assert "needs_update" in status
 

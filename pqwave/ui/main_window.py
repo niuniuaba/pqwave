@@ -940,11 +940,14 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Lepton-EDA Bridge Setup",
-                f"The Lepton-EDA bridge needs to {action} a companion script "
+                f"The Lepton-EDA bridge needs to {action} companion files "
                 f"to enable cross-probe and back-annotation.\n\n"
-                f"Install to:\n{status['target_path']}\n\n"
-                f"lepton-schematic will load this script automatically on startup. "
-                f"You only need to do this once.",
+                f"Files to create:\n"
+                f"  {status['scm_target']}\n"
+                f"  {status['gafrc_path']}\n\n"
+                f"lepton-schematic loads gafrc at startup, which loads "
+                f"the server script. You only need to do this once.\n\n"
+                f"Restart lepton-schematic after {action}.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.No:
@@ -956,8 +959,9 @@ class MainWindow(QMainWindow):
                 result = install_scheme_server()
                 if result["status"] == "ok":
                     self.chat_panel.append_output(
-                        f"[lepton] Server installed to {result['target_path']}. "
-                        "Restart lepton-schematic for changes to take effect.\n"
+                        f"[lepton] Server installed: {result['scm_target']}\n"
+                        f"[lepton] gafrc configured: {result['gafrc_path']}\n"
+                        "[lepton] Restart lepton-schematic for changes to take effect.\n"
                     )
                 else:
                     self.chat_panel.append_output(
