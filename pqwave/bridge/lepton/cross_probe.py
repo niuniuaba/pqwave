@@ -18,42 +18,59 @@ def _get_package_scm_path() -> str:
     return str(Path(__file__).resolve().parent / "pqwave-server.scm")
 
 
-def _get_autoload_dir() -> str:
-    """Return the lepton-eda autoload directory path."""
+def _get_user_config_dir() -> str:
+    """Return the lepton-eda user config directory (~/.config/lepton-eda)."""
     xdg_config = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-    return os.path.join(xdg_config, "lepton-eda", "scheme", "autoload")
+    return os.path.join(xdg_config, "lepton-eda")
 
 
-def _get_target_path() -> str:
-    return os.path.join(_get_autoload_dir(), "pqwave-server.scm")
+def _get_scm_target_path() -> str:
+    """Return the target path for pqwave-server.scm in the user config dir."""
+    return os.path.join(_get_user_config_dir(), "pqwave-server.scm")
+
+
+def _get_gafrc_path() -> str:
+    """Return the path to the user gafrc file."""
+    return os.path.join(_get_user_config_dir(), "gafrc")
 
 
 def check_scheme_server() -> dict:
-    """Check whether pqwave-server.scm is installed in the autoload directory.
+    """Check whether pqwave-server.scm is installed.
+
+    Lepton-eda does not have a user-level autoload directory. The system
+    autoload (/usr/share/lepton-eda/scheme/autoload/) is for system-wide
+    extensions. User extensions go through the user gafrc at
+    ~/.config/lepton-eda/gafrc, which runs arbitrary Scheme at startup.
+
+    We deploy pqwave-server.scm to ~/.config/lepton-eda/ and add a load
+    directive to gafrc. Both must exist for the server to be active.
 
     Returns a dict with keys:
         installed: bool
-        target_path: str
+        scm_target: str
+        gafrc_path: str
         current_version_mtime: float | None
         bundled_version_mtime: float
         needs_update: bool
     """
     bundled = _get_package_scm_path()
-    target = _get_target_path()
+    scm_target = _get_scm_target_path()
     bundled_mtime = os.path.getmtime(bundled)
 
-    if not os.path.exists(target):
+    if not os.path.exists(scm_target):
         return {
             "installed": False,
-            "target_path": target,
+            "scm_target": scm_target,
+            "gafrc_path": _get_gafrc_path(),
             "current_version_mtime": None,
             "bundled_version_mtime": bundled_mtime,
             "needs_update": True,
         }
-    installed_mtime = os.path.getmtime(target)
+    installed_mtime = os.path.getmtime(scm_target)
     return {
         "installed": True,
-        "target_path": target,
+        "scm_target": scm_target,
+        "gafrc_path": _get_gafrc_path(),
         "current_version_mtime": installed_mtime,
         "bundled_version_mtime": bundled_mtime,
         "needs_update": bundled_mtime > installed_mtime,
@@ -61,16 +78,36 @@ def check_scheme_server() -> dict:
 
 
 def install_scheme_server() -> dict:
-    """Copy pqwave-server.scm to the lepton-eda autoload directory.
+    """Install pqwave-server.scm and configure the user gafrc.
+
+    Copies pqwave-server.scm to ~/.config/lepton-eda/ and ensures gafrc
+    loads it. If gafrc already exists and does not reference pqwave, the
+    load directive is appended.
 
     Caller is responsible for obtaining user consent before calling.
-    Returns {"status": "ok", "target_path": str}
+    Returns {"status": "ok", "scm_target": str, "gafrc_path": str}
          or {"status": "error", "message": str}.
     """
     try:
-        os.makedirs(_get_autoload_dir(), exist_ok=True)
-        shutil.copy2(_get_package_scm_path(), _get_target_path())
-        return {"status": "ok", "target_path": _get_target_path()}
+        config_dir = _get_user_config_dir()
+        os.makedirs(config_dir, exist_ok=True)
+
+        scm_target = _get_scm_target_path()
+        shutil.copy2(_get_package_scm_path(), scm_target)
+
+        gafrc_path = _get_gafrc_path()
+        load_line = f'(load (string-append (dirname (current-filename)) "/pqwave-server.scm"))\n'
+        if os.path.exists(gafrc_path):
+            with open(gafrc_path, "r") as f:
+                existing = f.read()
+            if "pqwave-server.scm" not in existing:
+                with open(gafrc_path, "a") as f:
+                    f.write("\n" + load_line)
+        else:
+            with open(gafrc_path, "w") as f:
+                f.write(load_line)
+
+        return {"status": "ok", "scm_target": scm_target, "gafrc_path": gafrc_path}
     except OSError as e:
         return {"status": "error", "message": str(e)}
 
@@ -81,8 +118,13 @@ class LeptonCrossProbeClient(QObject):
     Sends cross-probe and back-annotation commands. Receives reverse
     cross-probe events ($SELECTED:net / $SELECTED:part).
 
-    Does NOT install the Scheme server automatically. The caller must
-    check check_scheme_server() and call install_scheme_server() explicitly.
+    Deployment: The companion script is copied to ~/.config/lepton-eda/
+    and loaded via the user gafrc. This is lepton-eda's standard user
+    extension mechanism (the system autoload at /usr/share/lepton-eda/
+    scheme/autoload/ is for system-wide extensions only).
+
+    Does NOT install automatically. The caller must check
+    check_scheme_server() and call install_scheme_server() explicitly.
 
     Signals:
         connected():          TCP connection established

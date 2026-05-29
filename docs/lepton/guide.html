@@ -148,15 +148,25 @@ Saves (Ctrl+S) ─────────────────────�
 
 <h3>Installing the Companion Script</h3>
 
-<p>The bridge needs a small Scheme script deployed to lepton-eda&rsquo;s
-autoload directory. This is a one-time step.</p>
+<p>The bridge needs a small Scheme script and a one-line
+<code>gafrc</code> file in lepton-eda&rsquo;s user config directory.
+This is a one-time step.</p>
+
+<p>lepton-eda does <em>not</em> have a user-level autoload directory.
+The system autoload (<code>/usr/share/lepton-eda/scheme/autoload/</code>)
+is for system-wide extensions. User extensions go through the user
+<code>gafrc</code> at <code>~/.config/lepton-eda/gafrc</code>, which
+lepton-eda loads automatically at startup. This file can contain arbitrary
+Scheme code or <code>load</code> directives.</p>
+
+<p><strong>What gets installed:</strong></p>
+<pre><code><span class="path">~/.config/lepton-eda/pqwave-server.scm</span>    ← the server script
+<span class="path">~/.config/lepton-eda/gafrc</span>                  ← loads the script at startup</code></pre>
 
 <p><strong>GUI:</strong> Open pqwave, then
 <strong>File &rarr; Lepton Bridge &rarr; Watch Schematic</strong>.
 Select any <code>.sch</code> file. A dialog will ask whether to install
-<code>pqwave-server.scm</code> to:</p>
-<pre><code><span class="path">~/.config/lepton-eda/scheme/autoload/pqwave-server.scm</span></code></pre>
-<p>Click <strong>Yes</strong>. Restart lepton-schematic.</p>
+the companion files. Click <strong>Yes</strong>. Restart lepton-schematic.</p>
 
 <p><strong>Headless / REPL:</strong></p>
 <pre><code class="language-python">api.lepton_config(<span class="cmd">"install_server"</span>)</code></pre>
@@ -172,8 +182,9 @@ port to appear:</p>
   <li>lepton-schematic is running (restart it after install)</li>
 </ol>
 
-<pre><code><span class="cmd"># Check the script is installed</span>
-ls <span class="path">~/.config/lepton-eda/scheme/autoload/pqwave-server.scm</span>
+<pre><code><span class="cmd"># Check the script and gafrc are installed</span>
+ls <span class="path">~/.config/lepton-eda/pqwave-server.scm</span>
+ls <span class="path">~/.config/lepton-eda/gafrc</span>
 
 <span class="cmd"># Check lepton-schematic is listening</span>
 ss -tlnp | grep 9424</code></pre>
@@ -542,11 +553,13 @@ convergence failures, or syntax errors in SPICE directives.</p>
 
 <h4>Cross-probe doesn&rsquo;t highlight in lepton-schematic</h4>
 <ol>
-  <li>Verify the script is installed:
-    <code>ls ~/.config/lepton-eda/scheme/autoload/pqwave-server.scm</code></li>
+  <li>Verify the script and gafrc are installed:
+    <code>ls ~/.config/lepton-eda/pqwave-server.scm ~/.config/lepton-eda/gafrc</code></li>
   <li>Verify lepton-schematic is running and listening:
     <code>ss -tlnp | grep 9424</code></li>
   <li>If port 9424 is not listening, restart lepton-schematic.</li>
+  <li>If the gafrc existed before install, verify it contains a
+    <code>load</code> line for <code>pqwave-server.scm</code>.</li>
   <li>Check for port conflicts (9424 must not be used by KiCad at 4243
     or xschem at 2026/2021 &mdash; pqwave warns on conflict).</li>
 </ol>

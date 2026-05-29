@@ -1,6 +1,8 @@
 ;; pqwave-server.scm — cross-probe and back-annotation server for lepton-schematic
-;; Deployed to ~/.config/lepton-eda/scheme/autoload/ on first bridge use.
-;; Loaded automatically by lepton-schematic at startup via system-gafrc.
+;; Deployed to ~/.config/lepton-eda/ and loaded via the user gafrc.
+;; Lepton-eda's user gafrc (~/.config/lepton-eda/gafrc) is the standard
+;; user extension point. The system autoload directory is for system-wide
+;; extensions only.
 
 (use-modules (srfi srfi-1)
              (ice-9 rdelim)

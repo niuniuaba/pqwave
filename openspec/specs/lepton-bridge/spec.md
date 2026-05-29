@@ -100,7 +100,7 @@ The `LeptonCrossProbeClient` class in `pqwave/bridge/lepton/cross_probe.py` SHAL
 - Handle connection failures gracefully (emit `error_occurred`, do not crash)
 
 The companion Scheme script `pqwave-server.scm` SHALL:
-- Be deployed to `~/.config/lepton-eda/scheme/autoload/pqwave-server.scm`
+- Be deployed to `~/.config/lepton-eda/pqwave-server.scm` and loaded via the user `gafrc` (`~/.config/lepton-eda/gafrc`)
 - Start a TCP server listening on the configured port when lepton-schematic starts
 - Use `open-page-hook` to build netname→object and refdes→object maps after page load
 - Handle `$NET: "name"` by calling `select-object!` on matching net objects and `schematic_canvas_zoom_object` to center the view
