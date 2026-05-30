@@ -89,16 +89,13 @@ lepton-eda source code.</p>
     <li><a href="#setup">Getting Started</a></li>
     <li><a href="#pipeline">Netlist Pipeline</a></li>
     <li><a href="#menus">In-Schematic Menus</a></li>
-    <li><a href="#cross-probe">Bidirectional Cross-Probe</a></li>
-    <li><a href="#back-annotation">Back-Annotation</a></li>
+    <li><a href="#cross-probe">Cross-Probe &amp; Back-Annotation (Future)</a></li>
     <li><a href="#api">Session API Commands</a></li>
     <li>
       <a href="#tutorials">Worked Tutorials</a>
       <ul>
         <li><a href="#tut-1">TwoStageAmp &mdash; Complete Workflow</a></li>
-        <li><a href="#tut-2">Bidirectional Cross-Probe</a></li>
-        <li><a href="#tut-3">DC Back-Annotation</a></li>
-        <li><a href="#tut-4">Standalone Scripting</a></li>
+        <li><a href="#tut-2">Standalone Scripting</a></li>
       </ul>
     </li>
     <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -237,113 +234,48 @@ no pin reordering, no control-block relocation.</p>
 
 <h2 id="menus">In-Schematic Menus</h2>
 
-<p>Once <code>pqwave-server.scm</code> is loaded, lepton-schematic gains
-three menu entries for driving the simulation workflow without leaving
-the editor:</p>
+<p>Once installed, lepton-schematic gains three menu entries between
+<strong>Netlist</strong> and <strong>Help</strong>, following the same
+pattern as the built-in &ldquo;1 allegro&rdquo; entry:</p>
 
 <table>
-  <tr><th>Menu</th><th>Action</th><th>What It Does</th></tr>
+  <tr><th>Menu</th><th>Item</th><th>What It Does</th></tr>
   <tr>
-    <td>Netlist &rarr; SPICE</td>
-    <td><code>&amp;spice-netlist</code></td>
+    <td>Netlist</td>
+    <td>2 SPICE</td>
     <td>Runs <code>lepton-netlist -g spice-sdb</code> on the current page,
       writes <code>&lt;basename&gt;.cir</code> in the schematic directory.</td>
   </tr>
   <tr>
-    <td>Simulation &rarr; ngspice</td>
-    <td><code>&amp;sim-ngspice</code></td>
+    <td>Simulation</td>
+    <td>ngspice</td>
     <td>Generates the netlist, then runs
       <code>ngspice -b -r &lt;basename&gt;.raw</code>.</td>
   </tr>
   <tr>
-    <td>Wave View &rarr; pqwave</td>
-    <td><code>&amp;wave-pqwave</code></td>
+    <td>Wave</td>
+    <td>pqwave</td>
     <td>Launches <code>pqwave &lt;basename&gt;.raw</code>.</td>
   </tr>
 </table>
 
+<p>The menu bar layout:</p>
+<pre><code>  [Options] [Netlist] [Simulation] [Wave] [Help]
+                      1 allegro
+                      2 SPICE</code></pre>
+
 <p>The typical workflow mirrors xschem&rsquo;s pattern:</p>
-
-<pre><code><span class="step"><strong>1.</strong> Netlist &rarr; SPICE</span>       &rarr;  <span class="path">circuit.cir</span>
+<pre><code><span class="step"><strong>1.</strong> Netlist &rarr; 2 SPICE</span>    &rarr;  <span class="path">circuit.cir</span>
 <span class="step"><strong>2.</strong> Simulation &rarr; ngspice</span>  &rarr;  <span class="path">circuit.raw</span>
-<span class="step"><strong>3.</strong> Wave View &rarr; pqwave</span>    &rarr;  pqwave opens, plots traces</code></pre>
+<span class="step"><strong>3.</strong> Wave &rarr; pqwave</span>          &rarr;  pqwave opens, plots traces</code></pre>
 
 <!-- ============================================================ -->
 
-<h2 id="cross-probe">Bidirectional Cross-Probe</h2>
+<h2 id="cross-probe">Cross-Probe &amp; Back-Annotation (Future)</h2>
 
-<p>Cross-probe works in <em>both</em> directions over a single TCP
-connection on port 9424. pqwave is the client; lepton-schematic (running
-the Scheme script) is the server.</p>
-
-<h3>pqwave &rarr; Schematic</h3>
-
-<p>Select a trace in pqwave, then
-<strong>File &rarr; Lepton Bridge &rarr; Cross-Probe &rarr; Probe Selected Net</strong>.
-The corresponding net is highlighted in lepton-schematic and the view centers
-on it.</p>
-
-<p>Under the hood, pqwave sends:</p>
-<pre><code>$NET: <span class="cmd">"Vbase1"</span></code></pre>
-<p>The Scheme server calls <code>select-object!</code> on every net segment
-with <code>netname=Vbase1</code>, then calls
-<code>schematic_canvas_zoom_object</code> to center the view.</p>
-
-<h3>Schematic &rarr; pqwave</h3>
-
-<p>Click a net in lepton-schematic. pqwave automatically plots the
-corresponding waveform trace (if it exists in the loaded dataset).</p>
-
-<p>Under the hood, lepton-schematic&rsquo;s <code>select-objects-hook</code>
-fires on every user click. The Scheme server extracts the
-<code>netname=</code> attribute and sends:</p>
-<pre><code>$SELECTED:net <span class="cmd">Vbase1</span></code></pre>
-<p>pqwave receives this, searches the loaded dataset for
-<code>v(Vbase1)</code> or <code>Vbase1</code>, and plots the trace.</p>
-
-<div class="note">
-  <strong>No feedback loop.</strong> When pqwave sends <code>$NET:</code>
-  and the server calls <code>select-object!</code>, the hook does
-  <em>not</em> fire. The hook is only triggered by user clicks in the C
-  code (<code>o_attrib_add_selected</code>), not by programmatic
-  <code>select-object!</code> calls. The two directions use distinct
-  mechanisms, preventing infinite ping-pong.
-</div>
-
-<!-- ============================================================ -->
-
-<h2 id="back-annotation">Back-Annotation</h2>
-
-<p>Simulation results can be written back onto the schematic using two
-mechanisms:</p>
-
-<h3>DC Bias Stamps</h3>
-
-<p>After a simulation completes, click <strong>Annotate DC</strong> in
-the Lepton control bar (or
-<strong>File &rarr; Lepton Bridge &rarr; Annotate DC</strong>).
-pqwave extracts the mean voltage of every <code>v(node)</code> variable
-and stamps it onto the corresponding netname attribute:</p>
-
-<table>
-  <tr><th>Before</th><th>After</th></tr>
-  <tr><td><code>netname=Vbase1</code></td><td><code>netname=Vbase1 [DC:1.82 V]</code></td></tr>
-  <tr><td><code>netname=Vout</code></td><td><code>netname=Vout [DC:5.67 V]</code></td></tr>
-</table>
-
-<p>These stamps persist in the <code>.sch</code> file. To remove them,
-click <strong>Clear Annotations</strong> (restores original netname values
-by stripping the <code>[DC:...V]</code> suffix).</p>
-
-<h3>Floating Labels</h3>
-
-<p>The Scheme server can also create text objects at arbitrary coordinates
-on the schematic page (used via the API for custom annotation layers):</p>
-
-<pre><code class="language-python">bridge.annotate_label(<span class="cmd">"Vbase1"</span>, <span class="cmd">"1.82 V"</span>, 30300, 49850)</code></pre>
-
-<p>These are tracked by the server and can be bulk-removed without affecting
-DC stamps.</p>
+<p>Bidirectional cross-probe and back-annotation require a TCP server
+inside lepton-schematic &mdash; not yet implemented. The current bridge
+provides in-schematic menus and file-watching simulation.</p>
 
 <!-- ============================================================ -->
 
@@ -357,29 +289,14 @@ DC stamps.</p>
   <tr><td><code>lepton_unwatch</code></td><td><code>lepton_unwatch() &rarr; dict</code></td></tr>
 </table>
 
-<h4>Cross-Probe</h4>
-<table>
-  <tr><th>Command</th><th>Signature</th></tr>
-  <tr><td><code>lepton_probe_net</code></td><td><code>lepton_probe_net(name: str) &rarr; dict</code></td></tr>
-  <tr><td><code>lepton_probe_part</code></td><td><code>lepton_probe_part(ref: str, pin: str | None = None) &rarr; dict</code></td></tr>
-  <tr><td><code>lepton_clear</code></td><td><code>lepton_clear() &rarr; dict</code></td></tr>
-</table>
-
-<h4>Back-Annotation</h4>
-<table>
-  <tr><th>Command</th><th>Signature</th></tr>
-  <tr><td><code>lepton_annotate_dc</code></td><td><code>lepton_annotate_dc(voltages: dict | None = None) &rarr; dict</code></td></tr>
-  <tr><td><code>lepton_clear_annotations</code></td><td><code>lepton_clear_annotations() &rarr; dict</code></td></tr>
-</table>
-
 <h4>Configuration</h4>
 <table>
   <tr><th>Command</th><th>Signature</th></tr>
   <tr><td><code>lepton_config</code></td><td><code>lepton_config(key: str, value=None) &rarr; dict</code></td></tr>
 </table>
 
-<p>Keys: <code>port</code> (default 9424), <code>auto_simulate</code>
-(default true), <code>install_server</code> (write-only).</p>
+<p>Keys: <code>auto_simulate</code> (default true),
+<code>install_server</code> (write-only).</p>
 
 <!-- ============================================================ -->
 
@@ -404,7 +321,7 @@ coupling, resistive biasing. The schematic includes a SPICE model include
 (<code>./models/2N3904.mod</code>) and simulation directives.</p>
 
 <h4>Step 1: Generate the Netlist</h4>
-<p>In lepton-schematic, click <strong>Netlist &rarr; SPICE</strong>.
+<p>In lepton-schematic, click <strong>Netlist &rarr; 2 SPICE</strong>.
 This creates <code>TwoStageAmp.cir</code> in the same directory.
 Check the log window for confirmation.</p>
 
@@ -414,7 +331,7 @@ netlist (same as Step 1) and runs ngspice, producing
 <code>TwoStageAmp.raw</code>. The log window shows simulation progress.</p>
 
 <h4>Step 3: View Results</h4>
-<p>Click <strong>Wave View &rarr; pqwave</strong>. pqwave launches with
+<p>Click <strong>Wave &rarr; pqwave</strong>. pqwave launches with
 the <code>.raw</code> file loaded. You should see variables including
 <code>v(vin)</code>, <code>v(vbase1)</code>, <code>v(vcoll1)</code>,
 <code>v(vout)</code>, and <code>time</code>.</p>
@@ -434,73 +351,7 @@ clipping at the 15&nbsp;V supply rail.</p>
 
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 
-<h3 id="tut-2">Tutorial 2: Bidirectional Cross-Probe</h3>
-
-<h4>pqwave &rarr; Schematic</h4>
-
-<ol>
-  <li>After simulation, select the <code>v(vout)</code> trace in pqwave.</li>
-  <li><strong>File &rarr; Lepton Bridge &rarr; Cross-Probe &rarr;
-    Probe Selected Net</strong>.</li>
-  <li>lepton-schematic highlights all net segments with
-    <code>netname=Vout</code> and centers the view on them.</li>
-</ol>
-
-<h4>Schematic &rarr; pqwave</h4>
-
-<ol>
-  <li>In lepton-schematic, click any net segment (e.g., the net labeled
-    <code>Vbase1</code>).</li>
-  <li>pqwave&rsquo;s chat panel shows:
-    <code>[lepton] Selected net: Vbase1</code>.</li>
-  <li>The <code>v(vbase1)</code> trace is automatically plotted.</li>
-  <li>Click another net (e.g., <code>Vcoll1</code>) &mdash; that trace
-    is plotted too.</li>
-</ol>
-
-<p>Clicking a net that is already plotted does nothing (duplicate
-detection).</p>
-
-<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
-
-<h3 id="tut-3">Tutorial 3: DC Back-Annotation</h3>
-
-<h4>Step 1: Stamp DC Voltages</h4>
-
-<p>After simulation completes, click <strong>Annotate DC</strong> in the
-Lepton control bar. The chat panel confirms:</p>
-<pre><code>[lepton] DC annotations stamped: 8 nets</code></pre>
-
-<p>In lepton-schematic, the netname attributes now include DC values:</p>
-<pre><code>netname=Vbase1 [DC:1.82 V]
-netname=Vcoll1 [DC:8.23 V]
-netname=Vout [DC:5.67 V]
-...</code></pre>
-
-<h4>Step 2: Verify</h4>
-
-<p>Compare the stamped values against cursor measurements in pqwave:</p>
-<ol>
-  <li>Place cursor A on the <code>v(vbase1)</code> trace.</li>
-  <li>The status bar shows the Y value &mdash; it should match the
-    stamped DC voltage (~1.82&nbsp;V for the bias point).</li>
-</ol>
-
-<h4>Step 3: Clear and Restore</h4>
-
-<p>Click <strong>Clear Annotations</strong>. The DC stamps are removed and
-the netname attributes are restored to their original values. Floating
-labels (if any) are also cleared.</p>
-
-<div class="note">
-  <strong>DC stamps persist in the .sch file.</strong> If you save the
-  schematic with annotations active, the stamps become part of the file.
-  Clear annotations before saving unless you want them permanently.
-</div>
-
-<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
-
-<h3 id="tut-4">Tutorial 4: Standalone Scripting</h3>
+<h3 id="tut-2">Tutorial 2: Standalone Scripting</h3>
 
 <p>All bridge operations are available through the Session API for
 headless use:</p>
