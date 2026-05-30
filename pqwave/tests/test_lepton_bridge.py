@@ -56,10 +56,15 @@ class TestSchemeServerDeployment:
         from pqwave.bridge.lepton.cross_probe import check_scheme_server
         status = check_scheme_server()
         assert "installed" in status
-        assert "scm_target" in status
-        assert "gafrc_path" in status
-        assert "bundled_version_mtime" in status
+        assert "additions_path" in status
+        assert "menu_scm_path" in status
         assert "needs_update" in status
+
+    def test_bundled_menu_additions_exists(self):
+        import os
+        from pathlib import Path
+        p = Path(__file__).parent.parent.parent / "pqwave" / "bridge" / "lepton" / "menu-additions.scm"
+        assert os.path.exists(str(p))
 
     def test_bundled_scm_exists(self):
         from pqwave.bridge.lepton.cross_probe import _get_package_scm_path

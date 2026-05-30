@@ -933,34 +933,34 @@ class MainWindow(QMainWindow):
         )
         from pqwave.bridge.lepton.control_bar import LeptonControlBar
 
-        # Check if Scheme server is installed
+        # Check if menu additions are installed
         status = check_scheme_server()
         if not status["installed"] or status["needs_update"]:
             action = "update" if status["installed"] else "install"
             reply = QMessageBox.question(
                 self,
                 "Lepton-EDA Bridge Setup",
-                f"The Lepton-EDA bridge needs to {action} companion files "
-                f"to enable cross-probe and back-annotation.\n\n"
-                f"Files to create:\n"
-                f"  {status['scm_target']}\n"
-                f"  {status['gafrc_path']}\n\n"
-                f"lepton-schematic loads gafrc at startup, which loads "
-                f"the server script. You only need to do this once.\n\n"
+                f"The Lepton-EDA bridge needs to {action} menu additions "
+                f"to enable in-schematic menus.\n\n"
+                f"Menu additions:\n"
+                f"  {status['additions_path']}\n\n"
+                f"This appends a (load ...) line to lepton-eda's menu.scm at:\n"
+                f"  {status['menu_scm_path']}\n\n"
+                f"You only need to do this once. "
                 f"Restart lepton-schematic after {action}.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.No:
                 self.chat_panel.append_output(
-                    "[lepton] Bridge setup cancelled. Cross-probe and back-annotation "
-                    "will not be available.\n"
+                    "[lepton] Bridge setup cancelled. "
+                    "In-schematic menus will not be available.\n"
                 )
             else:
                 result = install_scheme_server()
                 if result["status"] == "ok":
                     self.chat_panel.append_output(
-                        f"[lepton] Server installed: {result['scm_target']}\n"
-                        f"[lepton] gafrc configured: {result['gafrc_path']}\n"
+                        f"[lepton] Menu additions installed to {result['additions_path']}\n"
+                        f"[lepton] menu.scm patched: {result['menu_scm_path']}\n"
                         "[lepton] Restart lepton-schematic for changes to take effect.\n"
                     )
                 else:

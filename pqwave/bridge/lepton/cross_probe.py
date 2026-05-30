@@ -8,6 +8,7 @@ call install_scheme_server() after obtaining user consent.
 import os
 import shutil
 import socket
+import subprocess
 import threading
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -35,90 +36,127 @@ def _get_gafrc_path() -> str:
 
 
 def check_scheme_server() -> dict:
-    """Check whether pqwave-server.scm is installed.
+    """Check whether pqwave menu additions are installed.
 
-    Lepton-eda does not have a user-level autoload directory. The system
-    autoload (/usr/share/lepton-eda/scheme/autoload/) is for system-wide
-    extensions. User extensions go through the user gafrc at
-    ~/.config/lepton-eda/gafrc, which runs arbitrary Scheme at startup.
-
-    We deploy pqwave-server.scm to ~/.config/lepton-eda/ and add a load
-    directive to gafrc. Both must exist for the server to be active.
-
+    The install adds menu-additions.scm to ~/.config/lepton-eda/ and
+    appends a (load ...) line to lepton-eda's installed menu.scm.
     Returns a dict with keys:
         installed: bool
-        scm_target: str
-        gafrc_path: str
-        current_version_mtime: float | None
-        bundled_version_mtime: float
+        additions_path: str
+        menu_scm_path: str | None (None if lepton-eda not found)
         needs_update: bool
     """
-    bundled = _get_package_scm_path()
-    scm_target = _get_scm_target_path()
-    bundled_mtime = os.path.getmtime(bundled)
-
-    if not os.path.exists(scm_target):
+    additions_path = os.path.join(_get_user_config_dir(), "pqwave-menus.scm")
+    menu_scm_path = _find_lepton_menu_scm()
+    if not menu_scm_path:
         return {
             "installed": False,
-            "scm_target": scm_target,
-            "gafrc_path": _get_gafrc_path(),
-            "current_version_mtime": None,
-            "bundled_version_mtime": bundled_mtime,
+            "additions_path": additions_path,
+            "menu_scm_path": None,
+            "needs_update": False,
+        }
+    if not os.path.exists(additions_path):
+        return {
+            "installed": False,
+            "additions_path": additions_path,
+            "menu_scm_path": menu_scm_path,
             "needs_update": True,
         }
-    installed_mtime = os.path.getmtime(scm_target)
+    # Check if menu.scm has the load line
+    with open(menu_scm_path, "r") as f:
+        has_load = "pqwave-menus.scm" in f.read()
     return {
-        "installed": True,
-        "scm_target": scm_target,
-        "gafrc_path": _get_gafrc_path(),
-        "current_version_mtime": installed_mtime,
-        "bundled_version_mtime": bundled_mtime,
-        "needs_update": bundled_mtime > installed_mtime,
+        "installed": has_load,
+        "additions_path": additions_path,
+        "menu_scm_path": menu_scm_path,
+        "needs_update": not has_load,
     }
 
 
 def install_scheme_server() -> dict:
-    """Install pqwave-server.scm and configure the user gafrc.
+    """Install pqwave menu additions into lepton-eda's menu.scm.
 
-    Copies pqwave-server.scm to ~/.config/lepton-eda/ and ensures gafrc
-    loads it. If gafrc already exists and does not reference pqwave, the
-    load directive is appended.
+    Copies menu-additions.scm to ~/.config/lepton-eda/ and appends a
+    (load ...) line to the installed lepton-eda menu.scm. This is the
+    same pattern as the built-in allegro backend: plain (define ...)
+    functions referenced by symbol in add-menu.
 
     Caller is responsible for obtaining user consent before calling.
-    Returns {"status": "ok", "scm_target": str, "gafrc_path": str}
+    Returns {"status": "ok", "menu_scm_path": str, "additions_path": str}
          or {"status": "error", "message": str}.
     """
     try:
         config_dir = _get_user_config_dir()
         os.makedirs(config_dir, exist_ok=True)
 
-        scm_target = _get_scm_target_path()
-        shutil.copy2(_get_package_scm_path(), scm_target)
+        # Copy menu-additions.scm to user config dir
+        pkg_dir = Path(__file__).resolve().parent
+        additions_src = str(pkg_dir / "menu-additions.scm")
+        additions_dst = os.path.join(config_dir, "pqwave-menus.scm")
+        shutil.copy2(additions_src, additions_dst)
 
-        gafrc_path = _get_gafrc_path()
-        gafrc_content = (
-            ';; Load pqwave cross-probe server (lepton-schematic GUI only).\n'
-            ';; Guarded because gafrc is loaded by ALL lepton-eda tools,\n'
-            ';; but (schematic builtins) only exists in lepton-schematic.\n'
-            '(catch #t\n'
-            '  (lambda ()\n'
-            '    (resolve-module \'(schematic builtins))\n'
-            '    (load (string-append (dirname (current-filename)) "/pqwave-server.scm")))\n'
-            '  (lambda _ #f))\n'
-        )
-        if os.path.exists(gafrc_path):
-            with open(gafrc_path, "r") as f:
-                existing = f.read()
-            if "pqwave-server.scm" not in existing:
-                with open(gafrc_path, "a") as f:
-                    f.write("\n" + gafrc_content)
-        else:
-            with open(gafrc_path, "w") as f:
-                f.write(gafrc_content)
+        # Find the installed lepton-eda menu.scm
+        menu_scm_path = _find_lepton_menu_scm()
+        if not menu_scm_path:
+            return {"status": "error",
+                    "message": "Could not find lepton-eda menu.scm. Is lepton-eda installed?"}
 
-        return {"status": "ok", "scm_target": scm_target, "gafrc_path": gafrc_path}
+        # Append load line if not already present
+        load_line = f'(load "{additions_dst}")\n'
+        with open(menu_scm_path, "r") as f:
+            existing = f.read()
+        if "pqwave-menus.scm" not in existing:
+            with open(menu_scm_path, "a") as f:
+                f.write("\n" + load_line)
+
+        return {"status": "ok", "menu_scm_path": menu_scm_path,
+                "additions_path": additions_dst}
     except OSError as e:
         return {"status": "error", "message": str(e)}
+
+
+def _find_lepton_menu_scm() -> str | None:
+    """Find the installed lepton-eda menu.scm file.
+
+    Tries: 1) lepton-cli to query data dirs, 2) relative to
+    lepton-schematic binary, 3) common install prefixes.
+    """
+    # Try via lepton-cli first
+    for cli_name in ("lepton-cli",):
+        cli_path = shutil.which(cli_name)
+        if not cli_path:
+            continue
+        try:
+            result = subprocess.run(
+                [cli_path, "shell"],
+                input='(display (lookup-sys-data-path "scheme/conf/schematic/menu.scm"))(force-output)\n',
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("/") and line.endswith("menu.scm"):
+                    return line
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    # Fallback: relative to lepton-schematic binary (<prefix>/bin/lepton-schematic
+    # → <prefix>/share/lepton-eda/scheme/conf/schematic/menu.scm)
+    schematic_bin = shutil.which("lepton-schematic")
+    if schematic_bin:
+        prefix = os.path.dirname(os.path.dirname(schematic_bin))
+        candidate = os.path.join(prefix, "share", "lepton-eda",
+                                 "scheme", "conf", "schematic", "menu.scm")
+        if os.path.exists(candidate):
+            return candidate
+
+    # Common install locations
+    for prefix in ("/usr", "/usr/local", os.path.expanduser("~/Apps/lepton-eda")):
+        candidate = os.path.join(prefix, "share", "lepton-eda",
+                                 "scheme", "conf", "schematic", "menu.scm")
+        if os.path.exists(candidate):
+            return candidate
+
+    return None
 
 
 class LeptonCrossProbeClient(QObject):
