@@ -111,9 +111,10 @@ lepton-eda source code.</p>
 
 <p>pqwave watches a <code>.sch</code> schematic file. When you save in
 lepton-schematic, pqwave exports a SPICE netlist, runs ngspice, and loads
-the results. A small Scheme script installed once into lepton-eda&rsquo;s
-autoload directory adds menus, a TCP server for cross-probe, and back-annotation
-&mdash; all without touching lepton-eda&rsquo;s C code.</p>
+the results. A small Scheme script installed once adds in-schematic menus
+&mdash; Netlist &gt; SPICE, Simulation &gt; ngspice, Wave View &gt;
+pqwave &mdash; following the same pattern as lepton-eda&rsquo;s built-in
+allegro backend, without modifying a single line of C code.</p>
 
 <pre><code>lepton-schematic                         pqwave
 ───────────────                          ──────
@@ -146,54 +147,48 @@ Saves (Ctrl+S) ─────────────────────�
   <li>pqwave installed</li>
 </ul>
 
-<h3>Installing the Companion Script</h3>
+<h3>Installing the Menu Additions</h3>
 
-<p>The bridge needs a small Scheme script and a one-line
-<code>gafrc</code> file in lepton-eda&rsquo;s user config directory.
-This is a one-time step.</p>
-
-<p>lepton-eda does <em>not</em> have a user-level autoload directory.
-The system autoload (<code>/usr/share/lepton-eda/scheme/autoload/</code>)
-is for system-wide extensions. User extensions go through the user
-<code>gafrc</code> at <code>~/.config/lepton-eda/gafrc</code>, which
-lepton-eda loads automatically at startup. This file can contain arbitrary
-Scheme code or <code>load</code> directives.</p>
+<p>The bridge adds in-schematic menus (Netlist &rarr; SPICE, Simulation
+&rarr; ngspice, Wave View &rarr; pqwave) by appending a single
+<code>(load&nbsp;...)</code> line to lepton-eda&rsquo;s installed
+<code>menu.scm</code>. This is a one-time step. No source modifications,
+no rebuild required.</p>
 
 <p><strong>What gets installed:</strong></p>
-<pre><code><span class="path">~/.config/lepton-eda/pqwave-server.scm</span>    ← the server script
-<span class="path">~/.config/lepton-eda/gafrc</span>                  ← loads the script at startup</code></pre>
+<pre><code><span class="path">~/.config/lepton-eda/pqwave-menus.scm</span>   ← the menu script (47 lines)
+<span class="path">$LEPTON_PREFIX/share/lepton-eda/scheme/conf/schematic/menu.scm</span>
+    ↑ one (load ...) line appended</code></pre>
 
-<p><strong>GUI:</strong> Open pqwave, then
+<h4>Automated (GUI)</h4>
+<p>Open pqwave, then
 <strong>File &rarr; Lepton Bridge &rarr; Watch Schematic</strong>.
-Select any <code>.sch</code> file. A dialog will ask whether to install
-the companion files. Click <strong>Yes</strong>. Restart lepton-schematic.</p>
+Select any <code>.sch</code> file. A dialog will ask whether to install.
+Click <strong>Yes</strong>. Restart lepton-schematic.</p>
 
-<p><strong>Headless / REPL:</strong></p>
+<h4>Automated (Headless)</h4>
 <pre><code class="language-python">api.lepton_config(<span class="cmd">"install_server"</span>)</code></pre>
 
+<h4>Manual Install</h4>
+<p>You can also install by hand &mdash; two steps:</p>
+<pre><code><span class="cmd"># 1. Copy the menu additions to your config directory</span>
+cp <span class="path">pqwave/bridge/lepton/menu-additions.scm</span> \
+   <span class="path">~/.config/lepton-eda/pqwave-menus.scm</span>
+
+<span class="cmd"># 2. Append the load line to lepton-eda's installed menu.scm</span>
+<span class="cmd">echo</span> <span class="path">'(load "~/.config/lepton-eda/pqwave-menus.scm")'</span> \
+  &gt;&gt; <span class="path">$LEPTON_PREFIX/share/lepton-eda/scheme/conf/schematic/menu.scm</span></code></pre>
+
+<p>Replace <code>$LEPTON_PREFIX</code> with your lepton-eda install path
+(e.g. <code>/usr</code>, <code>/usr/local</code>, <code>~/Apps/lepton-eda</code>).</p>
+
 <h3>Verifying the Installation</h3>
-
-<p>The script starts a TCP server <em>inside lepton-schematic</em> on port 9424.
-pqwave connects <em>to</em> this port as a client. Both must be true for the
-port to appear:</p>
-
-<ol>
-  <li>The script is installed in the autoload directory</li>
-  <li>lepton-schematic is running (restart it after install)</li>
-</ol>
-
-<pre><code><span class="cmd"># Check the script and gafrc are installed</span>
-ls <span class="path">~/.config/lepton-eda/pqwave-server.scm</span>
-ls <span class="path">~/.config/lepton-eda/gafrc</span>
-
-<span class="cmd"># Check lepton-schematic is listening</span>
-ss -tlnp | grep 9424</code></pre>
-
-<div class="note">
-  <strong>Port 9424 is served by lepton-schematic, not pqwave.</strong>
-  If <code>ss</code> shows nothing, lepton-schematic is not running or
-  hasn&rsquo;t been restarted since the script was installed.
-</div>
+<p>Restart lepton-schematic. You should see three new menus:</p>
+<ul>
+  <li><strong>Netlist &rarr; SPICE</strong></li>
+  <li><strong>Simulation &rarr; ngspice</strong></li>
+  <li><strong>Wave View &rarr; pqwave</strong></li>
+</ul>
 
 <p>pqwave also checks installation status when you start watching a file.
 If the bundled version is newer than the installed one (after upgrading
@@ -551,35 +546,30 @@ missing model files (the schematic references <code>./models/2N3904.mod</code>
 &mdash; ensure it exists relative to the <code>.sch</code> file),
 convergence failures, or syntax errors in SPICE directives.</p>
 
-<h4>Cross-probe doesn&rsquo;t highlight in lepton-schematic</h4>
+<h4>Menus don&rsquo;t appear in lepton-schematic</h4>
 <ol>
-  <li>Verify the script and gafrc are installed:
-    <code>ls ~/.config/lepton-eda/pqwave-server.scm ~/.config/lepton-eda/gafrc</code></li>
-  <li>Verify lepton-schematic is running and listening:
-    <code>ss -tlnp | grep 9424</code></li>
-  <li>If port 9424 is not listening, restart lepton-schematic.</li>
-  <li>If the gafrc existed before install, verify it contains a
-    <code>load</code> line for <code>pqwave-server.scm</code>.</li>
-  <li>Check for port conflicts (9424 must not be used by KiCad at 4243
-    or xschem at 2026/2021 &mdash; pqwave warns on conflict).</li>
+  <li>Verify the menu additions file exists:
+    <code>ls ~/.config/lepton-eda/pqwave-menus.scm</code></li>
+  <li>Verify the load line is in menu.scm:
+    <code>grep pqwave-menus $(dirname $(which lepton-schematic))/../share/lepton-eda/scheme/conf/schematic/menu.scm</code></li>
+  <li>Restart lepton-schematic after installing.</li>
 </ol>
 
-<h4>Clicking a net in lepton-schematic doesn&rsquo;t plot in pqwave</h4>
-<p>Ensure the <code>.sch</code> file is being watched in pqwave
-(<strong>File &rarr; Lepton Bridge &rarr; Watch Schematic</strong>).
-The reverse cross-probe channel requires an active TCP connection from
-pqwave to lepton-schematic, which is only established while watching.</p>
+<h4>Cross-probe (future feature)</h4>
+<p>Cross-probe and back-annotation require a TCP server running inside
+lepton-schematic &mdash; this is not yet implemented. The in-schematic
+menus (Netlist &rarr; SPICE, Simulation &rarr; ngspice, Wave View
+&rarr; pqwave) are the currently available features.</p>
 
 <h4>File watcher doesn&rsquo;t detect saves</h4>
 <p>The watcher polls mtime and file size every second. If you save twice
 within the same second, the second save may be missed. This is a known
 limitation of mtime polling. Workaround: wait &gt;1 second between saves.</p>
 
-<h4>Port 9424 conflicts with another application</h4>
-<p>Change the port via the API before watching a file:</p>
-<pre><code class="language-python">api.lepton_config(<span class="cmd">"port"</span>, 9425)</code></pre>
-<p>You must also edit line 17 of the installed
-<code>pqwave-server.scm</code> to match.</p>
+<h4>Uninstalling</h4>
+<p>Remove the <code>(load ...)</code> line from menu.scm and delete
+<code>~/.config/lepton-eda/pqwave-menus.scm</code>. Restart
+lepton-schematic.</p>
 
 </body>
 </html>
