@@ -50,7 +50,7 @@
     (when netlist-entry
       (set-cdr! netlist-entry
         (append (cdr netlist-entry)
-                (list (list "SPICE" '&spice-netlist #f)))))))
+                (list (list "2 SPICE" '&spice-netlist #f)))))))
 
 ;; Add Simulation and Wave menus between Netlist and Help.
 (let* ((menu-list (@@ (schematic menu) %main-menu-list))
@@ -59,12 +59,10 @@
        (help-pos (list-index (lambda (n) (string=? n "_Help")) names)))
   (when (and netlist-pos help-pos)
     (let* ((before (list-head menu-list (+ 1 netlist-pos)))
-           (between (list-head (list-tail menu-list (+ 1 netlist-pos))
-                               (- help-pos netlist-pos)))
            (after (list-tail menu-list help-pos))
            (sim (list (cons "_Simulation"
                             (list (list "ngspice" '&sim-ngspice #f)))))
            (wave (list (cons "_Wave"
                              (list (list "pqwave" '&wave-pqwave #f)))))
-           (new-list (append before sim wave between after)))
+           (new-list (append before sim wave after)))
       (set! (@@ (schematic menu) %main-menu-list) new-list))))
