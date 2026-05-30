@@ -50,7 +50,7 @@
     (when netlist-entry
       (set-cdr! netlist-entry
         (append (cdr netlist-entry)
-                (list (list "SPICE" &spice-netlist #f)))))))
+                (list (list "SPICE" '&spice-netlist #f)))))))
 
 ;; Add new top-level menus.
 (add-menu "_Simulation" '(("ngspice" &sim-ngspice #f)))
