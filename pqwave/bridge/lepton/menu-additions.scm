@@ -44,10 +44,9 @@
              (raw (string-append base ".raw")))
         (system* "pqwave" raw)))))
 
-;; Append SPICE to the built-in Netlist menu by manipulating the
-;; private menu list.  Must happen before make-main-menu runs.
+;; Append SPICE to the built-in Netlist menu.
 (let ((menu-list (@@ (schematic menu) %main-menu-list)))
-  (let ((netlist-entry (assoc "Netlist" menu-list)))
+  (let ((netlist-entry (assoc "_Netlist" menu-list)))
     (when netlist-entry
       (set-cdr! netlist-entry
         (append (cdr netlist-entry)
