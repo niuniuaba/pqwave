@@ -204,6 +204,45 @@ class MenuManager:
         lepton_menu.addAction(unwatch_action)
 
         file_menu.addMenu(lepton_menu)
+
+        # Xschem Bridge submenu
+        xschem_menu = QMenu("Xschem Bridge", self.parent)
+
+        watch_action = QAction("Watch Schematic...", self.parent)
+        watch_action.triggered.connect(self.callbacks.get("xschem_watch", lambda: None))
+        xschem_menu.addAction(watch_action)
+
+        rewatch_action = QAction("Re-Watch", self.parent)
+        rewatch_action.triggered.connect(self.callbacks.get("xschem_rewatch", lambda: None))
+        xschem_menu.addAction(rewatch_action)
+
+        simulate_action = QAction("Simulate Now", self.parent)
+        simulate_action.triggered.connect(self.callbacks.get("xschem_simulate", lambda: None))
+        xschem_menu.addAction(simulate_action)
+
+        xschem_menu.addSeparator()
+
+        cross_probe_menu = QMenu("Cross-Probe", self.parent)
+        probe_action = QAction("Probe Selected Net", self.parent)
+        probe_action.triggered.connect(
+            self.callbacks.get("xschem_probe_net", lambda: None)
+        )
+        cross_probe_menu.addAction(probe_action)
+        clear_probe = QAction("Clear Highlight", self.parent)
+        clear_probe.triggered.connect(
+            self.callbacks.get("xschem_clear", lambda: None)
+        )
+        cross_probe_menu.addAction(clear_probe)
+        xschem_menu.addMenu(cross_probe_menu)
+
+        xschem_menu.addSeparator()
+        unwatch_action = QAction("Stop Watching", self.parent)
+        unwatch_action.triggered.connect(
+            self.callbacks.get("xschem_unwatch", lambda: None)
+        )
+        xschem_menu.addAction(unwatch_action)
+
+        file_menu.addMenu(xschem_menu)
         file_menu.addSeparator()
 
         open_file_action = QAction("Open File...", self.parent)

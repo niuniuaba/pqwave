@@ -183,6 +183,23 @@ class MainWindow(QMainWindow):
         self._lepton_connect_failed: bool = False
         self._lepton_last_path = ""
 
+        # Xschem bridge (same pattern as KiCad / Lepton)
+        self.xschem_control_bar = None
+        self._xschem_watcher = None
+        self._xschem_bridge = None
+        self._xschem_cross_probe = None
+        self._xschem_watched_path = None
+        self._xschem_simulating = False
+        self._xschem_connect_failed: bool = False
+        self._xschem_last_path = ""
+
+        # Xschem cursor cross-probe timer (debounce net highlight in schematic)
+        self._xschem_cp_timer = QTimer()
+        self._xschem_cp_timer.setSingleShot(True)
+        self._xschem_cp_timer.setInterval(250)
+        self._xschem_cp_timer.timeout.connect(self._xschem_cp_debounced)
+        self._xschem_cp_net = None
+
         self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
         self.menu_manager = MenuManager(self, callbacks, keybinding_manager=self.keybinding_manager)
@@ -709,6 +726,25 @@ class MainWindow(QMainWindow):
             self._on_lepton_annotate_dc(kwargs.get("voltages", {}))
         elif action == "lepton_clear_annotations":
             self._on_lepton_clear_annotations()
+        elif action == "xschem_watch":
+            self._start_xschem_watch(kwargs.get("path"))
+        elif action == "xschem_simulate":
+            self._on_xschem_simulate()
+        elif action == "xschem_unwatch":
+            self._on_xschem_unwatch()
+        elif action == "xschem_probe_net":
+            if self._xschem_cross_probe:
+                self._xschem_cross_probe.probe_net(kwargs["name"])
+        elif action == "xschem_probe_part":
+            if self._xschem_cross_probe:
+                self._xschem_cross_probe.probe_part(kwargs["ref"], kwargs.get("pin"))
+        elif action == "xschem_clear":
+            if self._xschem_cross_probe:
+                self._xschem_cross_probe.clear()
+        elif action == "_xschem_sim_done":
+            self._on_xschem_sim_done(kwargs.get("result", {}))
+        elif action == "_xschem_sim_error":
+            self._on_xschem_sim_error(kwargs)
 
     # ---- KiCad Bridge handlers ----
 
@@ -1243,6 +1279,219 @@ class MainWindow(QMainWindow):
                     pass
         return voltages
 
+    # ---- Xschem Bridge handlers ----
+
+    def _on_xschem_watch(self):
+        """File > Xschem Bridge > Watch Schematic."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Xschem Schematic",
+            self._xschem_watched_path or os.path.expanduser("~"),
+            "Xschem Schematics (*.sch);;All Files (*)"
+        )
+        if not path:
+            return
+        self._start_xschem_watch(path)
+
+    def _start_xschem_watch(self, sch_path: str):
+        """Initialize the xschem bridge and start watching the schematic."""
+        from PyQt6.QtWidgets import QMessageBox
+        from pqwave.bridge.xschem.bridge import XschemBridge
+        from pqwave.bridge.xschem.file_watcher import XschemFileWatcher
+        from pqwave.bridge.xschem.cross_probe import (
+            XschemCrossProbeClient, check_tcl_server, deploy_tcl_server
+        )
+        from pqwave.bridge.xschem.control_bar import XschemControlBar
+
+        # Check/offer Tcl server deployment
+        check = check_tcl_server()
+        if check["needs_deploy"]:
+            reply = QMessageBox.question(
+                self,
+                "Install Xschem Bridge Files",
+                "The pqwave companion Tcl script needs to be installed for "
+                "cross-probe to work. Install now?\n\n"
+                f"Script: {check['target_path']}\n"
+                f"Config: {check['xschemrc_path']}\n\n"
+                "Restart xschem after installation.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                deploy_tcl_server()
+                self.chat_panel.append_output(
+                    "[xschem] Companion Tcl script deployed. "
+                    "Restart xschem to enable cross-probe.\n"
+                )
+
+        if self._xschem_cross_probe:
+            self._xschem_cross_probe.disconnect()
+        if self._xschem_watcher:
+            self._xschem_watcher.unwatch()
+
+        self._xschem_bridge = XschemBridge()
+        self._xschem_watcher = XschemFileWatcher()
+        self._xschem_cross_probe = XschemCrossProbeClient()
+
+        if self.xschem_control_bar is None:
+            self.xschem_control_bar = XschemControlBar()
+            upper = self._main_splitter.widget(0)
+            if upper and upper.layout():
+                upper.layout().addWidget(self.xschem_control_bar)
+            self.xschem_control_bar.simulate_clicked.connect(self._on_xschem_simulate)
+            self.xschem_control_bar.unwatch_clicked.connect(self._on_xschem_unwatch)
+
+        self._xschem_watcher.file_changed.connect(self._on_xschem_file_changed)
+        self._xschem_watcher.watch(sch_path)
+        self._xschem_watched_path = sch_path
+        self._xschem_last_path = sch_path
+
+        self._xschem_cross_probe.error_occurred.connect(
+            lambda msg: self.chat_panel.append_output(f"[xschem] {msg}\n")
+        )
+
+        self.xschem_control_bar.setVisible(True)
+        basename = os.path.basename(sch_path)
+        self.statusBar().showMessage(
+            f"Watching {basename} — save in xschem to auto-simulate"
+        )
+        self.xschem_control_bar.set_status(f"watching {basename}")
+
+        self._run_xschem_pipeline(sch_path)
+
+    def _on_xschem_simulate(self):
+        """Menu action: manually re-run simulation on watched file."""
+        if self._xschem_watched_path:
+            self._run_xschem_pipeline(self._xschem_watched_path)
+
+    def _on_xschem_rewatch(self):
+        """Re-Watch button: resume watching the last path."""
+        if self._xschem_last_path:
+            self._start_xschem_watch(self._xschem_last_path)
+
+    def _on_xschem_file_changed(self, path: str):
+        """File watcher callback — schematic was saved."""
+        if self.xschem_control_bar:
+            self.xschem_control_bar.set_status("change detected, simulating...")
+        self._run_xschem_pipeline(path)
+
+    def _on_xschem_unwatch(self):
+        """Stop watching the schematic."""
+        self._xschem_last_path = self._xschem_watched_path
+        if self._xschem_watcher:
+            self._xschem_watcher.unwatch()
+        if self._xschem_cross_probe:
+            self._xschem_cross_probe.disconnect()
+        if self.xschem_control_bar:
+            self.xschem_control_bar.set_status("not watching (click Re-Watch to resume)")
+        self._xschem_watched_path = None
+
+    def _run_xschem_pipeline(self, sch_path: str):
+        """Export -> post-process -> ngspice -> load .raw."""
+        import os as _os
+        if self._xschem_simulating:
+            self.chat_panel.append_output(
+                "[xschem] pipeline skipped (already simulating)\n"
+            )
+            return
+        if self._xschem_bridge is None:
+            self.chat_panel.append_output("[xschem] pipeline skipped (no bridge)\n")
+            return
+        self._xschem_simulating = True
+        if self.xschem_control_bar:
+            self.xschem_control_bar.set_simulating(True)
+        try:
+            result = self._xschem_bridge.simulate(sch_path)
+            if result["returncode"] != 0:
+                self.chat_panel.append_output(
+                    f"[xschem] Simulation failed (code {result['returncode']}):\n"
+                    f"{result['stderr']}\n"
+                )
+                return
+            if result["raw_file"]:
+                self._load_raw_file(result["raw_file"])
+                self.chat_panel.append_output(
+                    f"[xschem] Simulation complete: "
+                    f"{len(self.state.datasets[-1].variables)} signals loaded\n"
+                )
+                if self.xschem_control_bar:
+                    self.xschem_control_bar.set_simulation_complete()
+        except (FileNotFoundError, RuntimeError) as e:
+            self.chat_panel.append_output(f"[xschem] {e}\n")
+        finally:
+            self._xschem_simulating = False
+            if self.xschem_control_bar:
+                self.xschem_control_bar.set_simulating(False)
+
+    def _on_xschem_sim_done(self, result: dict):
+        """Handle successful simulation completion (called from mutation dispatch)."""
+        self.chat_panel.append_output(
+            f"[xschem] Simulation complete: "
+            f"{result.get('raw_file', 'unknown')}\n"
+        )
+
+    def _on_xschem_sim_error(self, data: dict):
+        """Handle simulation error (called from mutation dispatch)."""
+        error = data.get("error") or data.get("result", {}).get(
+            "stderr", "unknown error"
+        )
+        self.chat_panel.append_output(
+            f"[xschem] Simulation failed: {error}\n"
+        )
+
+    def _on_xschem_probe_net_selected(self):
+        """Cross-probe menu: Probe Selected Net."""
+        if self._xschem_cross_probe is None:
+            from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
+            self._xschem_cross_probe = XschemCrossProbeClient()
+            self._xschem_cross_probe.connect_to_server()
+        self._xschem_connect_failed = False
+        self._xschem_probe_active_trace()
+
+    def _on_xschem_clear_probe(self):
+        """Cross-probe menu: Clear Highlight."""
+        if self._xschem_cross_probe and self._xschem_cross_probe.is_connected():
+            self._xschem_cross_probe.clear()
+
+    def _xschem_probe_active_trace(self, force_reconnect: bool = False):
+        """Cross-probe the selected trace's net in xschem."""
+        if not self._xschem_cross_probe:
+            return
+        if self._xschem_connect_failed and not force_reconnect:
+            return
+        if not self._xschem_cross_probe.is_connected():
+            if not self._xschem_cross_probe.connect_to_server():
+                self._xschem_connect_failed = True
+                return
+        self._xschem_connect_failed = False
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        selected = panel.trace_manager.get_selected_traces()
+        if not selected:
+            return
+        _, trace = selected[0]
+        net = self._extract_net_name(trace.expression)
+        self._xschem_cross_probe.probe_net(net)
+
+    def _xschem_cp_debounced(self):
+        """Send cross-probe command after debounce.
+
+        When _xschem_cp_net is set (from _trigger_xschem_cross_probe),
+        probes that specific net. Otherwise acts as a cursor-driven
+        cross-probe, looking up the selected trace's net.
+        """
+        if self._xschem_cp_net and self._xschem_cross_probe and self._xschem_cross_probe.is_connected():
+            self._xschem_cross_probe.probe_net(self._xschem_cp_net)
+            self._xschem_cp_net = None
+        else:
+            self._xschem_probe_active_trace()
+
+    def _trigger_xschem_cross_probe(self, net_name: str):
+        """Queue a cross-probe for xschem (debounced)."""
+        self._xschem_cp_net = net_name
+        self._xschem_cp_timer.start()
+
     def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""
         mc = self.state.mc_collection
@@ -1626,6 +1875,12 @@ class MainWindow(QMainWindow):
             'lepton_simulate': self._on_lepton_simulate,
             'lepton_unwatch': self._on_lepton_unwatch,
             'lepton_rewatch': self._on_lepton_rewatch,
+            'xschem_watch': self._on_xschem_watch,
+            'xschem_simulate': self._on_xschem_simulate,
+            'xschem_unwatch': self._on_xschem_unwatch,
+            'xschem_rewatch': self._on_xschem_rewatch,
+            'xschem_probe_net': self._on_xschem_probe_net_selected,
+            'xschem_clear': self._on_xschem_clear_probe,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -3677,6 +3932,12 @@ class MainWindow(QMainWindow):
             a = menu.addAction("Probe in Lepton-EDA")
             a.triggered.connect(lambda: self._lepton_probe_active_trace(force_reconnect=True))
 
+        # Xschem cross-probe (only when bridge is active)
+        if self._xschem_cross_probe is not None:
+            menu.addSeparator()
+            a = menu.addAction("Probe in Xschem")
+            a.triggered.connect(lambda: self._xschem_probe_active_trace(force_reconnect=True))
+
         # Common action for all trace types
         menu.addSeparator()
         a = menu.addAction("Remove Trace")
@@ -4202,6 +4463,10 @@ class MainWindow(QMainWindow):
         # Lepton-EDA cross-probe (only when bridge is active)
         if self._lepton_cross_probe is not None:
             self._lepton_ba_timer.start()
+
+        # Xschem cross-probe (only when bridge is active)
+        if self._xschem_cross_probe is not None:
+            self._xschem_cp_timer.start()
 
         self._update_cursor_status()
         self._sync_x_cursor_to_same_domain_panels('XA', value)
