@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Window registry for xschem integration.
+Window registry for the wave receiver.
 
 This module provides a singleton registry that tracks open pqwave windows,
-allowing xschem commands to be routed to the appropriate window based on
+allowing wave commands to be routed to the appropriate window based on
 raw file path or window ID.
 """
 

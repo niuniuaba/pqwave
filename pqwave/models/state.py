@@ -8,6 +8,8 @@ This module provides a singleton class that manages the global state of the
 application, including datasets, traces, axis configurations, and UI settings.
 """
 
+from __future__ import annotations
+
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -15,8 +17,6 @@ import numpy as np
 
 from .dataset import Dataset
 from .trace import Trace, AxisAssignment
-from pqwave.communication.window_registry import get_registry, WindowRegistry
-from pqwave.communication.command_handler import CommandHandler
 
 
 class ViewboxTheme(Enum):
@@ -284,6 +284,9 @@ class ApplicationState:
 
     def _initialize(self):
         """Initialize default state."""
+        from pqwave.bridge.xschem.window_registry import get_registry, WindowRegistry
+        from pqwave.bridge.xschem.wave_receiver import WaveCommandHandler
+
         self.datasets: List[Dataset] = []
         self.current_dataset_idx: int = 0
 
@@ -333,7 +336,7 @@ class ApplicationState:
         self.mc_collection = None
 
         self.window_registry: WindowRegistry = get_registry()
-        self.command_handler: Optional[CommandHandler] = None
+        self.wave_cmd_handler: Optional[WaveCommandHandler] = None
 
     # --- Backward-compat properties (route through active panel) ---
 

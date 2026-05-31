@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import QApplication
 
 from pqwave.ui.main_window import MainWindow
 from pqwave.logging_config import setup_logging
-from pqwave.communication import XschemServer, CommandHandler
+from pqwave.bridge.xschem.wave_receiver import WaveReceiver, WaveCommandHandler
 from pqwave.models.state import ApplicationState
 from pqwave.models.raw_converter import extract_traces_to_raw, write_raw_file, FORMAT_CONFIG
 from pqwave.models.rawfile import RawFile
@@ -531,16 +531,16 @@ def main():
         log_file=args.log_file
     )
 
-    # Handle xschem integration
-    xschem_servers = []  # Track active servers for cleanup
+    # Handle wave receiver integration
+    wave_servers = []  # Track active servers for cleanup
 
     # Send command and exit if requested
     if args.xschem_send:
         _send_command_to_server(args.xschem_port, args.xschem_send)
         return 0
 
-    # Create xschem server and command handler if enabled
-    xschem_server = None
+    # Create wave receiver and command handler if enabled
+    wave_receiver = None
     # Validate no port conflicts between xschem and KiCad cross-probe
     _ports_used = {}
     for _name, _port in [
@@ -559,7 +559,7 @@ def main():
             sys.exit(1)
         _ports_used[_port] = _name
 
-    command_handler = None
+    wave_cmd_handler = None
     xschem_port_busy = False
     if not args.no_xschem_server and args.xschem_port != 0:
         # Check port availability before binding — if another session owns
@@ -574,27 +574,27 @@ def main():
         except socket.error:
             xschem_port_busy = True
         if port_available:
-            xschem_server = XschemServer(port=args.xschem_port)
-            command_handler = CommandHandler()
-            command_handler.set_server(xschem_server)
+            wave_receiver = WaveReceiver(port=args.xschem_port)
+            wave_cmd_handler = WaveCommandHandler()
+            wave_cmd_handler.set_receiver(wave_receiver)
             # Store command handler in application state for window access
-            ApplicationState().command_handler = command_handler
+            ApplicationState().wave_cmd_handler = wave_cmd_handler
             # Connect signals for logging
-            xschem_server.command_received.connect(command_handler.handle_command)
+            wave_receiver.command_received.connect(wave_cmd_handler.handle_command)
             # Log command handler signals for debugging
-            command_handler.table_set_received.connect(
+            wave_cmd_handler.table_set_received.connect(
                 lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"table_set: {raw_file} from {client_addr}")
             )
-            command_handler.copyvar_received.connect(
+            wave_cmd_handler.copyvar_received.connect(
                 lambda var_name, color, client_addr, connection_state, logger=logger: logger.debug(f"copyvar: {var_name} color {color} from {client_addr}")
             )
-            command_handler.open_file_received.connect(
+            wave_cmd_handler.open_file_received.connect(
                 lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"open_file: {raw_file} from {client_addr}")
             )
-            command_handler.add_trace_received.connect(
+            wave_cmd_handler.add_trace_received.connect(
                 lambda var_name, axis, color, client_addr, connection_state, logger=logger: logger.debug(f"add_trace: {var_name} axis {axis} from {client_addr}")
             )
-            command_handler.invalid_command_received.connect(
+            wave_cmd_handler.invalid_command_received.connect(
                 lambda command_dict, error_message, logger=logger: logger.warning(f"Invalid command: {error_message} - {command_dict}")
             )
 
@@ -685,16 +685,16 @@ def main():
     else:
         window = MainWindow(xschem_ba_port=args.xschem_ba_port)
 
-    # Start xschem server after window is created (so signals are connected)
-    if xschem_server is not None:
-        if xschem_server.start():
-            logger.info(f"Xschem server started on port {args.xschem_port}")
-            xschem_servers.append(xschem_server)
+    # Start wave receiver after window is created (so signals are connected)
+    if wave_receiver is not None:
+        if wave_receiver.start():
+            logger.info(f"Wave receiver started on port {args.xschem_port}")
+            wave_servers.append(wave_receiver)
         else:
-            logger.warning("Xschem server failed to start (port conflict)")
+            logger.warning("Wave receiver failed to start (port conflict)")
 
-    # Cleanup xschem servers on exit
-    app.aboutToQuit.connect(lambda: [server.stop() for server in xschem_servers])
+    # Cleanup wave servers on exit
+    app.aboutToQuit.connect(lambda: [server.stop() for server in wave_servers])
 
     window.show()
     return app.exec()

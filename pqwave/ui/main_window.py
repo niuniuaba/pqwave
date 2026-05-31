@@ -43,7 +43,7 @@ from pqwave.ui.panel_grid import PanelGrid
 from pqwave.ui.mark_panel import MarkPanel
 from pqwave.utils.colors import ColorManager
 from pqwave.logging_config import get_logger
-from pqwave.communication.window_registry import get_registry
+from pqwave.bridge.xschem.window_registry import get_registry
 from pqwave.ui.keybinding_manager import KeyBindingManager
 from pqwave.ui.keybindings_dialog import KeyBindingsDialog
 from pqwave.ui.functions_help_dialog import FunctionsHelpDialog
@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
     """Main application window orchestrating all UI components."""
 
     # Cross-thread mutation signal: forwards SessionAPI mutation events
-    # from background threads (REPL Python mode, XschemServer) to the
+    # from background threads (REPL Python mode, WaveReceiver) to the
     # main thread so Qt GUI operations are always thread-safe.
     _mutation_signal = pyqtSignal(str, object)
 
@@ -233,7 +233,7 @@ class MainWindow(QMainWindow):
 
         # Wire SessionAPI mutations → TraceManager for live plot updates.
         # Use the signal bridge so mutations from any thread (REPL background
-        # thread, XschemServer network thread) always land on the main thread.
+        # thread, WaveReceiver network thread) always land on the main thread.
         self._mutation_signal.connect(self._on_mutation_from_signal)
         self._repl._session.set_mutation_callback(self._on_mutation_bridge)
 
@@ -1670,8 +1670,8 @@ class MainWindow(QMainWindow):
         if initial_panel:
             self._rebind_panel_signals(initial_panel)
 
-        # Connect xschem integration signals
-        self._connect_xschem_signals()
+        # Connect wave receiver integration signals
+        self._connect_wave_receiver_signals()
 
         # Back-annotation debounce timer (avoid sending too many updates)
         self._backannotation_timer = QTimer()
@@ -1968,25 +1968,25 @@ class MainWindow(QMainWindow):
             for panel in self.panel_grid.panels.values():
                 panel.trace_manager.rebuild_from_state()
 
-    def _connect_xschem_signals(self):
-        """Connect xschem command handler signals."""
-        if self.state.command_handler is None:
-            logger.debug("No xschem command handler available, skipping xschem signal connections")
+    def _connect_wave_receiver_signals(self):
+        """Connect wave receiver command handler signals."""
+        if self.state.wave_cmd_handler is None:
+            logger.debug("No wave command handler available, skipping wave signal connections")
             return
 
         # Connect command handler signals to local slots
-        self.state.command_handler.table_set_received.connect(self._handle_xschem_table_set)
-        self.state.command_handler.copyvar_received.connect(self._handle_xschem_copyvar)
-        self.state.command_handler.open_file_received.connect(self._handle_xschem_open_file)
-        self.state.command_handler.add_trace_received.connect(self._handle_xschem_add_trace)
-        self.state.command_handler.remove_trace_received.connect(self._handle_xschem_remove_trace)
-        self.state.command_handler.get_data_point_received.connect(self._handle_xschem_get_data_point)
-        self.state.command_handler.close_window_received.connect(self._handle_xschem_close_window)
-        self.state.command_handler.list_windows_received.connect(self._handle_xschem_list_windows)
-        self.state.command_handler.ping_received.connect(self._handle_xschem_ping)
-        self.state.command_handler.invalid_command_received.connect(self._handle_xschem_invalid_command)
+        self.state.wave_cmd_handler.table_set_received.connect(self._handle_xschem_table_set)
+        self.state.wave_cmd_handler.copyvar_received.connect(self._handle_xschem_copyvar)
+        self.state.wave_cmd_handler.open_file_received.connect(self._handle_xschem_open_file)
+        self.state.wave_cmd_handler.add_trace_received.connect(self._handle_xschem_add_trace)
+        self.state.wave_cmd_handler.remove_trace_received.connect(self._handle_xschem_remove_trace)
+        self.state.wave_cmd_handler.get_data_point_received.connect(self._handle_xschem_get_data_point)
+        self.state.wave_cmd_handler.close_window_received.connect(self._handle_xschem_close_window)
+        self.state.wave_cmd_handler.list_windows_received.connect(self._handle_xschem_list_windows)
+        self.state.wave_cmd_handler.ping_received.connect(self._handle_xschem_ping)
+        self.state.wave_cmd_handler.invalid_command_received.connect(self._handle_xschem_invalid_command)
 
-        logger.debug(f"Connected xschem signals for window {self.window_id}")
+        logger.debug(f"Connected wave receiver signals for window {self.window_id}")
 
     # Xschem pending commands handling
     def _queue_xschem_command(self, command_type: str, args: dict, client_addr: str, connection_state: dict) -> None:
@@ -2348,14 +2348,14 @@ class MainWindow(QMainWindow):
                 "error": error_message,
                 "id": command_id
             }
-            if self.state.command_handler is not None:
-                self.state.command_handler.send_response(client_addr, response)
+            if self.state.wave_cmd_handler is not None:
+                self.state.wave_cmd_handler.send_response(client_addr, response)
             else:
-                logger.error("Cannot send error response: command_handler not available")
+                logger.error("Cannot send error response: wave_cmd_handler not available")
 
     def _is_command_for_this_window(self, client_addr: str, connection_state: dict, raw_file: Optional[str] = None) -> bool:
         """
-        Determine if an xschem command is intended for this window.
+        Determine if a wave command is intended for this window.
 
         Checks:
         1. If client is already associated with this window (via registry)
@@ -2392,7 +2392,7 @@ class MainWindow(QMainWindow):
         # Default: not for this window
         return False
 
-    # Xschem helper methods
+    # Wave receiver helper methods
     def _send_xschem_response(self, client_addr: str, connection_state: dict,
                               status: str = "success", data: Optional[dict] = None,
                               error: Optional[str] = None) -> bool:
@@ -2409,8 +2409,8 @@ class MainWindow(QMainWindow):
         Returns:
             True if response sent successfully, False otherwise.
         """
-        if self.state.command_handler is None:
-            logger.warning(f"Cannot send response: command_handler not available")
+        if self.state.wave_cmd_handler is None:
+            logger.warning(f"Cannot send response: wave_cmd_handler not available")
             return False
 
         response = {"status": status}
@@ -2425,7 +2425,7 @@ class MainWindow(QMainWindow):
             response["id"] = command_id
 
         logger.debug(f"Sending xschem response to {client_addr}: {response}")
-        return self.state.command_handler.send_response(client_addr, response)
+        return self.state.wave_cmd_handler.send_response(client_addr, response)
 
     def _query_data_point(self, x_value: float) -> list:
         """
@@ -4328,8 +4328,8 @@ class MainWindow(QMainWindow):
             x_value: X coordinate in linear space
         """
         logger.debug(f"_send_data_point_update called with x={x_value}")
-        if self.state is None or self.state.command_handler is None:
-            logger.debug("State or command_handler is None, returning")
+        if self.state is None or self.state.wave_cmd_handler is None:
+            logger.debug("State or wave_cmd_handler is None, returning")
             return
 
         # Query data points at this X coordinate
@@ -4390,10 +4390,10 @@ class MainWindow(QMainWindow):
             }
 
             # Send via command handler with "json " prefix (xschem expects this format)
-            # Get xschem server from command handler
-            xschem_server = self.state.command_handler.xschem_server
-            if xschem_server is None:
-                logger.warning(f"Cannot send data_point_update: xschem server not available")
+            # Get wave receiver from command handler
+            wave_receiver = self.state.wave_cmd_handler.wave_receiver
+            if wave_receiver is None:
+                logger.warning(f"Cannot send data_point_update: wave receiver not available")
                 continue
 
             # Parse client address string
@@ -4405,7 +4405,7 @@ class MainWindow(QMainWindow):
                 continue
 
             # Find client socket
-            client_socket = xschem_server.clients.get(client_addr_tuple)
+            client_socket = wave_receiver.clients.get(client_addr_tuple)
             if not client_socket:
                 logger.warning(f"Client socket not found: {client_addr}")
                 continue
