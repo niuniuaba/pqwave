@@ -559,6 +559,17 @@ def main():
             sys.exit(1)
         _ports_used[_port] = _name
 
+    # Validate xschem cross-probe port against reserved ports
+    reserved_for_cross_probe = {4243: "KiCad", 2026: "xschem wave receiver"}
+    if args.xschem_ba_port in reserved_for_cross_probe:
+        print(
+            f"ERROR: xschem back-annotation port {args.xschem_ba_port} "
+            f"conflicts with {reserved_for_cross_probe[args.xschem_ba_port]} "
+            f"(port {args.xschem_ba_port}). Use --xschem-ba-port to change.",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
     wave_cmd_handler = None
     xschem_port_busy = False
     if not args.no_xschem_server and args.xschem_port != 0:
