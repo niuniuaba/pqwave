@@ -66,6 +66,14 @@ class MainWindow(QMainWindow):
     # main thread so Qt GUI operations are always thread-safe.
     _mutation_signal = pyqtSignal(str, object)
 
+    _NET_EXPR_RE = re.compile(r'^[vV]\(\s*(.+?)\s*\)$')
+
+    @staticmethod
+    def _extract_net_name(expression: str) -> str:
+        """Extract bare net name from a SPICE trace expression like v(out)."""
+        m = MainWindow._NET_EXPR_RE.match(expression)
+        return m.group(1) if m else expression
+
     def __init__(self, initial_file=None, xschem_ba_port=2021,
                  initial_files=None):
         """
@@ -172,6 +180,7 @@ class MainWindow(QMainWindow):
         self._lepton_cross_probe = None
         self._lepton_watched_path = None
         self._lepton_simulating = False
+        self._lepton_connect_failed: bool = False
         self._lepton_last_path = ""
 
         self.keybinding_manager = KeyBindingManager()
@@ -454,7 +463,7 @@ class MainWindow(QMainWindow):
                 # Multi-select matching traces (select_trace deselects others)
                 signal_set = set(signals)
                 tm.deselect_all()
-                for i, trace in enumerate(tm._state_traces):
+                for i, trace in enumerate(tm.state_traces):
                     if trace.expression in signal_set:
                         trace.selected = True
                 tm.group_selected_as_bus()
@@ -533,7 +542,7 @@ class MainWindow(QMainWindow):
                 for i, (var, _, _) in enumerate(tm.traces):
                     if var == sig:
                         tm.deselect_all()
-                        tm._state_traces[i].selected = True
+                        tm.state_traces[i].selected = True
                         found = True
                         break
                 if not found:
@@ -541,7 +550,7 @@ class MainWindow(QMainWindow):
                     for i, (var, _, _) in enumerate(tm.traces):
                         if var == sig:
                             tm.deselect_all()
-                            tm._state_traces[i].selected = True
+                            tm.state_traces[i].selected = True
                             found = True
                             break
                 if found:
@@ -817,7 +826,7 @@ class MainWindow(QMainWindow):
                 # Save current trace expressions and axes
                 saved: list[tuple[str, str, str]] = []
                 for panel in self.panel_grid.panels.values():
-                    for t in panel.trace_manager._state_traces:
+                    for t in panel.trace_manager.state_traces:
                         saved.append((t.expression, t.y_axis.value, panel.panel_id))
 
                 # Remove previous kicad datasets and clear traces
@@ -886,14 +895,14 @@ class MainWindow(QMainWindow):
                 self._kicad_connect_failed = True
                 return
         self._kicad_connect_failed = False
-        panel = self.panel_grid.active_panel()
+        panel = self.panel_grid.get_active_panel()
         if panel is None:
             return
-        selected = panel._trace_manager.get_selected_traces()
+        selected = panel.trace_manager.get_selected_traces()
         if not selected:
             return
         _, trace = selected[0]
-        net = trace.expression.strip("vV() ")
+        net = self._extract_net_name(trace.expression)
         self._kicad_cross_probe.probe_net(net)
 
     def _on_kicad_probe_selected(self):
@@ -941,25 +950,27 @@ class MainWindow(QMainWindow):
                 self,
                 "Lepton-EDA Bridge Setup",
                 f"The Lepton-EDA bridge needs to {action} menu additions "
-                f"to enable in-schematic menus.\n\n"
-                f"Menu additions:\n"
-                f"  {status['additions_path']}\n\n"
-                f"This appends a (load ...) line to lepton-eda's menu.scm at:\n"
+                f"and TCP server for in-schematic menus and cross-probe.\n\n"
+                f"Files to {action}:\n"
+                f"  Menu:   {status['additions_path']}\n"
+                f"  Server: {status.get('server_scm_path', status['additions_path'].replace('pqwave-menus.scm', 'pqwave-server.scm'))}\n\n"
+                f"This appends (load ...) lines to lepton-eda's menu.scm at:\n"
                 f"  {status['menu_scm_path']}\n\n"
-                f"You only need to do this once. "
                 f"Restart lepton-schematic after {action}.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.No:
                 self.chat_panel.append_output(
                     "[lepton] Bridge setup cancelled. "
-                    "In-schematic menus will not be available.\n"
+                    "In-schematic menus and cross-probe will not be available.\n"
                 )
             else:
                 result = install_scheme_server()
                 if result["status"] == "ok":
                     self.chat_panel.append_output(
-                        f"[lepton] Menu additions installed to {result['additions_path']}\n"
+                        f"[lepton] Bridge files installed:\n"
+                        f"  Menu:   {result['additions_path']}\n"
+                        f"  Server: {result['server_scm_path']}\n"
                         f"[lepton] menu.scm patched: {result['menu_scm_path']}\n"
                         "[lepton] Restart lepton-schematic for changes to take effect.\n"
                     )
@@ -1012,6 +1023,25 @@ class MainWindow(QMainWindow):
         self._lepton_cross_probe.error_occurred.connect(
             lambda msg: self.chat_panel.append_output(f"[lepton] {msg}\n")
         )
+        self._lepton_cross_probe.connected.connect(
+            lambda: self.chat_panel.append_output(
+                "[lepton] TCP connected to lepton-schematic on port 9424\n"
+            )
+        )
+        self._lepton_cross_probe.disconnected.connect(
+            self._on_lepton_disconnected
+        )
+
+        # Connect TCP client to lepton-schematic's cross-probe server
+        self._lepton_connect_failed = False
+        if not self._lepton_cross_probe.is_connected():
+            self.chat_panel.append_output("[lepton] Connecting to lepton-schematic:9424...\n")
+            if not self._lepton_cross_probe.connect_to_server():
+                self._lepton_connect_failed = True
+                self.chat_panel.append_output(
+                    "[lepton] lepton-schematic not running — cross-probe unavailable.\n"
+                    "Start lepton-schematic and press Re-Watch to connect.\n"
+                )
 
         self.lepton_control_bar.setVisible(True)
         basename = os.path.basename(sch_path)
@@ -1034,6 +1064,8 @@ class MainWindow(QMainWindow):
         self._lepton_last_path = self._lepton_watched_path
         if self._lepton_watcher:
             self._lepton_watcher.unwatch()
+        if hasattr(self, '_lepton_ba_timer'):
+            self._lepton_ba_timer.stop()
         if self._lepton_cross_probe:
             self._lepton_cross_probe.disconnect()
         if self.lepton_control_bar:
@@ -1087,7 +1119,7 @@ class MainWindow(QMainWindow):
                 voltages = self._extract_dc_voltages()
             for netname, voltage in voltages.items():
                 self._lepton_cross_probe.send_command(
-                    f"$ANNOTATE:DC {netname} {voltage}"
+                    f"$ANNOTATE:DC|{netname}|{voltage}"
                 )
             self.chat_panel.append_output(
                 f"[lepton] DC annotations stamped: {len(voltages)} nets\n"
@@ -1102,6 +1134,62 @@ class MainWindow(QMainWindow):
             self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
             self._lepton_cross_probe.send_command("$CLEAR:DC")
             self.chat_panel.append_output("[lepton] Annotations cleared\n")
+
+    def _on_lepton_disconnected(self):
+        """Handle unexpected TCP disconnect from lepton-schematic."""
+        self._lepton_connect_failed = True
+        self.chat_panel.append_output(
+            "[lepton] TCP disconnected from lepton-schematic\n"
+        )
+
+    def _lepton_probe_active_trace(self, force_reconnect: bool = False):
+        """Cross-probe the selected trace's net in lepton-schematic.
+
+        When *force_reconnect* is True (explicit user action from context
+        menu), the connect-failed flag is ignored and a reconnect is
+        attempted.  Cursor-driven calls pass False to avoid spamming
+        connection attempts.
+        """
+        if not self._lepton_cross_probe:
+            return
+        if self._lepton_connect_failed and not force_reconnect:
+            return
+        if not self._lepton_cross_probe.is_connected():
+            if not self._lepton_cross_probe.connect_to_server():
+                self._lepton_connect_failed = True
+                return
+        self._lepton_connect_failed = False
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        selected = panel.trace_manager.get_selected_traces()
+        if not selected:
+            return
+        # Probe only the first selected trace — probing all would send
+        # redundant TCP round-trips (each probe selects then deselects,
+        # so only the last one would visually stick).
+        _, trace = selected[0]
+        net = self._extract_net_name(trace.expression)
+        self._lepton_cross_probe.probe_net(net)
+
+    def _lepton_ba_debounced(self):
+        """Debounced cursor movement: cross-probe net + back-annotate value in lepton."""
+        self._lepton_probe_active_trace()
+        if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
+            panel = self.panel_grid.get_active_panel()
+            if panel is None:
+                return
+            cursor_y = panel.trace_manager.last_cursor_y
+            for _, trace in panel.trace_manager.get_selected_traces():
+                y_val = cursor_y.get(trace.name)
+                if y_val is None:
+                    continue
+                if not self._lepton_cross_probe.is_connected():
+                    break
+                net = self._extract_net_name(trace.expression)
+                self._lepton_cross_probe.send_command(
+                    f"$ANNOTATE:DC|{net}|{y_val:.6g}"
+                )
 
     def _on_lepton_net_selected(self, netname: str):
         """Reverse cross-probe: user clicked a net in lepton-schematic."""
@@ -1604,6 +1692,12 @@ class MainWindow(QMainWindow):
         self._kicad_ba_timer.setSingleShot(True)
         self._kicad_ba_timer.setInterval(250)
         self._kicad_ba_timer.timeout.connect(self._kicad_ba_debounced)
+
+        # Lepton-EDA cursor cross-probe timer (same debounce pattern)
+        self._lepton_ba_timer = QTimer()
+        self._lepton_ba_timer.setSingleShot(True)
+        self._lepton_ba_timer.setInterval(250)
+        self._lepton_ba_timer.timeout.connect(self._lepton_ba_debounced)
 
     def _rebind_panel_signals(self, panel):
         """Disconnect old panel signals and connect new panel's signals."""
@@ -3520,7 +3614,7 @@ class MainWindow(QMainWindow):
     def _find_panel_with_trace(self, trace_name: str):
         """Return the Panel containing *trace_name*, or None."""
         for p in self.panel_grid.panels.values():
-            if any(t.name == trace_name for t in p.trace_manager._state_traces):
+            if any(t.name == trace_name for t in p.trace_manager.state_traces):
                 return p
         return None
 
@@ -3536,15 +3630,15 @@ class MainWindow(QMainWindow):
 
         # Find the trace to determine its type
         tm = panel.trace_manager
-        trace = next((t for t in tm._state_traces if t.name == trace_name), None)
+        trace = next((t for t in tm.state_traces if t.name == trace_name), None)
         ttype = trace.trace_type if trace else 'analog'
-        trace_idx = tm._state_traces.index(trace) if trace else -1
+        trace_idx = tm.state_traces.index(trace) if trace else -1
 
         if ttype == 'analog':
             a = menu.addAction("Mark as Digital...")
             a.triggered.connect(
                 lambda _, idx=trace_idx, _tm=tm: _tm.type_manager.toggle(
-                    _tm._state_traces[idx], idx))
+                    _tm.state_traces[idx], idx))
             menu.addSeparator()
             a = menu.addAction("Eye Diagram")
             a.triggered.connect(self._show_eye_diagram)
@@ -3552,7 +3646,7 @@ class MainWindow(QMainWindow):
             a = menu.addAction("Show as Analog")
             a.triggered.connect(
                 lambda _, idx=trace_idx, _tm=tm: _tm.type_manager.toggle(
-                    _tm._state_traces[idx], idx))
+                    _tm.state_traces[idx], idx))
             a = menu.addAction("Threshold Settings...")
             a.triggered.connect(self._show_threshold_settings)
             a = menu.addAction("Group Into Bus")
@@ -3576,6 +3670,12 @@ class MainWindow(QMainWindow):
             a = menu.addAction("Ungroup Bus")
             a.triggered.connect(
                 lambda _, _tm=tm: _tm.ungroup_bus(trace_name))
+
+        # Lepton-EDA cross-probe (only when bridge is active)
+        if self._lepton_cross_probe is not None:
+            menu.addSeparator()
+            a = menu.addAction("Probe in Lepton-EDA")
+            a.triggered.connect(lambda: self._lepton_probe_active_trace(force_reconnect=True))
 
         # Common action for all trace types
         menu.addSeparator()
@@ -4098,6 +4198,10 @@ class MainWindow(QMainWindow):
 
         # KiCad cross-probe: highlight net corresponding to cursor position
         self._kicad_ba_timer.start()
+
+        # Lepton-EDA cross-probe (only when bridge is active)
+        if self._lepton_cross_probe is not None:
+            self._lepton_ba_timer.start()
 
         self._update_cursor_status()
         self._sync_x_cursor_to_same_domain_panels('XA', value)

@@ -35,65 +35,105 @@ def _get_gafrc_path() -> str:
     return os.path.join(_get_user_config_dir(), "gafrc")
 
 
-def check_scheme_server() -> dict:
-    """Check whether pqwave menu additions are installed.
+def _extract_scm_version(path: str) -> int:
+    """Extract VERSION number from a .scm file. Returns 0 if not found."""
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                if line.startswith(";; VERSION:"):
+                    return int(line.split(":")[1].strip())
+    except (OSError, ValueError):
+        pass
+    return 0
 
-    The install adds menu-additions.scm to ~/.config/lepton-eda/ and
-    appends a (load ...) line to lepton-eda's installed menu.scm.
+
+def check_scheme_server() -> dict:
+    """Check whether pqwave menu additions and TCP server are installed.
+
     Returns a dict with keys:
         installed: bool
-        additions_path: str
+        additions_path: str  — path to pqwave-menus.scm in user config
+        server_scm_path: str — path to pqwave-server.scm in user config
         menu_scm_path: str | None (None if lepton-eda not found)
-        needs_update: bool
+        needs_update: bool  — True if files need (re)install or update
     """
-    additions_path = os.path.join(_get_user_config_dir(), "pqwave-menus.scm")
+    config_dir = _get_user_config_dir()
+    additions_path = os.path.join(config_dir, "pqwave-menus.scm")
+    server_scm_path = os.path.join(config_dir, "pqwave-server.scm")
     menu_scm_path = _find_lepton_menu_scm()
     if not menu_scm_path:
         return {
             "installed": False,
             "additions_path": additions_path,
+            "server_scm_path": server_scm_path,
             "menu_scm_path": None,
             "needs_update": False,
         }
-    if not os.path.exists(additions_path):
+    if not os.path.exists(additions_path) or not os.path.exists(server_scm_path):
         return {
             "installed": False,
             "additions_path": additions_path,
+            "server_scm_path": server_scm_path,
             "menu_scm_path": menu_scm_path,
             "needs_update": True,
         }
-    # Check if menu.scm has the load line
+    # Check if menu.scm has both load lines
     with open(menu_scm_path, "r") as f:
-        has_load = "pqwave-menus.scm" in f.read()
+        content = f.read()
+        has_menus = "pqwave-menus.scm" in content
+        has_server = "pqwave-server.scm" in content
+    if not has_menus or not has_server:
+        return {
+            "installed": False,
+            "additions_path": additions_path,
+            "server_scm_path": server_scm_path,
+            "menu_scm_path": menu_scm_path,
+            "needs_update": True,
+        }
+    # Check if installed files are outdated vs current source.
+    # Compare both files — update if either source is newer.
+    pkg_dir = Path(__file__).resolve().parent
+    src_menu_v = _extract_scm_version(str(pkg_dir / "menu-additions.scm"))
+    src_server_v = _extract_scm_version(str(pkg_dir / "pqwave-server.scm"))
+    installed_menu_v = _extract_scm_version(additions_path)
+    installed_server_v = _extract_scm_version(server_scm_path)
+    needs_update = (installed_menu_v < src_menu_v or
+                    installed_server_v < src_server_v)
     return {
-        "installed": has_load,
+        "installed": True,
         "additions_path": additions_path,
+        "server_scm_path": server_scm_path,
         "menu_scm_path": menu_scm_path,
-        "needs_update": not has_load,
+        "needs_update": needs_update,
     }
 
 
 def install_scheme_server() -> dict:
-    """Install pqwave menu additions into lepton-eda's menu.scm.
+    """Install pqwave menu additions and TCP server into lepton-eda's menu.scm.
 
-    Copies menu-additions.scm to ~/.config/lepton-eda/ and appends a
-    (load ...) line to the installed lepton-eda menu.scm. This is the
-    same pattern as the built-in allegro backend: plain (define ...)
-    functions referenced by symbol in add-menu.
+    Copies menu-additions.scm and pqwave-server.scm to ~/.config/lepton-eda/
+    and appends (load ...) lines to the installed menu.scm.
 
     Caller is responsible for obtaining user consent before calling.
-    Returns {"status": "ok", "menu_scm_path": str, "additions_path": str}
+    Returns {"status": "ok", "menu_scm_path": str, "additions_path": str,
+             "server_scm_path": str}
          or {"status": "error", "message": str}.
     """
     try:
         config_dir = _get_user_config_dir()
         os.makedirs(config_dir, exist_ok=True)
 
-        # Copy menu-additions.scm to user config dir
         pkg_dir = Path(__file__).resolve().parent
+
+        # Copy menu-additions.scm
         additions_src = str(pkg_dir / "menu-additions.scm")
         additions_dst = os.path.join(config_dir, "pqwave-menus.scm")
         shutil.copy2(additions_src, additions_dst)
+
+        # Copy pqwave-server.scm
+        server_src = str(pkg_dir / "pqwave-server.scm")
+        server_dst = os.path.join(config_dir, "pqwave-server.scm")
+        shutil.copy2(server_src, server_dst)
 
         # Find the installed lepton-eda menu.scm
         menu_scm_path = _find_lepton_menu_scm()
@@ -101,16 +141,21 @@ def install_scheme_server() -> dict:
             return {"status": "error",
                     "message": "Could not find lepton-eda menu.scm. Is lepton-eda installed?"}
 
-        # Append load line if not already present
-        load_line = f'(load "{additions_dst}")\n'
         with open(menu_scm_path, "r") as f:
             existing = f.read()
+
+        lines_to_add = []
         if "pqwave-menus.scm" not in existing:
+            lines_to_add.append(f'(load "{additions_dst}")')
+        if "pqwave-server.scm" not in existing:
+            lines_to_add.append(f'(load "{server_dst}")')
+
+        if lines_to_add:
             with open(menu_scm_path, "a") as f:
-                f.write("\n" + load_line)
+                f.write("\n" + "\n".join(lines_to_add) + "\n")
 
         return {"status": "ok", "menu_scm_path": menu_scm_path,
-                "additions_path": additions_dst}
+                "additions_path": additions_dst, "server_scm_path": server_dst}
     except OSError as e:
         return {"status": "error", "message": str(e)}
 
@@ -165,10 +210,9 @@ class LeptonCrossProbeClient(QObject):
     Sends cross-probe and back-annotation commands. Receives reverse
     cross-probe events ($SELECTED:net / $SELECTED:part).
 
-    Deployment: The companion script is copied to ~/.config/lepton-eda/
-    and loaded via the user gafrc. This is lepton-eda's standard user
-    extension mechanism (the system autoload at /usr/share/lepton-eda/
-    scheme/autoload/ is for system-wide extensions only).
+    Deployment: menu-additions.scm and pqwave-server.scm are copied to
+    ~/.config/lepton-eda/ and loaded via (load ...) lines appended to
+    lepton-eda's installed menu.scm.
 
     Does NOT install automatically. The caller must check
     check_scheme_server() and call install_scheme_server() explicitly.
@@ -208,6 +252,9 @@ class LeptonCrossProbeClient(QObject):
             self._sock = socket.create_connection(
                 ("localhost", self._port), timeout=self._timeout
             )
+            # Disable timeout after connect — the reader thread blocks on recv
+            # indefinitely waiting for reverse cross-probe events from the server.
+            self._sock.settimeout(None)
             self._running = True
             self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
             self._reader_thread.start()
@@ -228,14 +275,17 @@ class LeptonCrossProbeClient(QObject):
                 pass
             self._sock = None
             self.disconnected.emit()
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
 
     def send_command(self, text: str) -> bool:
-        if not self._sock:
+        sock = self._sock  # snapshot to avoid TOCTOU with _read_loop
+        if not sock:
             self.error_occurred.emit("Not connected to lepton-schematic")
             return False
         try:
             msg = text.rstrip("\n") + "\n"
-            self._sock.sendall(msg.encode("utf-8"))
+            sock.sendall(msg.encode("utf-8"))
             return True
         except OSError as e:
             self.error_occurred.emit(f"Send failed: {e}")
@@ -255,9 +305,12 @@ class LeptonCrossProbeClient(QObject):
 
     def _read_loop(self):
         buf = b""
-        while self._running and self._sock:
+        while self._running:
+            sock = self._sock  # snapshot to avoid TOCTOU with disconnect()
+            if not sock:
+                break
             try:
-                data = self._sock.recv(4096)
+                data = sock.recv(4096)
                 if not data:
                     break
                 buf += data

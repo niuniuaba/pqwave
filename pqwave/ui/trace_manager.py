@@ -165,6 +165,9 @@ class TraceManager(QtCore.QObject):
         # Re-entrancy guard for update_traces_for_log_mode
         self._updating_log_mode = False
 
+        # Cursor Y values per trace at XA cursor position (for back-annotation)
+        self.last_cursor_y: dict[str, float] = {}
+
         # Digital signal type manager (handles analog↔digital toggle, bus grouping)
         self.type_manager = TraceTypeManager(
             on_recreate=self.recreate_trace_plot_item)
@@ -176,7 +179,7 @@ class TraceManager(QtCore.QObject):
         self.legend._right_click_handler = self._on_legend_sample_right_clicked
 
     @property
-    def _state_traces(self) -> List[Trace]:
+    def state_traces(self) -> List[Trace]:
         """Return traces belonging to this TraceManager's panel.
 
         Unlike ApplicationState.traces (which routes through the active panel),
@@ -586,17 +589,17 @@ class TraceManager(QtCore.QObject):
         self.legend.clear()
         for i, (var, plot_item, y_axis) in enumerate(self.traces):
             legend_name = f"{var} @ {y_axis}"
-            if i < len(self._state_traces):
-                tt = self._state_traces[i].trace_type
+            if i < len(self.state_traces):
+                tt = self.state_traces[i].trace_type
                 if tt == 'digital':
                     legend_name = f"{var} [D] @ {y_axis}"
                 elif tt == 'bus':
-                    t = self._state_traces[i]
+                    t = self.state_traces[i]
                     n_bits = t.metadata.get('bus_width', len(t.bus_signals or []))
                     legend_name = f"{var} [BUS:{n_bits}] @ {y_axis}"
             sample = self.legend.addItem(plot_item, legend_name)
             # Apply bold styling to selected traces
-            if i < len(self._state_traces) and self._state_traces[i].selected:
+            if i < len(self.state_traces) and self.state_traces[i].selected:
                 label = self.legend.getLabel(plot_item)
                 if label is not None:
                     label.setText(legend_name, bold=True)
@@ -608,7 +611,7 @@ class TraceManager(QtCore.QObject):
         (-1, 0, 1, ...) confuses users.  Analog traces (or digital traces
         viewed in analog mode) restore normal tick display.
         """
-        traces = self._state_traces
+        traces = self.state_traces
         all_digital = (
             len(traces) > 0
             and all(t.trace_type in ('digital', 'bus') for t in traces)
@@ -625,7 +628,7 @@ class TraceManager(QtCore.QObject):
         # import traceback
         # traceback.print_stack()  # Debug statement removed for test stability
         # Clear traces from viewboxes (including bus bottom lines)
-        for t in self._state_traces:
+        for t in self.state_traces:
             bot = t.metadata.pop('_bus_bot_item', None)
             if bot is not None:
                 vb = bot.getViewBox()
@@ -722,7 +725,7 @@ class TraceManager(QtCore.QObject):
                     pass
 
         # Remove bus bottom items
-        for t in self._state_traces:
+        for t in self.state_traces:
             bot = t.metadata.pop('_bus_bot_item', None)
             if bot is not None:
                 vb = bot.getViewBox()
@@ -746,7 +749,7 @@ class TraceManager(QtCore.QObject):
         self._remove_digital_y1_bounds()
 
         # 2. Rebuild from state traces
-        for trace in self._state_traces:
+        for trace in self.state_traces:
             plot_item = self._create_plot_item(trace)
             if not trace.visible:
                 plot_item.setVisible(False)
@@ -766,7 +769,7 @@ class TraceManager(QtCore.QObject):
         idx = self._find_trace_index(plot_item)
         if idx is None:
             return
-        trace = self._state_traces[idx] if idx < len(self._state_traces) else None
+        trace = self.state_traces[idx] if idx < len(self.state_traces) else None
         if trace is None:
             return
         self.trace_context_menu_requested.emit(trace.name)
@@ -786,7 +789,7 @@ class TraceManager(QtCore.QObject):
         modifiers = QApplication.keyboardModifiers()
         ctrl_held = bool(modifiers & QtCore.Qt.KeyboardModifier.ControlModifier)
 
-        trace = self._state_traces[idx] if idx < len(self._state_traces) else None
+        trace = self.state_traces[idx] if idx < len(self.state_traces) else None
         if trace is None:
             return
 
@@ -847,7 +850,7 @@ class TraceManager(QtCore.QObject):
     def toggle_bus_expand(self, bus_trace_name: str) -> None:
         """Expand/collapse a bus: show or hide its member traces."""
         bus_trace = next(
-            (t for t in self._state_traces if t.name == bus_trace_name), None)
+            (t for t in self.state_traces if t.name == bus_trace_name), None)
         if bus_trace is None or bus_trace.trace_type != 'bus':
             return
         if bus_trace.bus_signals is None:
@@ -863,13 +866,13 @@ class TraceManager(QtCore.QObject):
         """Show member traces of a bus (unconditionally)."""
         if bus_trace is None:
             bus_trace = next(
-                (t for t in self._state_traces if t.name == bus_trace_name), None)
+                (t for t in self.state_traces if t.name == bus_trace_name), None)
         if bus_trace is None or bus_trace.trace_type != 'bus':
             return
         if bus_trace.bus_signals is None:
             return
         member_exprs = set(bus_trace.bus_signals)
-        for i, t in enumerate(self._state_traces):
+        for i, t in enumerate(self.state_traces):
             if t.expression in member_exprs:
                 t.metadata.pop('_bus_member_hidden', None)
                 t.visible = True
@@ -882,13 +885,13 @@ class TraceManager(QtCore.QObject):
         """Hide member traces of a bus (unconditionally)."""
         if bus_trace is None:
             bus_trace = next(
-                (t for t in self._state_traces if t.name == bus_trace_name), None)
+                (t for t in self.state_traces if t.name == bus_trace_name), None)
         if bus_trace is None or bus_trace.trace_type != 'bus':
             return
         if bus_trace.bus_signals is None:
             return
         member_exprs = set(bus_trace.bus_signals)
-        for i, t in enumerate(self._state_traces):
+        for i, t in enumerate(self.state_traces):
             if t.expression in member_exprs:
                 t.metadata['_bus_member_hidden'] = True
                 t.visible = False
@@ -900,14 +903,14 @@ class TraceManager(QtCore.QObject):
     def ungroup_bus(self, bus_trace_name: str) -> None:
         """Ungroup a bus: restore member visibility and remove the bus trace."""
         bus_trace = next(
-            (t for t in self._state_traces if t.name == bus_trace_name), None)
+            (t for t in self.state_traces if t.name == bus_trace_name), None)
         if bus_trace is None or bus_trace.trace_type != 'bus':
             return
 
         # Restore member trace visibility
         if bus_trace.bus_signals:
             member_exprs = set(bus_trace.bus_signals)
-            for i, t in enumerate(self._state_traces):
+            for i, t in enumerate(self.state_traces):
                 if t.expression in member_exprs:
                     t.metadata.pop('_bus_member_hidden', None)
                     t.visible = True
@@ -916,10 +919,10 @@ class TraceManager(QtCore.QObject):
                     t.trace_type = 'digital'
 
         # Remove bus from state
-        state_idx = next((i for i, t in enumerate(self._state_traces)
+        state_idx = next((i for i, t in enumerate(self.state_traces)
                           if t.name == bus_trace_name), -1)
         if state_idx >= 0:
-            self._state_traces.pop(state_idx)
+            self.state_traces.pop(state_idx)
             self.state.remove_trace(state_idx)
 
         # Remove bus plot items (main line + bottom rail)
@@ -940,7 +943,7 @@ class TraceManager(QtCore.QObject):
 
     def set_trace_visible(self, expr: str, visible: bool) -> None:
         """Set a trace's visibility by name or expression."""
-        for i, t in enumerate(self._state_traces):
+        for i, t in enumerate(self.state_traces):
             if t.name == expr or t.expression == expr:
                 t.visible = visible
                 if i < len(self.traces):
@@ -954,7 +957,7 @@ class TraceManager(QtCore.QObject):
     def set_all_traces_visible(self, visible: bool) -> None:
         """Set visibility for all traces."""
         changed = False
-        for i, t in enumerate(self._state_traces):
+        for i, t in enumerate(self.state_traces):
             if t.visible != visible:
                 t.visible = visible
                 if i < len(self.traces):
@@ -977,17 +980,17 @@ class TraceManager(QtCore.QObject):
 
     def select_trace(self, idx: int) -> None:
         """Select the trace at *idx* and deselect all others."""
-        for i, trace in enumerate(self._state_traces):
+        for i, trace in enumerate(self.state_traces):
             trace.selected = (i == idx)
 
     def deselect_all(self) -> None:
         """Deselect all traces."""
-        for trace in self._state_traces:
+        for trace in self.state_traces:
             trace.selected = False
 
     def get_selected_traces(self) -> list[tuple[int, Trace]]:
         """Return (index, Trace) pairs for all selected traces."""
-        return [(i, t) for i, t in enumerate(self._state_traces) if t.selected]
+        return [(i, t) for i, t in enumerate(self.state_traces) if t.selected]
 
     def remove_selected_traces(self) -> int:
         """Remove all selected traces. Returns the number removed."""
@@ -1074,7 +1077,7 @@ class TraceManager(QtCore.QObject):
 
     def _selected_count(self) -> int:
         """Return the number of selected traces."""
-        return sum(1 for t in self._state_traces if t.selected)
+        return sum(1 for t in self.state_traces if t.selected)
 
     def remove_trace_by_variable_name(self, variable_name: str) -> bool:
         """Remove a trace by variable name (unquoted or quoted).
@@ -1122,9 +1125,9 @@ class TraceManager(QtCore.QObject):
             self.plot_widget.plotItem.vb.removeItem(plot_item)
 
         # Remove bus bottom line if present (match by name, not index —
-        # self.traces and self._state_traces may diverge after bus grouping).
+        # self.traces and self.state_traces may diverge after bus grouping).
         bot = None
-        for t in self._state_traces:
+        for t in self.state_traces:
             if t.name == var:
                 bot = t.metadata.get('_bus_bot_item')
                 break
@@ -1143,7 +1146,7 @@ class TraceManager(QtCore.QObject):
         # Remove from application state
         # Find corresponding trace in state.traces
         state_trace_idx = -1
-        for i, trace in enumerate(self._state_traces):
+        for i, trace in enumerate(self.state_traces):
             # Compare trace name (expression) with var
             if trace.name == var:
                 state_trace_idx = i
@@ -1184,11 +1187,11 @@ class TraceManager(QtCore.QObject):
             if not self.traces:
                 return
 
-            state_traces = self._state_traces
+            state_traces = self.state_traces
             for i, (var, plot_item, y_axis) in enumerate(self.traces):
                 y_log = self.y1_log if y_axis == "Y1" else self.y2_log
 
-                # Find matching trace by expression — self._state_traces is a
+                # Find matching trace by expression — self.state_traces is a
                 # global list shared across all panels, so indexed lookup
                 # (state_traces[i]) is WRONG when multiple panels exist.
                 # Match by expression instead.
@@ -1235,7 +1238,7 @@ class TraceManager(QtCore.QObject):
         if np.iscomplexobj(new_x_data) and np.all(new_x_data.imag == 0):
             new_x_data = new_x_data.real
 
-        state_traces = self._state_traces
+        state_traces = self.state_traces
         updated_count = 0
         for var, plot_item, y_axis in self.traces:
             y_log = self.y1_log if y_axis == "Y1" else self.y2_log
@@ -1288,7 +1291,8 @@ class TraceManager(QtCore.QObject):
         if not self.traces or not self.legend:
             return
 
-        state_traces = self._state_traces
+        state_traces = self.state_traces
+        self.last_cursor_y = {}  # trace name -> Y value at XA cursor
 
         for i, (var, plot_item, y_axis) in enumerate(self.traces):
             trace = state_traces[i] if i < len(state_traces) else None
@@ -1298,14 +1302,16 @@ class TraceManager(QtCore.QObject):
 
             base_name = f"{var} @ {y_axis}"
 
-            # Collect Y values for visible X cursors
+            # Collect Y values for visible X cursors. Store XA value for back-annotation.
             values = []
-            for cursor_x in (xa_linear, xb_linear):
+            for ci, cursor_x in enumerate((xa_linear, xb_linear)):
                 if cursor_x is not None and len(trace.x_data) > 0:
                     x_min, x_max = float(trace.x_data[0]), float(trace.x_data[-1])
                     clipped_x = max(x_min, min(cursor_x, x_max))
                     y_val = float(np.interp(clipped_x, trace.x_data, trace.y_data))
                     values.append(f"{y_val:.6g}")
+                    if ci == 0:  # XA cursor
+                        self.last_cursor_y[trace.name] = y_val
 
             suffix = " " + " ".join(values) if values else ""
             full_name = base_name + suffix
@@ -1419,7 +1425,7 @@ class TraceManager(QtCore.QObject):
         trace_height = trace.metadata.get('digital_height', 1.0)
         target_axis = trace.y_axis
         y_off = 0.0
-        for t in self._state_traces:
+        for t in self.state_traces:
             if t is trace:
                 break
             if t.trace_type in ('digital', 'bus') and t.y_axis == target_axis:
@@ -1875,7 +1881,7 @@ class TraceManager(QtCore.QObject):
         if old_item.scene() is not None:
             old_item.scene().removeItem(old_item)
 
-        trace = next((t for t in self._state_traces if t.name == var), None)
+        trace = next((t for t in self.state_traces if t.name == var), None)
         if trace is None:
             self.logger.warning(
                 f"recreate_trace_plot_item: trace '{var}' not found in state; "
@@ -1897,7 +1903,7 @@ class TraceManager(QtCore.QObject):
     def recreate_all_digital(self) -> None:
         """Recreate all digital and bus trace plot items (e.g., after height change)."""
         for i, (var, old_item, y_axis) in enumerate(self.traces):
-            t = next((s for s in self._state_traces if s.name == var), None)
+            t = next((s for s in self.state_traces if s.name == var), None)
             if t is None or t.trace_type not in ('digital', 'bus'):
                 continue
             vb = old_item.getViewBox()
@@ -1936,7 +1942,7 @@ class TraceManager(QtCore.QObject):
         markers so pyqtgraph's autoRange includes a fixed minimum viewport
         height, preventing a single trace from filling the entire Y axis.
         """
-        traces = self._state_traces
+        traces = self.state_traces
         y1_traces = [t for t in traces
                      if t.y_axis == AxisAssignment.Y1 and t.visible]
         y1_digital = [t for t in y1_traces

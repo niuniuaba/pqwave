@@ -2,6 +2,7 @@
 ;; Loaded via a (load ...) line appended to lepton-eda's menu.scm.
 ;; This code runs after conf/schematic/menu.scm has populated the
 ;; built-in menus, but before make-main-menu builds the menu bar.
+;; VERSION: 5
 
 (define (&spice-netlist)
   (let* ((page (active-page))
@@ -42,7 +43,9 @@
       (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
              (base (substring filename 0 idx))
              (raw (string-append base ".raw")))
-        (system* "pqwave" raw)))))
+        ;; system* blocks until child exits; pqwave is a GUI app, so use
+        ;; sh -c with & to detach and return immediately.
+        (system* "sh" "-c" (string-append "pqwave \"" raw "\" &"))))))
 
 ;; Append SPICE to the built-in Netlist menu.
 (let ((menu-list (@@ (schematic menu) %main-menu-list)))

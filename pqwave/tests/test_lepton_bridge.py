@@ -57,6 +57,7 @@ class TestSchemeServerDeployment:
         status = check_scheme_server()
         assert "installed" in status
         assert "additions_path" in status
+        assert "server_scm_path" in status
         assert "menu_scm_path" in status
         assert "needs_update" in status
 

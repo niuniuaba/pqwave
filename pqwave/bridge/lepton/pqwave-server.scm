@@ -1,20 +1,13 @@
-;; pqwave-server.scm — cross-probe and back-annotation server for lepton-schematic
-;; Deployed to ~/.config/lepton-eda/ and loaded via the user gafrc.
-;; Lepton-eda's user gafrc (~/.config/lepton-eda/gafrc) is the standard
-;; user extension point. The system autoload directory is for system-wide
-;; extensions only.
+;; pqwave-server.scm — cross-probe and back-annotation TCP server for lepton-schematic
+;; Loaded via a (load ...) line appended to lepton-eda's menu.scm.
+;; Menu additions are in menu-additions.scm (loaded separately).
+;; This file only contains the TCP server and cross-probe logic.
+;; VERSION: 7
 
-(use-modules (srfi srfi-1)
-             (ice-9 rdelim)
-             (ice-9 threads)
-             (lepton attrib)
-             (lepton object)
-             (lepton page)
-             (schematic hook)
-             (schematic selection)
-             (schematic window)
-             (schematic menu)
-             (schematic builtins))
+(use-modules (srfi srfi-1) (srfi srfi-13) (ice-9 rdelim) (ice-9 threads))
+(use-modules (lepton attrib) (lepton object) (lepton page) (lepton log))
+(use-modules (schematic hook) (schematic selection))
+(use-modules (schematic window) (system foreign))
 
 (define pqwave-port 9424)
 (define pqwave-server-socket #f)
@@ -36,8 +29,9 @@
           (lambda ()
             (let loop ()
               (let ((client-conn (accept sock)))
-                (set! pqwave-client (cdr client-conn))
-                (pqwave-handle-client (cdr client-conn))
+                ;; Guile 3.0: accept returns (client-sock . addr-vector)
+                (set! pqwave-client (car client-conn))
+                (pqwave-handle-client (car client-conn))
                 (set! pqwave-client #f)
                 (loop)))))))
     (lambda (key . args)
@@ -85,7 +79,17 @@
             (and (eq? (object-type o) 'net)
                  (any (lambda (a)
                         (and (string=? "netname" (attrib-name a))
-                             (string=? name (attrib-value a))))
+                             (let ((val (attrib-value a)))
+                               (and (string? val)
+                               ;; Match exact name, or name with [DC:...] suffix
+                               ;; left by prior $ANNOTATE:DC calls.  Require the
+                               ;; character after the prefix to be '[' so that
+                               ;; e.g. "Vout" does not falsely match "Vout2".
+                               (or (string=? name val)
+                                   (and (string-prefix? name val)
+                                        (< (string-length name) (string-length val))
+                                        (char=? (string-ref val (string-length name)) #\[)
+                                        (string-contains val "[DC:")))))))
                       (object-attribs o))))
           (page-contents page)))
 
@@ -102,10 +106,9 @@
 (define (pqwave-probe-net name)
   (let* ((page (active-page))
          (nets (if page (pqwave-find-nets-by-name page name) '())))
+    ;; Briefly select each net for visual highlighting, then zoom.
     (for-each (lambda (net)
-                (catch #t
-                  (lambda () (select-object! net))
-                  (lambda _ #f)))
+                (catch #t (lambda () (select-object! net)) (lambda _ #f)))
               nets)
     (when (and page (pair? nets))
       (catch #t
@@ -114,7 +117,12 @@
                            (window->pointer (current-window)))))
             (unless (null-pointer? *canvas)
               (schematic_canvas_zoom_object *canvas (object->pointer (car nets))))))
-        (lambda _ #f)))))
+        (lambda _ #f))
+      ;; Immediately deselect so the cross-probed net cannot be
+      ;; accidentally deleted, moved, or copied by the user.
+      (for-each (lambda (net)
+                  (catch #t (lambda () (deselect-object! net)) (lambda _ #f)))
+                nets))))
 
 (define (pqwave-probe-part ref)
   (let* ((page (active-page))
@@ -139,7 +147,9 @@
 ;; ---- Back-Annotation Handlers ----
 
 (define (pqwave-annotate-dc cmd)
-  (let* ((parts (string-split cmd #\space))
+  ;; Format: $ANNOTATE:DC|netname|voltage  (pipe-delimited to allow
+  ;; net names containing spaces).
+  (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
          (voltage (if (> (length parts) 2) (list-ref parts 2) "0.0")))
     (let ((page (active-page)))
@@ -201,60 +211,20 @@
            (let ((netname (find (lambda (a) (string=? "netname" (attrib-name a)))
                                 (object-attribs obj))))
              (when netname
-               (catch #t
-                 (lambda ()
-                   (write-line (string-append "$SELECTED:net "
-                                              (attrib-value netname))
-                               pqwave-client)
-                   (force-output pqwave-client))
-                 (lambda _ #f)))))
+               ;; Strip any [DC:...] suffix left by back-annotation.
+               (let* ((raw-val (attrib-value netname))
+                      (bracket-idx (string-index raw-val #\[))
+                      (clean-name (if bracket-idx
+                                      (string-trim-right
+                                       (substring raw-val 0 bracket-idx))
+                                      raw-val)))
+                 (catch #t
+                   (lambda ()
+                     (write-line (string-append "$SELECTED:net " clean-name)
+                                 pqwave-client)
+                     (force-output pqwave-client))
+                   (lambda _ #f))))))
          objs)))))
-
-;; ---- In-Schematic Menus ----
-
-(define-action-public (&spice-netlist #:label "SPICE" #:icon "gtk-execute")
-  (let* ((page (active-page))
-         (filename (if page (page-filename page) #f)))
-    (when filename
-      (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
-             (base (substring filename 0 idx))
-             (cir-file (string-append base ".cir")))
-        (catch #t
-          (lambda ()
-            (system* "lepton-netlist" "-g" "spice-sdb" "-o" cir-file filename)
-            (log! 'message (string-append "SPICE netlist written: " cir-file)))
-          (lambda (key . args)
-            (log! 'warning (format #f "SPICE netlist export failed: ~A ~A" key args))))))))
-
-(define-action-public (&sim-ngspice #:label "ngspice" #:icon "gtk-execute")
-  (let* ((page (active-page))
-         (filename (if page (page-filename page) #f)))
-    (when filename
-      (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
-             (base (substring filename 0 idx))
-             (cir-file (string-append base ".cir"))
-             (raw-file (string-append base ".raw")))
-        (system* "lepton-netlist" "-g" "spice-sdb" "-o" cir-file filename)
-        (catch #t
-          (lambda ()
-            (system* "ngspice" "-b" "-r" raw-file cir-file)
-            (log! 'message (string-append "Simulation complete: " raw-file)))
-          (lambda (key . args)
-            (log! 'warning (format #f "Simulation failed: ~A ~A" key args))))))))
-
-(define-action-public (&wave-pqwave #:label "pqwave" #:icon "gtk-execute")
-  (let* ((page (active-page))
-         (filename (if page (page-filename page) #f)))
-    (when filename
-      (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
-             (base (substring filename 0 idx))
-             (raw-file (string-append base ".raw")))
-        (system* "pqwave" raw-file)))))
-
-;; Register menus — gafrc runs before make-main-menu, so these appear on startup
-(add-menu "Netlist" '(("SPICE" &spice-netlist "gtk-execute")))
-(add-menu "_Simulation" '(("ngspice" &sim-ngspice "gtk-execute")))
-(add-menu "_Wave View" '(("pqwave" &wave-pqwave "gtk-execute")))
 
 ;; Start the server
 (pqwave-start-server pqwave-port)
