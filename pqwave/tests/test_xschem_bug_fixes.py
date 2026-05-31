@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Set Qt platform before importing PyQt6
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
-from pqwave.communication import XschemServer, CommandHandler
 from pqwave.ui.main_window import MainWindow
 from pqwave.models.state import ApplicationState
 

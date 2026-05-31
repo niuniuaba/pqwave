@@ -10,7 +10,7 @@ import logging
 import pytest
 from PyQt6.QtCore import QCoreApplication, QTimer
 
-from pqwave.communication import XschemServer, CommandHandler
+from pqwave.bridge.xschem.wave_receiver import WaveReceiver, WaveCommandHandler
 
 # Configure logging for tests
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,8 +28,8 @@ def qapp():
 
 def test_server_start_stop():
     """Test that server can start and stop cleanly."""
-    server = XschemServer(port=2023)
-    handler = CommandHandler()
+    server = WaveReceiver(port=2023)
+    handler = WaveCommandHandler()
     server.command_received.connect(handler.handle_command)
 
     assert server.start(), "Server failed to start"
@@ -41,7 +41,7 @@ def test_server_start_stop():
 
 def test_command_handler_table_set(qapp):
     """Test command_handler processes table_set command."""
-    handler = CommandHandler()
+    handler = WaveCommandHandler()
 
     # Capture signal using a list
     received = []
@@ -70,7 +70,7 @@ def test_command_handler_table_set(qapp):
 
 def test_command_handler_copyvar(qapp):
     """Test command_handler processes copyvar command."""
-    handler = CommandHandler()
+    handler = WaveCommandHandler()
 
     received = []
     def on_copyvar(var_name, color, client_addr, connection_state):
@@ -94,7 +94,7 @@ def test_command_handler_copyvar(qapp):
 
 def test_command_handler_json_open_file(qapp):
     """Test command_handler processes JSON open_file command."""
-    handler = CommandHandler()
+    handler = WaveCommandHandler()
 
     received = []
     def on_open_file(raw_file, client_addr, connection_state):
@@ -117,7 +117,7 @@ def test_command_handler_json_open_file(qapp):
 
 def test_command_handler_invalid_command(qapp):
     """Test command_handler emits invalid_command signal for unknown command."""
-    handler = CommandHandler()
+    handler = WaveCommandHandler()
 
     received = []
     def on_invalid(command_dict, error_message):
@@ -140,8 +140,8 @@ def test_command_handler_invalid_command(qapp):
 
 def test_server_integration_table_set(qapp):
     """Integration test: server receives gaw-style table_set command."""
-    server = XschemServer(port=2024)
-    handler = CommandHandler()
+    server = WaveReceiver(port=2024)
+    handler = WaveCommandHandler()
     server.command_received.connect(handler.handle_command)
 
     received = []
@@ -174,8 +174,8 @@ def test_server_integration_table_set(qapp):
 
 def test_server_integration_copyvar(qapp):
     """Integration test: server receives gaw-style copyvar command."""
-    server = XschemServer(port=2025)
-    handler = CommandHandler()
+    server = WaveReceiver(port=2025)
+    handler = WaveCommandHandler()
     server.command_received.connect(handler.handle_command)
 
     received = []
