@@ -766,6 +766,7 @@ class SessionAPI:
             state._xschem_config = {
                 "auto_simulate": True,
                 "cross_probe_port": 2021,
+                "cross_probe_debounce_ms": 250,
                 "wave_port": 2026,
                 "watch_interval": 1000,
             }

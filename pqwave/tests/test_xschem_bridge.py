@@ -11,9 +11,15 @@ class TestXschemBridgeExport:
         bridge = XschemBridge()
         fake_netlist = "* SPICE netlist\nR1 n1 n2 1k\n.end\n"
 
+        fake_tmpdir = "/tmp/pqwave_xschem_nl_test123"
+
         with patch("shutil.which", return_value="/usr/bin/xschem"), \
+             patch("tempfile.mkdtemp", return_value=fake_tmpdir), \
              patch("subprocess.run") as mock_run, \
              patch("os.path.exists", return_value=True), \
+             patch("os.unlink"), \
+             patch("os.rmdir"), \
+             patch("os.listdir", return_value=[]), \
              patch("builtins.open", MagicMock()) as mock_open:
 
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -28,6 +34,12 @@ class TestXschemBridgeExport:
             mock_run.assert_called_once()
             call_args = mock_run.call_args[0][0]
             assert call_args[0] == "/usr/bin/xschem"
+            # Verify --tcl flag with netlist_dir override
+            assert "--tcl" in call_args
+            tcl_idx = list(call_args).index("--tcl")
+            tcl_cmd = call_args[tcl_idx + 1]
+            assert "set netlist_dir" in tcl_cmd
+            assert fake_tmpdir in tcl_cmd
             assert "-n" in call_args
             assert "-s" in call_args
             assert "-q" in call_args

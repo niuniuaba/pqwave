@@ -30,42 +30,60 @@ class XschemBridge(SchematicBridge):
     # ---- SchematicBridge implementation ----
 
     def export_netlist(self, sch_path: str) -> str:
-        """Export SPICE netlist from a .sch file via xschem CLI."""
+        """Export SPICE netlist from a .sch file via xschem CLI.
+
+        Uses a temporary directory as netlist_dir (set via --tcl) so we
+        always know exactly where the output .spice file lands, regardless
+        of the user's xschemrc netlist_dir configuration.
+        """
         xschem_bin = self._resolve_xschem()
         sch_dir = os.path.dirname(os.path.abspath(sch_path))
         sch_basename = os.path.splitext(os.path.basename(sch_path))[0]
 
-        result = subprocess.run(
-            [xschem_bin, "-n", "-s", "-q", "--quit",
-             "--netlist_type", "spice", sch_path],
-            capture_output=True, text=True, timeout=30,
-            cwd=sch_dir,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"xschem failed with code {result.returncode}: {result.stderr}"
+        # Create a temp dir for netlist output so we control the output path.
+        # This avoids fragility from guessing ~/.xschem/simulations/ or
+        # schematic-relative paths — xschemrc may override netlist_dir.
+        temp_netlist_dir = tempfile.mkdtemp(prefix="pqwave_xschem_nl_")
+        try:
+            # --tcl runs before file load and netlist, overriding netlist_dir
+            result = subprocess.run(
+                [xschem_bin, "--tcl",
+                 f"set netlist_dir {temp_netlist_dir}",
+                 "-n", "-s", "-q", "--quit",
+                 "--netlist_type", "spice", sch_path],
+                capture_output=True, text=True, timeout=30,
+                cwd=sch_dir,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"xschem failed with code {result.returncode}: {result.stderr}"
+                )
 
-        # xschem writes to netlist_dir/<basename>.spice
-        netlist_dir = os.path.join(os.path.expanduser("~"), ".xschem", "simulations")
-        spice_path = os.path.join(netlist_dir, f"{sch_basename}.spice")
-        if os.path.exists(spice_path):
-            with open(spice_path, "r") as f:
-                return f.read()
-        # Fallback: try same dir as schematic
-        alt_path = os.path.join(sch_dir, "simulation", f"{sch_basename}.spice")
-        if os.path.exists(alt_path):
-            with open(alt_path, "r") as f:
-                return f.read()
-        # Last fallback: ngspice netlist name
-        alt_path2 = os.path.join(sch_dir, f"{sch_basename}.spice")
-        if os.path.exists(alt_path2):
-            with open(alt_path2, "r") as f:
-                return f.read()
-        raise RuntimeError(
-            f"xschem ran but no .spice file found. "
-            f"Tried: {spice_path}, {alt_path}, {alt_path2}"
-        )
+            spice_path = os.path.join(temp_netlist_dir, f"{sch_basename}.spice")
+            if os.path.exists(spice_path):
+                with open(spice_path, "r") as f:
+                    netlist = f.read()
+                # Clean up temp files on success path
+                try:
+                    os.unlink(spice_path)
+                    os.rmdir(temp_netlist_dir)
+                except OSError:
+                    pass
+                return netlist
+            raise RuntimeError(
+                f"xschem ran but no .spice file found at {spice_path}. "
+                f"stderr: {result.stderr}"
+            )
+        finally:
+            # Ensure temp dir is cleaned up on error paths too
+            try:
+                netlist_dir_path = temp_netlist_dir
+                if os.path.exists(netlist_dir_path):
+                    for f in os.listdir(netlist_dir_path):
+                        os.unlink(os.path.join(netlist_dir_path, f))
+                    os.rmdir(netlist_dir_path)
+            except OSError:
+                pass
 
     def get_netlist_fixes(self) -> list[NetlistFix]:
         """Xschem SPICE output is clean — no fixes needed."""
@@ -88,6 +106,7 @@ class XschemBridge(SchematicBridge):
             return None
 
     def is_tool_running(self) -> bool:
+        # Try process-based detection first (pgrep / pidof).
         for cmd in (["pgrep", "-x", "xschem"], ["pidof", "xschem"]):
             try:
                 result = subprocess.run(
@@ -97,7 +116,21 @@ class XschemBridge(SchematicBridge):
                     return True
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 continue
-        return False
+        # Fallback: check if the cross-probe TCP port is accepting connections.
+        # This also works in containers / restricted shells where pgrep/pidof
+        # are unavailable.
+        import socket as _socket
+        state = ApplicationState()
+        cp_config = getattr(state, "_xschem_config", {})
+        port = cp_config.get("cross_probe_port", 2021)
+        try:
+            sock = _socket.create_connection(
+                ("localhost", port), timeout=0.5
+            )
+            sock.close()
+            return True
+        except (OSError, _socket.timeout):
+            return False
 
     def get_watch_extensions(self) -> list[str]:
         return [".sch"]

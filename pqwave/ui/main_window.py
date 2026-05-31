@@ -193,10 +193,15 @@ class MainWindow(QMainWindow):
         self._xschem_connect_failed: bool = False
         self._xschem_last_path = ""
 
-        # Xschem cursor cross-probe timer (debounce net highlight in schematic)
+        # Xschem cursor cross-probe timer (debounce net highlight in schematic).
+        # Interval is read from xschem_config; defaults to 250 ms.
+        from pqwave.models.state import ApplicationState
+        _xs_cfg = getattr(ApplicationState(), "_xschem_config", {})
+        _xs_debounce = _xs_cfg.get("cross_probe_debounce_ms", 250)
+
         self._xschem_cp_timer = QTimer()
         self._xschem_cp_timer.setSingleShot(True)
-        self._xschem_cp_timer.setInterval(250)
+        self._xschem_cp_timer.setInterval(_xs_debounce)
         self._xschem_cp_timer.timeout.connect(self._xschem_cp_debounced)
         self._xschem_cp_net = None
 
