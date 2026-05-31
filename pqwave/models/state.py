@@ -330,6 +330,7 @@ class ApplicationState:
             "kicad_cli": "",
             "lepton_netlist": "",
             "ngspice": "",
+            "xschem": "",
         }
 
         # Monte Carlo run collection (None when not in MC mode)

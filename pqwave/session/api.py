@@ -689,6 +689,97 @@ class SessionAPI:
         state._lepton_config[key] = value
         return {"status": "ok"}
 
+    # ---- Xschem bridge methods ----
+
+    def xschem_watch(self, path: str) -> dict:
+        """Start watching a .sch file for changes."""
+        path = os.path.abspath(path)
+        if self._on_mutation:
+            self._on_mutation("xschem_watch", path=path)
+            return {"status": "ok", "path": path}
+        self._xschem_watched_path = path
+        return {"status": "ok", "path": path}
+
+    def xschem_simulate(self, sch_path: str | None = None) -> dict:
+        """Run export -> post-process -> ngspice pipeline."""
+        path = sch_path or getattr(self, "_xschem_watched_path", None)
+        if not path:
+            raise ValueError("No .sch file specified or watched")
+        if self._on_mutation:
+            self._on_mutation("xschem_simulate", path=path)
+            return {"status": "ok", "triggered": True}
+        from pqwave.bridge.xschem.bridge import XschemBridge
+        bridge = XschemBridge()
+        result = bridge.simulate(path)
+        if result["raw_file"]:
+            self.load(result["raw_file"])
+        return {"status": "ok", "raw_file": result.get("raw_file", "")}
+
+    def xschem_unwatch(self) -> dict:
+        """Stop watching the current .sch file."""
+        if self._on_mutation:
+            self._on_mutation("xschem_unwatch")
+            return {"status": "ok"}
+        self._xschem_watched_path = None
+        return {"status": "ok"}
+
+    def xschem_probe_net(self, name: str) -> dict:
+        """Highlight a net in xschem."""
+        if self._on_mutation:
+            self._on_mutation("xschem_probe_net", name=name)
+            return {"status": "ok"}
+        from pqwave.bridge.xschem.bridge import XschemBridge
+        bridge = XschemBridge()
+        bridge.probe_net(name)
+        return {"status": "ok"}
+
+    def xschem_probe_part(self, ref: str, pin: str | None = None) -> dict:
+        """Highlight a component in xschem."""
+        if self._on_mutation:
+            self._on_mutation("xschem_probe_part", ref=ref, pin=pin)
+            return {"status": "ok"}
+        from pqwave.bridge.xschem.bridge import XschemBridge
+        bridge = XschemBridge()
+        bridge.probe_part(ref, pin)
+        return {"status": "ok"}
+
+    def xschem_clear(self) -> dict:
+        """Clear all xschem highlights."""
+        if self._on_mutation:
+            self._on_mutation("xschem_clear")
+            return {"status": "ok"}
+        from pqwave.bridge.xschem.bridge import XschemBridge
+        bridge = XschemBridge()
+        bridge.clear_probe()
+        return {"status": "ok"}
+
+    def xschem_config(self, key: str, value=None) -> dict:
+        """Get or set xschem bridge configuration.
+
+        Keys: auto_simulate, install_server, cross_probe_port,
+              wave_port, watch_interval, xschem (binary path),
+              ngspice (binary path)
+        """
+        from pqwave.models.state import ApplicationState
+        state = ApplicationState()
+        if not hasattr(state, "_xschem_config"):
+            state._xschem_config = {
+                "auto_simulate": True,
+                "cross_probe_port": 2021,
+                "wave_port": 2026,
+                "watch_interval": 1000,
+            }
+        if value is None:
+            if key == "install_server":
+                return {"status": "error", "message": "install_server is write-only"}
+            return {"status": "ok", key: state._xschem_config.get(key)}
+        if key == "install_server":
+            from pqwave.bridge.xschem.cross_probe import deploy_tcl_server
+            result = deploy_tcl_server()
+            return {"status": "ok", "deploy_result": result}
+        state._xschem_config[key] = value
+        return {"status": "ok", key: value}
+
     def load(self, path: str) -> dict:
         """Load a raw, vcd, or json project file into the session."""
         import os
