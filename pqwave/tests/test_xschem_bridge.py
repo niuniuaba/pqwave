@@ -72,6 +72,77 @@ class TestXschemBridgeExport:
         assert bridge.get_watch_extensions() == [".sch"]
 
 
+class TestXschemBridgeSimulate:
+    def test_simulate_pipeline_success(self):
+        """Verify the full export -> post-process -> ngspice pipeline."""
+        bridge = XschemBridge()
+        fake_netlist = "* test netlist\nR1 n1 n2 1k\n.end\n"
+        fake_raw = "/tmp/pqwave_test.raw"
+
+        with patch("shutil.which", return_value="/usr/bin/xschem"), \
+             patch("tempfile.mkdtemp", return_value="/tmp/pqwave_nl_test"), \
+             patch("subprocess.run") as mock_run, \
+             patch("os.path.exists", return_value=True), \
+             patch("os.unlink"), \
+             patch("os.rmdir"), \
+             patch("os.listdir", return_value=[]), \
+             patch("os.close"), \
+             patch("tempfile.mkstemp", return_value=(3, "/tmp/circuit.cir")), \
+             patch("builtins.open", MagicMock()) as mock_open:
+
+            mock_file = MagicMock()
+            mock_file.read.return_value = fake_netlist
+            mock_open.return_value.__enter__.return_value = mock_file
+            mock_open.return_value.__exit__ = MagicMock()
+
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="", stderr=""),
+                MagicMock(returncode=0, stdout="Simulation OK\n", stderr=""),
+            ]
+
+            result = bridge.simulate("/path/to/circuit.sch", raw_output=fake_raw)
+
+            assert result["returncode"] == 0
+            assert result["raw_file"] == fake_raw
+            assert "Simulation OK" in result["stdout"]
+            assert result["netlist"] == fake_netlist
+            assert result["fix_info"] == []
+            assert mock_run.call_count == 2
+
+    def test_simulate_ngspice_error(self):
+        """Verify ngspice failure is reported, not thrown."""
+        bridge = XschemBridge()
+        fake_netlist = "* bad circuit\n.end\n"
+
+        with patch("shutil.which", return_value="/usr/bin/xschem"), \
+             patch("tempfile.mkdtemp", return_value="/tmp/pqwave_nl_test"), \
+             patch("subprocess.run") as mock_run, \
+             patch("os.path.exists", return_value=True), \
+             patch("os.unlink"), \
+             patch("os.rmdir"), \
+             patch("os.listdir", return_value=[]), \
+             patch("os.close"), \
+             patch("tempfile.mkstemp", return_value=(3, "/tmp/circuit.cir")), \
+             patch("builtins.open", MagicMock()) as mock_open:
+
+            mock_file = MagicMock()
+            mock_file.read.return_value = fake_netlist
+            mock_open.return_value.__enter__.return_value = mock_file
+            mock_open.return_value.__exit__ = MagicMock()
+
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="", stderr=""),
+                MagicMock(returncode=1, stdout="", stderr="convergence failure"),
+            ]
+
+            result = bridge.simulate("/path/to/bad.sch")
+
+            assert result["returncode"] == 1
+            assert result["raw_file"] is None
+            assert "convergence failure" in result["stderr"]
+            assert result["netlist"] == fake_netlist
+
+
 import sys
 
 from PyQt6.QtWidgets import QApplication

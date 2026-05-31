@@ -2400,3 +2400,45 @@ def _cmd_kicad_clear(session: SessionAPI):
              "Get or set KiCad bridge configuration")
 def _cmd_kicad_config(session: SessionAPI, key: str, value=None):
     return session.kicad_config(key, value)
+
+
+@api_command("xschem_watch", "xschem_watch(path)",
+             "Watch a .sch file for changes and auto-simulate on save")
+def _cmd_xschem_watch(session: SessionAPI, path: str):
+    return session.xschem_watch(path)
+
+
+@api_command("xschem_unwatch", "xschem_unwatch()",
+             "Stop watching the xschem schematic file")
+def _cmd_xschem_unwatch(session: SessionAPI):
+    return session.xschem_unwatch()
+
+
+@api_command("xschem_simulate", "xschem_simulate(sch_path=None)",
+             "Manually trigger xschem simulation pipeline")
+def _cmd_xschem_simulate(session: SessionAPI, sch_path: str = None):
+    return session.xschem_simulate(sch_path)
+
+
+@api_command("xschem_probe_net", "xschem_probe_net(name)",
+             "Cross-probe: highlight a net in xschem schematic")
+def _cmd_xschem_probe_net(session: SessionAPI, name: str):
+    return session.xschem_probe_net(name)
+
+
+@api_command("xschem_probe_part", "xschem_probe_part(ref, pin=None)",
+             "Cross-probe: highlight a component or pin in xschem schematic")
+def _cmd_xschem_probe_part(session: SessionAPI, ref: str, pin: str = None):
+    return session.xschem_probe_part(ref, pin)
+
+
+@api_command("xschem_clear", "xschem_clear()",
+             "Clear all cross-probe highlights in xschem")
+def _cmd_xschem_clear(session: SessionAPI):
+    return session.xschem_clear()
+
+
+@api_command("xschem_config", "xschem_config(key, value=None)",
+             "Get or set xschem bridge configuration")
+def _cmd_xschem_config(session: SessionAPI, key: str, value=None):
+    return session.xschem_config(key, value)

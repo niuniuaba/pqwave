@@ -243,6 +243,13 @@ class MenuManager:
         xschem_menu.addAction(unwatch_action)
 
         file_menu.addMenu(xschem_menu)
+
+        # Store refs for dynamic enable/disable by MainWindow
+        self._xschem_watch_action = watch_action
+        self._xschem_rewatch_action = rewatch_action
+        self._xschem_simulate_action = simulate_action
+        self._xschem_unwatch_action = unwatch_action
+        self._xschem_probe_menu = cross_probe_menu
         file_menu.addSeparator()
 
         open_file_action = QAction("Open File...", self.parent)
@@ -877,6 +884,17 @@ class MenuManager:
         """Update Y cursor B menu and toolbar checked state."""
         self.toggle_y_cursor_B_action.setChecked(checked)
         self.toggle_y_cursor_B_toolbar.setChecked(checked)
+
+    def set_xschem_bridge_enabled(self, watching: bool) -> None:
+        """Enable or disable xschem bridge menu actions based on watch state."""
+        if not hasattr(self, "_xschem_simulate_action"):
+            return  # menu not yet created
+        self._xschem_simulate_action.setEnabled(watching)
+        self._xschem_unwatch_action.setEnabled(watching)
+        if hasattr(self, "_xschem_rewatch_action"):
+            self._xschem_rewatch_action.setEnabled(watching)
+        if hasattr(self, "_xschem_probe_menu"):
+            self._xschem_probe_menu.setEnabled(watching)
 
     def update_cursor_status(self, positions: dict, deltas: dict) -> None:
         """Update cursor delta display in status bar.

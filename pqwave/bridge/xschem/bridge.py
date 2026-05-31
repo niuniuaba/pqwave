@@ -26,6 +26,7 @@ class XschemBridge(SchematicBridge):
         super().__init__()
         self._xschem = xschem_path
         self._ngspice = ngspice_path
+        self._cross_probe = None  # lazily instantiated in _ensure_cross_probe()
 
     # ---- SchematicBridge implementation ----
 
@@ -197,6 +198,6 @@ class XschemBridge(SchematicBridge):
 
     def _ensure_cross_probe(self):
         from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
-        if not hasattr(self, "_cross_probe") or self._cross_probe is None:
+        if self._cross_probe is None:
             self._cross_probe = XschemCrossProbeClient()
         return self._cross_probe

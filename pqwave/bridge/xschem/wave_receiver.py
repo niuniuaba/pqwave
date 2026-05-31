@@ -56,6 +56,7 @@ class WaveReceiver(QObject):
         self.server_socket: Optional[socket.socket] = None
         self.server_thread: Optional[threading.Thread] = None
         self.running = False
+        self._lock = threading.Lock()
         self.clients: Dict[Tuple[str, int], socket.socket] = {}
         self.client_threads: Dict[Tuple[str, int], threading.Thread] = {}
 
@@ -106,17 +107,20 @@ class WaveReceiver(QObject):
 
         self.running = False
 
-        # Close all client connections
-        for client_addr, client_sock in list(self.clients.items()):
+        # Close all client connections (snapshot under lock)
+        with self._lock:
+            client_snapshot = list(self.clients.items())
+        for client_addr, client_sock in client_snapshot:
             try:
                 client_sock.close()
                 self.connection_closed.emit(f"{client_addr[0]}:{client_addr[1]}")
             except socket.error:
                 pass
 
-        self.clients.clear()
-        self.client_threads.clear()
-        self.connection_state.clear()
+        with self._lock:
+            self.clients.clear()
+            self.client_threads.clear()
+            self.connection_state.clear()
 
         # Close server socket
         if self.server_socket:
@@ -140,23 +144,22 @@ class WaveReceiver(QObject):
                 client_socket, client_addr = self.server_socket.accept()
                 logger.debug(f"New connection from {client_addr[0]}:{client_addr[1]}")
 
-                # Store client socket
-                self.clients[client_addr] = client_socket
-
-                # Initialize connection state
-                self.connection_state[client_addr] = {
-                    'current_raw_file': None,
-                    'window_id': None
-                }
-
-                # Start client handler thread
+                # Create client handler thread
                 client_thread = threading.Thread(
                     target=self._handle_client,
                     args=(client_socket, client_addr),
                     daemon=True,
                     name=f"WaveClient-{client_addr[0]}:{client_addr[1]}"
                 )
-                self.client_threads[client_addr] = client_thread
+
+                # Store under lock for thread safety with stop()
+                with self._lock:
+                    self.clients[client_addr] = client_socket
+                    self.connection_state[client_addr] = {
+                        'current_raw_file': None,
+                        'window_id': None
+                    }
+                    self.client_threads[client_addr] = client_thread
                 client_thread.start()
 
                 self.connection_opened.emit(f"{client_addr[0]}:{client_addr[1]}")
@@ -227,13 +230,14 @@ class WaveReceiver(QObject):
             except socket.error:
                 pass
 
-            # Remove client from tracking
-            if client_addr in self.clients:
-                del self.clients[client_addr]
-            if client_addr in self.client_threads:
-                del self.client_threads[client_addr]
-            if client_addr in self.connection_state:
-                del self.connection_state[client_addr]
+            # Remove client from tracking (under lock for thread safety)
+            with self._lock:
+                if client_addr in self.clients:
+                    del self.clients[client_addr]
+                if client_addr in self.client_threads:
+                    del self.client_threads[client_addr]
+                if client_addr in self.connection_state:
+                    del self.connection_state[client_addr]
 
             self.connection_closed.emit(client_str)
             logger.debug(f"Client handler for {client_str} exiting")
