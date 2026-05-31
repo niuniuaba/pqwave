@@ -58,3 +58,44 @@ class TestXschemBridgeExport:
     def test_get_watch_extensions_returns_sch(self):
         bridge = XschemBridge()
         assert bridge.get_watch_extensions() == [".sch"]
+
+
+import sys
+
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtTest import QSignalSpy
+from pqwave.bridge.xschem.control_bar import XschemControlBar
+
+# QApplication required for Qt widget/signal infrastructure
+_app = QApplication.instance()
+if _app is None:
+    _app = QApplication(sys.argv)
+
+
+class TestXschemControlBar:
+    def test_initial_state_hidden(self):
+        bar = XschemControlBar()
+        assert bar.isHidden()
+
+    def test_set_status_updates_label(self):
+        bar = XschemControlBar()
+        bar.set_status("watching circuit.sch")
+        assert "circuit.sch" in bar._status_label.text()
+
+    def test_set_simulating_disables_button(self):
+        bar = XschemControlBar()
+        bar.set_simulating(True)
+        assert not bar._simulate_btn.isEnabled()
+        assert "simulating" in bar._status_label.text().lower()
+
+    def test_simulate_clicked_emits_signal(self):
+        bar = XschemControlBar()
+        spy = QSignalSpy(bar.simulate_clicked)
+        bar._simulate_btn.click()
+        assert len(spy) == 1
+
+    def test_unwatch_clicked_emits_signal(self):
+        bar = XschemControlBar()
+        spy = QSignalSpy(bar.unwatch_clicked)
+        bar._unwatch_btn.click()
+        assert len(spy) == 1
