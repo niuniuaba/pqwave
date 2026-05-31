@@ -1449,13 +1449,27 @@ class MainWindow(QMainWindow):
         if self._xschem_cross_probe is None:
             from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
             self._xschem_cross_probe = XschemCrossProbeClient()
-            self._xschem_cross_probe.connect_to_server()
+        if not self._xschem_cross_probe.is_connected():
+            ok = self._xschem_cross_probe.connect_to_server()
+            if not ok:
+                self._xschem_connect_failed = True
+                self.chat_panel.append_output(
+                    "[xschem] Cross-probe: xschem not running or "
+                    "pqwave server not active. Start xschem and try again.\n"
+                )
+                return
         self._xschem_connect_failed = False
         self._xschem_probe_active_trace()
 
     def _on_xschem_clear_probe(self):
-        """Cross-probe menu: Clear Highlight."""
-        if self._xschem_cross_probe and self._xschem_cross_probe.is_connected():
+        """Cross-probe menu: Clear Highlight.
+        Attempt connection if not already connected (same as probe)."""
+        if self._xschem_cross_probe is None:
+            from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
+            self._xschem_cross_probe = XschemCrossProbeClient()
+        if not self._xschem_cross_probe.is_connected():
+            self._xschem_cross_probe.connect_to_server()
+        if self._xschem_cross_probe.is_connected():
             self._xschem_cross_probe.clear()
 
     def _xschem_probe_active_trace(self, force_reconnect: bool = False):
@@ -4436,8 +4450,11 @@ class MainWindow(QMainWindow):
         """Handle mouse movement in plot."""
         self.menu_manager.update_coordinate_label(x, y1, y2)
 
-        # Trigger xschem back-annotation from cross-hair position when ON
-        if self.plot_widget.cross_hair_visible:
+        # Trigger xschem back-annotation from cross-hair position when ON.
+        # Only fire when the xschem bridge is active to avoid pointless
+        # TCP connect() attempts to port 2021 when no xschem is running.
+        if (self.plot_widget.cross_hair_visible
+                and self._xschem_cross_probe is not None):
             self._xschem_ba_x = x  # x is already in linear space
             self._xschem_ba_timer.start()
 

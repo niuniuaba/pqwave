@@ -356,8 +356,9 @@ class WaveReceiver(QObject):
             logger.error(f"Invalid client address format: {client_addr_str}")
             return False
 
-        # Find client socket
-        client_socket = self.clients.get(client_addr)
+        # Find client socket (under lock for thread safety)
+        with self._lock:
+            client_socket = self.clients.get(client_addr)
         if not client_socket:
             logger.warning(f"Client not found: {client_addr_str}")
             return False

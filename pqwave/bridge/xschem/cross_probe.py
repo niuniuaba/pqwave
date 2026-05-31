@@ -15,8 +15,14 @@ from PyQt6.QtCore import QObject, pyqtSignal
 # ---- Path helpers ----
 
 def _get_package_tcl_path() -> str:
-    """Return the path to pqwave-server.tcl inside the pqwave package."""
-    pkg_dir = Path(__file__).resolve().parents[3]  # pqwave/bridge/xschem → pqwave/
+    """Return the path to pqwave-server.tcl bundled inside the pqwave package.
+
+    Resolves from pqwave/bridge/xschem/cross_probe.py:
+      parents[2] → pqwave/ package root (2 levels up: xschem/ → bridge/ → pqwave/)
+    The Tcl script lives at pqwave/share/pqwave-server.tcl so it is
+    included in pip-installed distributions alongside the Python source.
+    """
+    pkg_dir = Path(__file__).resolve().parents[2]
     return str(pkg_dir / "share" / "pqwave-server.tcl")
 
 

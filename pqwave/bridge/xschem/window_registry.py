@@ -42,6 +42,11 @@ class WindowRegistry(QObject):
             cls._instance._initialize()
         return cls._instance
 
+    @classmethod
+    def reset(cls):
+        """Reset the singleton instance (for test isolation)."""
+        cls._instance = None
+
     def _initialize(self):
         """Initialize registry data structures."""
         # window_id -> weak reference to MainWindow
