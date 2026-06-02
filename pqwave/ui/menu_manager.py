@@ -623,6 +623,12 @@ class MenuManager:
         )
         help_menu.addAction(lepton_guide_action)
 
+        xschem_guide_action = QAction("Xschem User Guide", self.parent)
+        xschem_guide_action.triggered.connect(
+            self.callbacks.get("show_xschem_guide", lambda: None)
+        )
+        help_menu.addAction(xschem_guide_action)
+
         self.menubar.addMenu(help_menu)
 
     @staticmethod

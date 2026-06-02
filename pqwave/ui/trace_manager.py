@@ -389,6 +389,7 @@ class TraceManager(QtCore.QObject):
                     # Get color
                     if custom_color is not None:
                         color = custom_color
+                        self.color_manager.mark_color_used(color)
                         self.logger.debug(f"  Using custom color: {color}")
                     else:
                         color = self.color_manager.get_next_color()
@@ -529,7 +530,11 @@ class TraceManager(QtCore.QObject):
                 error_out.append(msg)
             return None
 
-        color = custom_color or self.color_manager.get_next_color()
+        if custom_color is not None:
+            color = custom_color
+            self.color_manager.mark_color_used(color)
+        else:
+            color = self.color_manager.get_next_color()
         trace = Trace(
             name=stripped, expression=stripped,
             x_data=trace_x_data, y_data=y_data,

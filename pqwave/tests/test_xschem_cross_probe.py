@@ -16,7 +16,7 @@ from pqwave.bridge.xschem.cross_probe import (
 class TestDeployment:
     def test_get_config_dir(self):
         with patch.dict(os.environ, {"HOME": "/home/testuser"}):
-            assert _get_xschem_config_dir() == "/home/testuser/.config/xschem"
+            assert _get_xschem_config_dir() == "/home/testuser/.xschem"
 
     def test_get_xschemrc_path(self):
         with patch.dict(os.environ, {"HOME": "/home/testuser"}):
@@ -27,6 +27,7 @@ class TestDeployment:
             result = check_tcl_server()
             assert result["installed"] is False
             assert result["needs_deploy"] is True
+            assert len(result["missing"]) == 2  # both scripts
 
     def test_check_tcl_server_installed_no_xschemrc_line(self):
         with patch("os.path.exists") as mock_exists, \
@@ -38,18 +39,22 @@ class TestDeployment:
 
             result = check_tcl_server()
             assert result["installed"] is False
-            assert result["server_script_ok"] is True
-            assert result["xschemrc_configured"] is False
+            assert len(result["missing"]) == 2  # files exist but rc not configured
 
     def test_check_tcl_server_fully_installed(self):
         with patch("os.path.exists", return_value=True), \
              patch("builtins.open", MagicMock()) as mock_open:
             mock_file = MagicMock()
-            mock_file.read.return_value = "lappend tcl_files ~/.config/xschem/pqwave-server.tcl\n"
+            mock_file.read.return_value = (
+                "lappend tcl_files ~/.xschem/pqwave-server.tcl\n"
+                "set user_startup_commands"
+                " { source $env(HOME)/.xschem/pqwave_override.tcl }\n"
+            )
             mock_open.return_value.__enter__.return_value = mock_file
 
             result = check_tcl_server()
             assert result["installed"] is True
+            assert len(result["missing"]) == 0
 
 
 class TestCrossProbeClient:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pqwave"
-version = "0.3.0"
+version = "0.3.2"
 authors = [
     {name = "niuniuaba", email = "liuyongjin@petalmail.com"}
 ]
@@ -60,3 +60,7 @@ pqwave = "pqwave.main:main"
 where = ["."]
 include = ["pqwave*"]
 exclude = ["tests*", "archieves*"]
+
+[tool.setuptools.package-data]
+"pqwave.bridge.xschem" = ["*.tcl"]
+"pqwave.bridge.lepton" = ["*.scm"]

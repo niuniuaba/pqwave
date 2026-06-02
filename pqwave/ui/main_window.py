@@ -191,6 +191,7 @@ class MainWindow(QMainWindow):
         self._xschem_watched_path = None
         self._xschem_simulating = False
         self._xschem_connect_failed: bool = False
+        self._xschem_connect_failed_at: float = 0.0
         self._xschem_last_path = ""
 
         # Xschem cursor cross-probe timer (debounce net highlight in schematic).
@@ -1315,9 +1316,9 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Install Xschem Bridge Files",
-                "The pqwave companion Tcl script needs to be installed for "
-                "cross-probe to work. Install now?\n\n"
-                f"Script: {check['target_path']}\n"
+                "The pqwave companion Tcl scripts need to be installed for "
+                "cross-probe and Alt+G to work. Install now?\n\n"
+                f"Missing: {', '.join(check['missing'])}\n"
                 f"Config: {check['xschemrc_path']}\n\n"
                 "Restart xschem after installation.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1325,8 +1326,8 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.Yes:
                 deploy_tcl_server()
                 self.chat_panel.append_output(
-                    "[xschem] Companion Tcl script deployed. "
-                    "Restart xschem to enable cross-probe.\n"
+                    "[xschem] Companion Tcl scripts deployed. "
+                    "Restart xschem to enable cross-probe and Alt+G.\n"
                 )
 
         if self._xschem_cross_probe:
@@ -1446,63 +1447,104 @@ class MainWindow(QMainWindow):
 
     def _on_xschem_probe_net_selected(self):
         """Cross-probe menu: Probe Selected Net."""
-        if self._xschem_cross_probe is None:
-            from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
-            self._xschem_cross_probe = XschemCrossProbeClient()
-        if not self._xschem_cross_probe.is_connected():
-            ok = self._xschem_cross_probe.connect_to_server()
-            if not ok:
-                self._xschem_connect_failed = True
-                self.chat_panel.append_output(
-                    "[xschem] Cross-probe: xschem not running or "
-                    "pqwave server not active. Start xschem and try again.\n"
-                )
-                return
-        self._xschem_connect_failed = False
+        if not self._xschem_ensure_client(force_reconnect=True):
+            self.chat_panel.append_output(
+                "[xschem] Cross-probe: xschem not running or "
+                "pqwave server not active. Start xschem and try again.\n"
+            )
+            return
         self._xschem_probe_active_trace()
 
     def _on_xschem_clear_probe(self):
-        """Cross-probe menu: Clear Highlight.
-        Attempt connection if not already connected (same as probe)."""
+        """Cross-probe menu: Clear Highlight."""
+        if not self._xschem_ensure_client(force_reconnect=True):
+            return
+        self._xschem_cross_probe.clear()
+
+    def _xschem_ensure_client(self, force_reconnect: bool = False) -> bool:
+        """Ensure the cross-probe client exists and is connected.
+
+        If *force_reconnect* is True, disconnects any existing connection
+        first so a fresh TCP connection is established.
+        """
         if self._xschem_cross_probe is None:
             from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
             self._xschem_cross_probe = XschemCrossProbeClient()
-        if not self._xschem_cross_probe.is_connected():
-            self._xschem_cross_probe.connect_to_server()
-        if self._xschem_cross_probe.is_connected():
-            self._xschem_cross_probe.clear()
-
-    def _xschem_probe_active_trace(self, force_reconnect: bool = False):
-        """Cross-probe the selected trace's net in xschem."""
-        if not self._xschem_cross_probe:
-            return
-        if self._xschem_connect_failed and not force_reconnect:
-            return
+        if force_reconnect and self._xschem_cross_probe.is_connected():
+            self._xschem_cross_probe.disconnect()
         if not self._xschem_cross_probe.is_connected():
             if not self._xschem_cross_probe.connect_to_server():
                 self._xschem_connect_failed = True
-                return
+                self._xschem_connect_failed_at = time.monotonic()
+                return False
         self._xschem_connect_failed = False
+        self._xschem_connect_failed_at = 0.0
+        return True
+
+    def _xschem_should_retry(self) -> bool:
+        """Return True if enough time has passed since the last connect
+        failure for an auto-recovery retry (30 s cooldown)."""
+        if not self._xschem_connect_failed:
+            return True
+        if time.monotonic() - self._xschem_connect_failed_at > 30.0:
+            self._xschem_connect_failed = False
+            return True
+        return False
+
+    def _xschem_probe_trace(self, trace, force_reconnect: bool = False):
+        """Cross-probe a specific trace's net in xschem."""
+        if self._xschem_connect_failed and not force_reconnect:
+            logger.debug("xschem probe: skipped (connect failed)")
+            return
+        if not self._xschem_ensure_client(force_reconnect=force_reconnect):
+            logger.debug("xschem probe: client not available")
+            return
+        net = self._extract_net_name(trace.expression)
+        logger.debug(f"xschem probe: $NET: \"{net}\"")
+        self._xschem_cross_probe.probe_net(net)
+
+    def _xschem_probe_active_trace(self, force_reconnect: bool = False):
+        """Cross-probe the selected or visible trace's net in xschem.
+
+        Prefers checkbox-selected traces, then falls back to the first
+        visible trace in the active panel.  For right-click context-menu
+        probes, use ``_xschem_probe_trace()`` instead (it receives the
+        specific trace object directly).
+        """
+        if self._xschem_connect_failed and not force_reconnect:
+            return
+        if not self._xschem_ensure_client(force_reconnect=force_reconnect):
+            return
         panel = self.panel_grid.get_active_panel()
         if panel is None:
             return
+        # Prefer checkbox-selected trace, fall back to any visible trace.
+        trace = None
         selected = panel.trace_manager.get_selected_traces()
-        if not selected:
+        if selected:
+            trace = selected[0][1]
+        else:
+            visible = [t for t in panel.trace_manager.state_traces if t.visible]
+            if visible:
+                trace = visible[0]
+        if trace is None:
             return
-        _, trace = selected[0]
         net = self._extract_net_name(trace.expression)
         self._xschem_cross_probe.probe_net(net)
 
     def _xschem_cp_debounced(self):
-        """Send cross-probe command after debounce.
-
-        When _xschem_cp_net is set (from _trigger_xschem_cross_probe),
-        probes that specific net. Otherwise acts as a cursor-driven
-        cross-probe, looking up the selected trace's net.
-        """
-        if self._xschem_cp_net and self._xschem_cross_probe and self._xschem_cross_probe.is_connected():
-            self._xschem_cross_probe.probe_net(self._xschem_cp_net)
-            self._xschem_cp_net = None
+        """Send cross-probe command after debounce."""
+        if not self._xschem_should_retry():
+            self._xschem_cp_net = None  # stale — clear it
+            return
+        net_to_probe = self._xschem_cp_net
+        self._xschem_cp_net = None
+        if net_to_probe is not None:
+            # Specific net was queued — ensure client is connected,
+            # then probe it (don't fall through to active-trace).
+            if self._xschem_ensure_client():
+                logger.debug(f"xschem cp: $NET: \"{net_to_probe}\"")
+                self._xschem_cross_probe.probe_net(net_to_probe)
         else:
             self._xschem_probe_active_trace()
 
@@ -1862,6 +1904,7 @@ class MainWindow(QMainWindow):
             'show_mc_guide': self._show_mc_guide,
             'show_kicad_guide': self._show_kicad_guide,
             'show_lepton_guide': self._show_lepton_guide,
+            'show_xschem_guide': self._show_xschem_guide,
             'split_horizontal': self._split_panel_horizontal,
             'split_vertical': self._split_panel_vertical,
             'close_panel': self._close_active_panel,
@@ -2307,9 +2350,41 @@ class MainWindow(QMainWindow):
             return
         # Update client-window mapping
         self.state.window_registry.set_window_for_client(client_addr, self.window_id)
-        # Load the raw file in this window
-        logger.info(f"Loading raw file: {raw_file}")
-        self._load_raw_file(raw_file)
+
+        # Resolve bare basenames (xschem sends just "bridge.raw") against
+        # the watched schematic's netlist directory.
+        resolved = self._resolve_raw_path(raw_file)
+        logger.info(f"Loading raw file: {resolved}")
+        self._load_raw_file(resolved)
+
+    def _resolve_raw_path(self, raw_file: str) -> str:
+        """Resolve a bare .raw basename to an absolute path.
+
+        Current pqwave_override.tcl sends the full path, so resolution is
+        usually unnecessary.  Kept as a fallback for older TCL overrides
+        that send only the basename, or when no schematic is being watched.
+        """
+        if os.path.sep in raw_file:
+            return raw_file
+
+        # Search in order matching xschem's netlist_dir precedence.
+        search_dirs = []
+        sch_path = getattr(self, "_xschem_last_path", None)
+        if sch_path:
+            from pqwave.bridge.xschem.bridge import XschemBridge
+            netlist_dir = XschemBridge._resolve_netlist_dir(
+                os.path.dirname(os.path.abspath(sch_path)))
+            search_dirs.append(netlist_dir)
+            search_dirs.append(os.path.dirname(os.path.abspath(sch_path)))
+        if self.raw_file is not None:
+            raw_dir = os.path.dirname(os.path.abspath(self.raw_file.filename))
+            search_dirs.append(raw_dir)
+
+        for d in search_dirs:
+            candidate = os.path.join(d, raw_file)
+            if os.path.exists(candidate):
+                return candidate
+        return raw_file
 
     def _handle_xschem_copyvar(self, var_name: str, color: str, client_addr: str, connection_state: dict):
         """Handle xschem copyvar command."""
@@ -2372,15 +2447,16 @@ class MainWindow(QMainWindow):
             logger.debug(f"Ignoring open_file, not for this window")
             return
         self.state.window_registry.set_window_for_client(client_addr, self.window_id)
+        resolved = self._resolve_raw_path(raw_file)
         try:
-            self._load_raw_file(raw_file)
+            self._load_raw_file(resolved)
             self._send_xschem_response(
                 client_addr, connection_state,
                 status="success",
-                data={"loaded": True, "raw_file": raw_file, "window_id": self.window_id}
+                data={"loaded": True, "raw_file": resolved, "window_id": self.window_id}
             )
         except Exception as e:
-            logger.error(f"Failed to load raw file {raw_file}: {e}")
+            logger.error(f"Failed to load raw file {resolved}: {e}")
             self._send_xschem_response(
                 client_addr, connection_state,
                 status="error",
@@ -3949,19 +4025,19 @@ class MainWindow(QMainWindow):
         if self._lepton_cross_probe is not None:
             menu.addSeparator()
             a = menu.addAction("Probe in Lepton-EDA")
-            a.triggered.connect(lambda: self._lepton_probe_active_trace(force_reconnect=True))
+            a.triggered.connect(lambda _: self._lepton_probe_active_trace(force_reconnect=True))
 
-        # Xschem cross-probe (only when bridge is active)
-        if self._xschem_cross_probe is not None:
-            menu.addSeparator()
-            a = menu.addAction("Probe in Xschem")
-            a.triggered.connect(lambda: self._xschem_probe_active_trace(force_reconnect=True))
+        # Xschem cross-probe (lazy-creates client on first use)
+        menu.addSeparator()
+        a = menu.addAction("Probe in Xschem")
+        a.triggered.connect(
+            lambda _, _trace=trace: self._xschem_probe_trace(_trace, force_reconnect=True))
 
         # Common action for all trace types
         menu.addSeparator()
         a = menu.addAction("Remove Trace")
         remove_expr = trace.expression if trace else trace_name
-        a.triggered.connect(lambda: tm.remove_trace_by_variable_name(remove_expr))
+        a.triggered.connect(lambda _: tm.remove_trace_by_variable_name(remove_expr))
 
         self._trace_menu_active = True
         menu.exec(QCursor.pos())
@@ -4451,10 +4527,9 @@ class MainWindow(QMainWindow):
         self.menu_manager.update_coordinate_label(x, y1, y2)
 
         # Trigger xschem back-annotation from cross-hair position when ON.
-        # Only fire when the xschem bridge is active to avoid pointless
-        # TCP connect() attempts to port 2021 when no xschem is running.
-        if (self.plot_widget.cross_hair_visible
-                and self._xschem_cross_probe is not None):
+        # Skip if the last connect attempt failed — prevents TCP connection
+        # storms when xschem is not running.
+        if self.plot_widget.cross_hair_visible and self._xschem_should_retry():
             self._xschem_ba_x = x  # x is already in linear space
             self._xschem_ba_timer.start()
 
@@ -4477,7 +4552,8 @@ class MainWindow(QMainWindow):
 
         # Also trigger xschem schematic back-annotation
         self._xschem_ba_x = x_linear
-        self._xschem_ba_timer.start()
+        if self._xschem_should_retry():
+            self._xschem_ba_timer.start()
 
         # KiCad cross-probe: highlight net corresponding to cursor position
         self._kicad_ba_timer.start()
@@ -4486,8 +4562,8 @@ class MainWindow(QMainWindow):
         if self._lepton_cross_probe is not None:
             self._lepton_ba_timer.start()
 
-        # Xschem cross-probe (only when bridge is active)
-        if self._xschem_cross_probe is not None:
+        # Xschem cross-probe — skip if last connect failed (auto-retry after 30s).
+        if self._xschem_should_retry():
             self._xschem_cp_timer.start()
 
         self._update_cursor_status()
@@ -4503,9 +4579,10 @@ class MainWindow(QMainWindow):
         if self.plot_widget.get_axis_log_mode('X'):
             x_linear = self.plot_widget._log_to_linear(value)
 
-        # Store and start debounce timer for xschem back-annotation
+        # Store and start debounce timer for xschem back-annotation.
         self._xschem_ba_x = x_linear
-        self._xschem_ba_timer.start()
+        if self._xschem_should_retry():
+            self._xschem_ba_timer.start()
 
         self._sync_x_cursor_to_same_domain_panels('XB', value)
 
@@ -4588,24 +4665,18 @@ class MainWindow(QMainWindow):
             self._xschem_ba_x = None
 
     def _send_xschem_backannotation(self, x_value: float):
-        """Send cursor X position to xschem via TCP for schematic back-annotation.
+        """Send cursor X position to xschem for value annotation.
 
-        Opens a short-lived TCP connection to xschem's built-in command server
-        (xschem_listen_port) and sends:
-
-            xschem set annotate_cursor_x <value>
-
-        The connection is closed immediately after sending. Failures are silently
-        logged (xschem not running, port not open, etc.).
+        Uses the persistent cross-probe channel (port 2021).  The
+        companion Tcl script calls ``xschem set annotate_cursor_x``
+        so xschem can display the trace value at the cursor position
+        on its built-in graph.
         """
-        try:
-            sock = socket.create_connection(('localhost', self._xschem_ba_port), timeout=0.5)
-            msg = f"xschem set annotate_cursor_x {x_value:.10g}\n"
-            sock.sendall(msg.encode('utf-8'))
-            sock.close()
-            logger.debug(f"xschem back-annotation sent: x={x_value:.10g}")
-        except (socket.error, ConnectionRefusedError, OSError) as e:
-            logger.debug(f"xschem back-annotation connection failed: {e}")
+        if not self._xschem_ensure_client():
+            return
+        self._xschem_cross_probe.send_command(
+            f'$ANNOTATE:X {x_value:.10g}'
+        )
 
     def _send_data_point_update(self, x_value: float):
         """
@@ -4694,7 +4765,10 @@ class MainWindow(QMainWindow):
             # Find client socket
             client_socket = wave_receiver.clients.get(client_addr_tuple)
             if not client_socket:
-                logger.warning(f"Client socket not found: {client_addr}")
+                # xschem Alt+G connections are short-lived — the client
+                # disconnects after sending table_set + copyvar.  Clean
+                # up the stale registry entry so we don't keep warning.
+                registry.remove_client_association(client_addr)
                 continue
 
             # Send JSON command with "json " prefix
@@ -5525,6 +5599,53 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Lepton-EDA User Guide")
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.resize(780, 620)
+
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setHtml(html)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.show()
+
+    def _show_xschem_guide(self) -> None:
+        """Show the Xschem Bridge user guide (non-modal)."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+        )
+        from PyQt6.QtCore import Qt
+
+        from pathlib import Path
+        guide_path = Path(__file__).parent.parent.parent / "docs" / "xschem" / "guide.html"
+        if not guide_path.exists():
+            QMessageBox.warning(
+                self, "Not Found",
+                f"Xschem guide not found at:\n{guide_path}",
+            )
+            return
+
+        try:
+            html = guide_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(
+                self, "Error",
+                f"Failed to read Xschem guide:\n{e}",
+            )
+            return
+
+        p = self.palette()
+        html = html.replace("__TEXT__", p.color(p.ColorRole.Text).name())
+        html = html.replace("__BASE__", p.color(p.ColorRole.Base).name())
+        html = html.replace("__LINK__", p.color(p.ColorRole.Link).name())
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Xschem User Guide")
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setModal(False)
         dialog.resize(780, 620)

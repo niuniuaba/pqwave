@@ -1,40 +1,35 @@
 """TCP client for pqwave-server.tcl running inside xschem.
 
-Auto-deploys the companion Tcl script on first use. Does NOT modify
+Auto-deploys companion Tcl scripts on first use.  Does NOT modify
 xschem C source code — purely additive Tcl via xschemrc.
 """
 
 import os
+import re
 import shutil
 import socket
-import threading
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
 
 
 # ---- Path helpers ----
 
-def _get_package_tcl_path() -> str:
-    """Return the path to pqwave-server.tcl bundled inside the pqwave package.
+_THIS_DIR = Path(__file__).parent  # non-resolving: matches pip-installed layout
 
-    Resolves from pqwave/bridge/xschem/cross_probe.py:
-      parents[2] → pqwave/ package root (2 levels up: xschem/ → bridge/ → pqwave/)
-    The Tcl script lives at pqwave/share/pqwave-server.tcl so it is
-    included in pip-installed distributions alongside the Python source.
-    """
-    pkg_dir = Path(__file__).resolve().parents[2]
-    return str(pkg_dir / "share" / "pqwave-server.tcl")
+
+def _get_package_tcl_path(name: str = "pqwave-server.tcl") -> str:
+    """Return the path to a Tcl script alongside this module."""
+    return str(_THIS_DIR / name)
 
 
 def _get_xschem_config_dir() -> str:
-    """Return the xschem user config directory (~/.config/xschem)."""
-    xdg_config = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-    return os.path.join(xdg_config, "xschem")
+    """Return the xschem user config directory (~/.xschem)."""
+    return os.path.join(os.path.expanduser("~"), ".xschem")
 
 
-def _get_tcl_target_path() -> str:
-    """Return the target path for pqwave-server.tcl in user config."""
-    return os.path.join(_get_xschem_config_dir(), "pqwave-server.tcl")
+def _get_tcl_target_path(name: str = "pqwave-server.tcl") -> str:
+    """Return the target path for a Tcl script in user config."""
+    return os.path.join(_get_xschem_config_dir(), name)
 
 
 def _get_xschemrc_path() -> str:
@@ -54,80 +49,111 @@ def _extract_tcl_version(path: str) -> int:
     return 0
 
 
+# ---- Tcl scripts deployed to ~/.xschem/ ----
+
+_TCL_SCRIPTS = [
+    {
+        "name": "pqwave-server.tcl",
+        "description": "cross-probe server",
+        # Match the actual lappend line, not just a substring mention.
+        "xschemrc_re": re.compile(
+            r"^\s*lappend\s+tcl_files\s+.*pqwave-server\.tcl", re.MULTILINE
+        ),
+        "xschemrc_line": "lappend tcl_files ~/.xschem/pqwave-server.tcl\n",
+    },
+    {
+        "name": "pqwave_override.tcl",
+        "description": "Alt+G wave push override",
+        # Match a user_startup_commands or source line referencing this file.
+        "xschemrc_re": re.compile(
+            r"(?:user_startup_commands|source\b).*pqwave_override\.tcl",
+            re.MULTILINE,
+        ),
+        "xschemrc_line": (
+            "set user_startup_commands"
+            ' { source $env(HOME)/.xschem/pqwave_override.tcl }\n'
+        ),
+    },
+]
+
+
 # ---- Check / Deploy ----
 
 def check_tcl_server() -> dict:
-    """Check whether pqwave-server.tcl is installed and configured.
+    """Check whether pqwave Tcl scripts are installed in ~/.xschem/.
 
     Returns dict with keys:
         installed: bool
-        server_script_ok: bool — the .tcl file exists
-        xschemrc_configured: bool — xschemrc has the lappend line
-        needs_deploy: bool — files need deployment
-        target_path: str
-        xschemrc_path: str
+        needs_deploy: bool — files missing or outdated
+        missing: list[str] — names of scripts that need deployment
     """
-    target_path = _get_tcl_target_path()
     xschemrc_path = _get_xschemrc_path()
-    server_script_ok = os.path.exists(target_path)
-    xschemrc_configured = False
-
+    xschemrc_content = ""
     if os.path.exists(xschemrc_path):
         with open(xschemrc_path, "r") as f:
-            content = f.read()
-            xschemrc_configured = "pqwave-server.tcl" in content
+            xschemrc_content = f.read()
 
-    installed = server_script_ok and xschemrc_configured
-    needs_deploy = not installed
+    missing = []
+    for script in _TCL_SCRIPTS:
+        target = _get_tcl_target_path(script["name"])
+        file_ok = os.path.exists(target)
+        rc_ok = bool(script["xschemrc_re"].search(xschemrc_content))
 
-    # Check if deployed script is outdated
-    if server_script_ok:
-        src_ver = _extract_tcl_version(_get_package_tcl_path())
-        installed_ver = _extract_tcl_version(target_path)
+        if not file_ok or not rc_ok:
+            missing.append(script["name"])
+            continue
+
+        # Check version — redeploy if bundled is newer
+        src_ver = _extract_tcl_version(_get_package_tcl_path(script["name"]))
+        installed_ver = _extract_tcl_version(target)
         if installed_ver < src_ver:
-            needs_deploy = True
+            missing.append(script["name"])
 
     return {
-        "installed": installed,
-        "server_script_ok": server_script_ok,
-        "xschemrc_configured": xschemrc_configured,
-        "needs_deploy": needs_deploy,
-        "target_path": target_path,
+        "installed": len(missing) == 0,
+        "needs_deploy": len(missing) > 0,
+        "missing": missing,
         "xschemrc_path": xschemrc_path,
     }
 
 
 def deploy_tcl_server() -> dict:
-    """Deploy pqwave-server.tcl to ~/.config/xschem/ and configure xschemrc.
+    """Deploy Tcl scripts to ~/.xschem/ and configure xschemrc.
+
+    Copies both pqwave-server.tcl and pqwave_override.tcl from
+    pqwave/bridge/xschem/ to ~/.xschem/, then ensures xschemrc
+    has the required load lines.
 
     Returns {"status": "ok"} or {"status": "error", "message": str}.
     """
     try:
         config_dir = _get_xschem_config_dir()
         os.makedirs(config_dir, exist_ok=True)
-
-        # Copy Tcl script
-        src = _get_package_tcl_path()
-        dst = _get_tcl_target_path()
-        shutil.copy2(src, dst)
-
-        # Ensure xschemrc exists and has the load line
         xschemrc = _get_xschemrc_path()
         os.makedirs(os.path.dirname(xschemrc), exist_ok=True)
 
-        load_line = "lappend tcl_files ~/.config/xschem/pqwave-server.tcl\n"
-
+        # Read existing xschemrc content
+        xschemrc_content = ""
         if os.path.exists(xschemrc):
             with open(xschemrc, "r") as f:
-                content = f.read()
-            if "pqwave-server.tcl" not in content:
-                with open(xschemrc, "a") as f:
-                    f.write(f"\n# pqwave cross-probe server\n{load_line}")
-        else:
-            with open(xschemrc, "w") as f:
-                f.write(f"# xschemrc — created by pqwave\n{load_line}")
+                xschemrc_content = f.read()
 
-        return {"status": "ok", "target_path": dst, "xschemrc_path": xschemrc}
+        deployed = []
+        for script in _TCL_SCRIPTS:
+            # Copy the Tcl script
+            src = _get_package_tcl_path(script["name"])
+            dst = _get_tcl_target_path(script["name"])
+            shutil.copy2(src, dst)
+            deployed.append(dst)
+
+            # Ensure xschemrc has the load line
+            if not script["xschemrc_re"].search(xschemrc_content):
+                with open(xschemrc, "a") as f:
+                    f.write(f"\n# pqwave {script['description']}\n"
+                            f"{script['xschemrc_line']}")
+                xschemrc_content += script["xschemrc_line"]
+
+        return {"status": "ok", "deployed": deployed, "xschemrc_path": xschemrc}
     except OSError as e:
         return {"status": "error", "message": str(e)}
 
