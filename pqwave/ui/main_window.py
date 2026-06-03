@@ -1922,6 +1922,8 @@ class MainWindow(QMainWindow):
             'kicad_simulate': self._on_kicad_simulate,
             'kicad_rewatch': self._on_kicad_rewatch,
             'kicad_unwatch': self._on_kicad_unwatch,
+            'kicad_probe_selected': self._on_kicad_probe_selected,
+            'kicad_clear_probe': self._on_kicad_clear_probe,
             'lepton_watch': self._on_lepton_watch,
             'lepton_simulate': self._on_lepton_simulate,
             'lepton_unwatch': self._on_lepton_unwatch,

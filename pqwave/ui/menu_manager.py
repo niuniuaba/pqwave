@@ -149,6 +149,21 @@ class MenuManager:
         unwatch_action.triggered.connect(self.callbacks.get("kicad_unwatch", lambda: None))
         kicad_menu.addAction(unwatch_action)
 
+        kicad_menu.addSeparator()
+
+        cross_probe_menu = QMenu("Cross-Probe", self.parent)
+        probe_action = QAction("Probe Selected Net", self.parent)
+        probe_action.triggered.connect(
+            self.callbacks.get("kicad_probe_selected", lambda: None)
+        )
+        cross_probe_menu.addAction(probe_action)
+        clear_probe = QAction("Clear Highlight", self.parent)
+        clear_probe.triggered.connect(
+            self.callbacks.get("kicad_clear_probe", lambda: None)
+        )
+        cross_probe_menu.addAction(clear_probe)
+        kicad_menu.addMenu(cross_probe_menu)
+
         file_menu.addMenu(kicad_menu)
         file_menu.addSeparator()
 
