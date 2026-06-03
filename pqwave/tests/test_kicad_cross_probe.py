@@ -1,105 +1,94 @@
-"""Tests for KiCad CrossProbeClient."""
+"""Tests for IPC-based IpcProbeClient."""
 
-import socket
-from unittest.mock import MagicMock, patch
-
-from pqwave.bridge.kicad.cross_probe import CrossProbeClient
+from unittest.mock import MagicMock
+from pqwave.bridge.kicad.cross_probe import IpcProbeClient
 
 
-class TestCrossProbeClient:
+class TestIpcProbeClient:
+    """Tests for IPC-based probe client."""
+
     def test_initial_state_not_connected(self):
-        client = CrossProbeClient()
+        client = IpcProbeClient()
         assert not client.is_connected()
 
-    def test_connect_to_kicad_success(self):
-        client = CrossProbeClient(port=4243)
-        with patch("socket.create_connection") as mock_connect:
-            mock_sock = MagicMock()
-            mock_connect.return_value = mock_sock
-            result = client.connect_to_kicad()
-            assert result is True
-            mock_connect.assert_called_once_with(("localhost", 4243), timeout=2.0)
-            assert client.is_connected()
+    def test_set_kicad_instance(self):
+        client = IpcProbeClient()
+        mock_kicad = MagicMock()
+        client.set_kicad(mock_kicad)
+        assert client.is_connected()
 
-    def test_connect_to_kicad_refused(self):
-        client = CrossProbeClient(port=9999)
-        with patch("socket.create_connection") as mock_connect:
-            mock_connect.side_effect = ConnectionRefusedError("refused")
-            result = client.connect_to_kicad()
-            assert result is False
-            assert not client.is_connected()
+    def test_probe_net_calls_run_action(self):
+        client = IpcProbeClient()
+        mock_kicad = MagicMock()
+        mock_kicad.run_action.return_value = MagicMock(status=1)
+        client.set_kicad(mock_kicad)
 
-    def test_connect_timeout(self):
-        client = CrossProbeClient(port=4243)
-        with patch("socket.create_connection") as mock_connect:
-            mock_connect.side_effect = socket.timeout("timeout")
-            result = client.connect_to_kicad()
-            assert result is False
+        result = client.probe_net("R1")
+
+        assert result is True
+        mock_kicad.run_action.assert_called_once()
 
     def test_probe_net_when_not_connected(self):
-        client = CrossProbeClient()
+        client = IpcProbeClient()
         result = client.probe_net("R1")
         assert result is False
 
-    def test_probe_net_when_connected(self):
-        client = CrossProbeClient()
-        with patch("socket.create_connection") as mock_connect:
-            mock_sock = MagicMock()
-            mock_connect.return_value = mock_sock
-            client.connect_to_kicad()
-            result = client.probe_net("R1")
-            assert result is True
-            mock_sock.sendall.assert_called_once()
-            sent = mock_sock.sendall.call_args[0][0]
-            assert b'$NET: "R1"' in sent
+    def test_probe_part_calls_run_action(self):
+        client = IpcProbeClient()
+        mock_kicad = MagicMock()
+        mock_kicad.run_action.return_value = MagicMock(status=1)
+        client.set_kicad(mock_kicad)
 
-    def test_probe_part_with_pin(self):
-        client = CrossProbeClient()
-        with patch("socket.create_connection") as mock_connect:
-            mock_sock = MagicMock()
-            mock_connect.return_value = mock_sock
-            client.connect_to_kicad()
-            client.probe_part("U1", pin="3")
-            sent = mock_sock.sendall.call_args[0][0]
-            assert b'$PART: "U1" $PAD: "3"' in sent
+        result = client.probe_part("Q1")
 
-    def test_probe_part_without_pin(self):
-        client = CrossProbeClient()
-        with patch("socket.create_connection") as mock_connect:
-            mock_sock = MagicMock()
-            mock_connect.return_value = mock_sock
-            client.connect_to_kicad()
-            client.probe_part("Q1")
-            sent = mock_sock.sendall.call_args[0][0]
-            assert b'$PART: "Q1"' in sent
+        assert result is True
 
-    def test_clear_command(self):
-        client = CrossProbeClient()
-        with patch("socket.create_connection") as mock_connect:
-            mock_sock = MagicMock()
-            mock_connect.return_value = mock_sock
-            client.connect_to_kicad()
-            client.clear()
-            sent = mock_sock.sendall.call_args[0][0]
-            assert b"$CLEAR" in sent
+    def test_clear_probe(self):
+        client = IpcProbeClient()
+        mock_kicad = MagicMock()
+        mock_kicad.run_action.return_value = MagicMock(status=1)
+        client.set_kicad(mock_kicad)
 
-    def test_disconnect_cleans_up(self):
-        client = CrossProbeClient()
-        with patch("socket.create_connection") as mock_connect:
-            mock_sock = MagicMock()
-            mock_connect.return_value = mock_sock
-            client.connect_to_kicad()
-            client.disconnect()
-            assert not client.is_connected()
-            mock_sock.close.assert_called_once()
+        result = client.clear()
 
-    def test_send_failure_disconnects(self):
-        client = CrossProbeClient()
-        with patch("socket.create_connection") as mock_connect:
-            mock_sock = MagicMock()
-            mock_sock.sendall.side_effect = OSError("broken pipe")
-            mock_connect.return_value = mock_sock
-            client.connect_to_kicad()
-            result = client.send_command("test")
-            assert result is False
-            assert not client.is_connected()
+        assert result is True
+        mock_kicad.run_action.assert_called_once()
+
+    def test_disconnect_clears_kicad_ref(self):
+        client = IpcProbeClient()
+        mock_kicad = MagicMock()
+        client.set_kicad(mock_kicad)
+        client.disconnect()
+
+        assert not client.is_connected()
+        assert client._kicad is None
+
+    def test_connected_signal_emitted(self):
+        client = IpcProbeClient()
+        signal_received = []
+        client.connected.connect(lambda: signal_received.append(True))
+
+        client.set_kicad(MagicMock())
+
+        assert len(signal_received) == 1
+
+    def test_disconnected_signal_emitted(self):
+        client = IpcProbeClient()
+        signal_received = []
+        client.disconnected.connect(lambda: signal_received.append(True))
+        client.set_kicad(MagicMock())
+        client.disconnect()
+
+        assert len(signal_received) == 1
+
+    def test_error_signal_on_failed_probe(self):
+        client = IpcProbeClient()
+        errors = []
+        client.error_occurred.connect(errors.append)
+        # No set_kicad — simulate a missing/unset IPC connection
+
+        result = client.probe_net("R1")
+
+        assert result is False
+        assert len(errors) == 1
+        assert "Not connected" in errors[0]
