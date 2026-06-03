@@ -1,7 +1,7 @@
 """Tests for KiCadBridge IPC API connection layer."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 from pqwave.bridge.kicad.bridge import KiCadBridge
 
@@ -171,3 +171,67 @@ class TestDisconnectIpc:
         bridge._disconnect_ipc()  # should not raise
 
         assert bridge._kipy_kicad is None
+
+
+class TestIpcExportNetlist:
+    """Tests for IPC-based netlist export with kicad-cli fallback."""
+
+    def test_export_via_ipc_when_connected(self):
+        bridge = KiCadBridge()
+        bridge._ipc_available = True
+        mock_sch = MagicMock()
+        mock_result = MagicMock()
+        mock_result.succeeded = True
+        mock_result.output_path = ["/tmp/test.cir"]
+        mock_sch.export_netlist.return_value = mock_result
+        mock_kicad = MagicMock()
+        mock_kicad.get_schematic.return_value = mock_sch
+        bridge._kipy_kicad = mock_kicad
+
+        with patch("builtins.open", mock_open(read_data=".title test\nR1 1 0 1k\n.end\n")):
+            result = bridge._export_netlist_via_ipc()
+
+        assert ".title test" in result
+        mock_sch.export_netlist.assert_called_once()
+
+    def test_falls_back_to_kicad_cli_when_ipc_unavailable(self):
+        bridge = KiCadBridge(kicad_cli_path="/usr/bin/kicad-cli")
+        bridge._ipc_available = False
+        expected = ".title test\nR1 1 0 1k\n.end\n"
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            with patch("builtins.open", mock_open(read_data=expected)):
+                with patch("os.path.isfile", return_value=True):
+                    result = bridge.export_netlist("/path/to/circuit.kicad_sch")
+
+        assert result == expected
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "kicad-cli" in call_args[0]
+
+    def test_raises_when_both_unavailable(self):
+        bridge = KiCadBridge()
+        bridge._ipc_available = False
+        with patch("shutil.which", return_value=None):
+            with pytest.raises(FileNotFoundError, match="kicad-cli"):
+                bridge.export_netlist("/path/to/circuit.kicad_sch")
+
+    def test_ipc_export_failure_falls_back(self):
+        bridge = KiCadBridge(kicad_cli_path="/usr/bin/kicad-cli")
+        bridge._ipc_available = True
+        mock_sch = MagicMock()
+        mock_sch.export_netlist.side_effect = Exception("API error")
+        mock_kicad = MagicMock()
+        mock_kicad.get_schematic.return_value = mock_sch
+        bridge._kipy_kicad = mock_kicad
+        expected = ".title fallback\n.end\n"
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            with patch("builtins.open", mock_open(read_data=expected)):
+                with patch("os.path.isfile", return_value=True):
+                    result = bridge.export_netlist("/path/to/circuit.kicad_sch")
+
+        assert result == expected
+        mock_run.assert_called_once()

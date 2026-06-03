@@ -67,6 +67,48 @@ class KiCadBridge(SchematicBridge):
     # ---- SchematicBridge implementation ----
 
     def export_netlist(self, sch_path: str) -> str:
+        """Export SPICE netlist from a .kicad_sch file.
+
+        Primary path: IPC API schematic.export_netlist(SNF_SPICE).
+        Fallback path: kicad-cli sch export netlist --format spice.
+        """
+        # Try IPC path first
+        try:
+            if self._ensure_ipc():
+                return self._export_netlist_via_ipc()
+        except Exception:
+            # Any IPC failure (kicad-python missing, connection dropped,
+            # export failed, etc.) — fall through to kicad-cli
+            _log.info("IPC API not available, using kicad-cli fallback")
+
+        # Fallback: kicad-cli subprocess
+        return self._export_netlist_via_kicad_cli(sch_path)
+
+    def _export_netlist_via_ipc(self) -> str:
+        """Export netlist via IPC API schematic.export_netlist(SNF_SPICE)."""
+        from kipy.proto.schematic import schematic_jobs_pb2
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".cir", prefix="pqwave_kicad_ipc_")
+        os.close(fd)
+        try:
+            schematic = self._kipy_kicad.get_schematic()
+            result = schematic.export_netlist(
+                tmp_path, format=schematic_jobs_pb2.SNF_SPICE
+            )
+            if not result.succeeded:
+                raise RuntimeError(f"IPC netlist export failed: {result}")
+
+            # Read back the exported file
+            output_path = result.output_path[0] if result.output_path else tmp_path
+            with open(output_path, "r") as f:
+                return f.read()
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def _export_netlist_via_kicad_cli(self, sch_path: str) -> str:
         """Export SPICE netlist from a .kicad_sch file via kicad-cli."""
         kicad_cli = self._resolve_kicad_cli()
 
