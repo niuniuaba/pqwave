@@ -1,7 +1,7 @@
 """Tests for KiCadBridge IPC API connection layer."""
 
 import pytest
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch, PropertyMock
 
 from pqwave.bridge.kicad.bridge import KiCadBridge
 
@@ -235,3 +235,82 @@ class TestIpcExportNetlist:
 
         assert result == expected
         mock_run.assert_called_once()
+
+
+class TestIpcSimPinsExtraction:
+    """Tests for IPC-based Sim.Pins extraction."""
+
+    def _make_mock_pin(self, number, name):
+        pin = MagicMock()
+        pin.number = number
+        pin.name = name
+        return pin
+
+    def _make_mock_symbol_child(self, pin):
+        child = MagicMock()
+        child.item = pin
+        return child
+
+    def test_extracts_sim_pins_from_symbols(self):
+        bridge = KiCadBridge()
+        bridge._ipc_available = True
+
+        mock_sch = MagicMock()
+        q1_pins = [
+            self._make_mock_symbol_child(self._make_mock_pin("1", "E")),
+            self._make_mock_symbol_child(self._make_mock_pin("2", "B")),
+            self._make_mock_symbol_child(self._make_mock_pin("3", "C")),
+        ]
+        q1_sym = MagicMock()
+        q1_sym.reference_field.text = "Q1"
+        type(q1_sym.definition).items = PropertyMock(return_value=q1_pins)
+
+        d1_pins = [
+            self._make_mock_symbol_child(self._make_mock_pin("1", "K")),
+            self._make_mock_symbol_child(self._make_mock_pin("2", "A")),
+        ]
+        d1_sym = MagicMock()
+        d1_sym.reference_field.text = "D1"
+        type(d1_sym.definition).items = PropertyMock(return_value=d1_pins)
+
+        mock_sch.get_symbols.return_value = [q1_sym, d1_sym]
+        bridge._kipy_kicad = MagicMock()
+        bridge._kipy_kicad.get_schematic.return_value = mock_sch
+
+        result = bridge._extract_sim_pins_ipc()
+
+        assert result == {
+            "Q1": {"1": "E", "2": "B", "3": "C"},
+            "D1": {"1": "K", "2": "A"},
+        }
+
+    def test_skips_symbols_without_pins(self):
+        bridge = KiCadBridge()
+        bridge._ipc_available = True
+
+        mock_sch = MagicMock()
+        r1_sym = MagicMock()
+        r1_sym.reference_field.text = "R1"
+        type(r1_sym.definition).items = PropertyMock(return_value=[])
+
+        mock_sch.get_symbols.return_value = [r1_sym]
+        bridge._kipy_kicad = MagicMock()
+        bridge._kipy_kicad.get_schematic.return_value = mock_sch
+
+        result = bridge._extract_sim_pins_ipc()
+        assert result == {}
+
+    def test_falls_back_to_regex_when_ipc_unavailable(self):
+        bridge = KiCadBridge()
+        bridge._ipc_available = False
+
+        sch_content = """(kicad_sch
+  (symbol
+    (property "Reference" "Q1"
+    (property "Sim.Pins" "1=E 2=B 3=C"
+    (pin "1"
+"""
+        with patch("builtins.open", mock_open(read_data=sch_content)):
+            result = bridge.extract_sim_pins("/fake/path.kicad_sch")
+
+        assert result == {"Q1": {"1": "E", "2": "B", "3": "C"}}

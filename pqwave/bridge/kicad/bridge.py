@@ -225,6 +225,55 @@ class KiCadBridge(SchematicBridge):
         return {"sim_pins": self.extract_sim_pins(sch_path)}
 
     def extract_sim_pins(self, sch_path: str) -> dict[str, dict[str, str]]:
+        """Parse Sim.Pins from the schematic.
+
+        Primary path: IPC API schematic.get_symbols() — structured objects.
+        Fallback path: S-expression regex parsing of .kicad_sch file.
+        """
+        try:
+            if self._ensure_ipc():
+                return self._extract_sim_pins_ipc()
+        except RuntimeError:
+            _log.info("IPC not available for Sim.Pins, using regex fallback")
+
+        return self._extract_sim_pins_regex(sch_path)
+
+    def _extract_sim_pins_ipc(self) -> dict[str, dict[str, str]]:
+        """Extract Sim.Pins from all symbols via IPC API.
+
+        Returns a dict mapping reference designator → {pin_number: pin_name, ...}.
+        Example: {"Q1": {"1": "E", "2": "B", "3": "C"}, "D1": {"1": "K", "2": "A"}}
+        """
+        schematic = self._kipy_kicad.get_schematic()
+        symbols = schematic.get_symbols()
+
+        result: dict[str, dict[str, str]] = {}
+        for sym in symbols:
+            # Get reference designator
+            ref = None
+            if sym.reference_field and sym.reference_field.text:
+                ref = sym.reference_field.text
+
+            if not ref:
+                continue
+
+            pin_map: dict[str, str] = {}
+            if sym.definition:
+                for child in sym.definition.items:
+                    item = getattr(child, "item", None)
+                    if item is None:
+                        continue
+                    number = getattr(item, "number", None)
+                    name = getattr(item, "name", None)
+                    if number is not None and name is not None:
+                        pin_map[str(number)] = str(name)
+
+            if pin_map:
+                result[ref] = pin_map
+
+        return result
+
+    def _extract_sim_pins_regex(self, sch_path: str) -> dict[str, dict[str, str]]:
         """Parse Sim.Pins from a .kicad_sch S-expression file.
 
         Returns a dict mapping reference designators to pin mappings:
