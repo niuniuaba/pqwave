@@ -82,6 +82,49 @@ class TestStripSlashes:
 
 
 # ---------------------------------------------------------------------------
+# ContentAwareStripSlashes (content-aware skip when no slashes present)
+# ---------------------------------------------------------------------------
+
+class TestContentAwareStripSlashes:
+    """Tests for content-aware StripSlashes: skip when no slashes present."""
+
+    def test_apply_when_slashes_present(self):
+        fix = StripSlashes()
+        netlist = "D1 /d1 /ox D1N4148\n"
+        result = fix.apply(netlist)
+        assert result == "D1 d1 ox D1N4148\n"
+
+    def test_skip_when_no_slashes(self):
+        fix = StripSlashes()
+        netlist = "D1 d1 ox D1N4148\nV1 AC_P AC_N SIN(0 100 100)\n.end\n"
+        result = fix.apply(netlist)
+        assert result == netlist  # unchanged
+
+    def test_info_returns_empty_when_no_slashes_in_net_positions(self):
+        fix = StripSlashes()
+        netlist = "* /comment\n.subckt opamp /in+ /in- /out\nR1 1 0 1k\n.end\n"
+        results = fix.info(netlist)
+        assert len(results) == 0
+
+    def test_has_slashes_detection(self):
+        fix = StripSlashes()
+        assert fix._netlist_has_slashes("D1 /d1 /ox D1N4148\n") is True
+        assert fix._netlist_has_slashes("D1 d1 ox D1N4148\n") is False
+
+    def test_preserves_hierarchical_paths(self):
+        fix = StripSlashes()
+        netlist = "R1 /sheet1/net1 /sheet1/net2 1k\n"
+        result = fix.apply(netlist)
+        assert result == netlist  # hierarchical path preserved
+
+    def test_strips_single_level_nets_in_mixed_line(self):
+        fix = StripSlashes()
+        netlist = "XU1 /d1 /sheet1/net1 opamp\n"
+        result = fix.apply(netlist)
+        assert result == "XU1 d1 /sheet1/net1 opamp\n"
+
+
+# ---------------------------------------------------------------------------
 # FixDiodePins
 # ---------------------------------------------------------------------------
 

@@ -15,29 +15,61 @@ from pqwave.bridge.schem_bridge import NetlistFix
 
 
 class StripSlashes(NetlistFix):
-    """Strip leading slashes from single-level net names."""
+    """Strip leading slashes from single-level net names.
+
+    KiCad versions before 10.99.0 prepend '/' to root-level net names
+    in exported SPICE netlists.  This fix strips those leading slashes
+    from single-level names like /d1 → d1 while preserving multi-level
+    hierarchical paths like /sheet1/net1.
+
+    The fix is content-aware: if the netlist has no leading slashes
+    at net positions, apply() is a no-op.
+    """
 
     name = "Strip leading slashes from net names"
 
-    _slash_re = re.compile(r"(?<![\w])/([A-Za-z_]\w*)\b")
+    _slash_re = re.compile(r"(?<![\w])/([A-Za-z_]\w*)(?![\/\w])")
+
+    def _netlist_has_slashes(self, netlist: str) -> bool:
+        """Check if the netlist contains leading slashes at net positions.
+
+        Skips comment lines, .subckt, .param, and .func lines since
+        slashes there are intentional.
+        """
+        for line in netlist.split("\n"):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("*"):
+                continue
+            if (stripped.startswith(".subckt") or stripped.startswith(".param")
+                    or stripped.startswith(".func")):
+                continue
+            if self._slash_re.search(line):
+                return True
+        return False
 
     def apply(self, netlist: str, context: Optional[dict] = None) -> str:
+        if not self._netlist_has_slashes(netlist):
+            return netlist  # nothing to fix
+
         result_lines = []
         for line in netlist.split("\n"):
             stripped = line.strip()
-            if stripped.startswith("*") or stripped.startswith(".subckt") \
-                    or stripped.startswith(".param") or stripped.startswith(".func"):
+            if (stripped.startswith("*") or stripped.startswith(".subckt")
+                    or stripped.startswith(".param") or stripped.startswith(".func")):
                 result_lines.append(line)
             else:
                 result_lines.append(self._slash_re.sub(r"\1", line))
         return "\n".join(result_lines)
 
     def info(self, netlist: str, context: Optional[dict] = None) -> list[dict]:
+        if not self._netlist_has_slashes(netlist):
+            return []
+
         unique_names: set[str] = set()
         for line in netlist.split("\n"):
             stripped = line.strip()
-            if stripped.startswith("*") or stripped.startswith(".subckt") \
-                    or stripped.startswith(".param") or stripped.startswith(".func"):
+            if (stripped.startswith("*") or stripped.startswith(".subckt")
+                    or stripped.startswith(".param") or stripped.startswith(".func")):
                 continue
             unique_names.update(self._slash_re.findall(line))
         if not unique_names:
@@ -46,7 +78,11 @@ class StripSlashes(NetlistFix):
         return [
             {
                 "fix": self.name,
-                "detail": f"stripped '/' from {len(sorted_names)} node names: {', '.join(sorted_names)}",
+                "detail": (
+                    f"stripped '/' from {len(sorted_names)} node names: "
+                    f"{', '.join(sorted_names[:5])}"
+                    f"{'...' if len(sorted_names) > 5 else ''}"
+                ),
             }
         ]
 
