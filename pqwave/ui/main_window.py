@@ -166,7 +166,6 @@ class MainWindow(QMainWindow):
         self.kicad_control_bar = None  # Created when KiCad watch starts
         self._kicad_watcher = None
         self._kicad_bridge = None
-        self._kicad_cross_probe = None
         self._kicad_watched_path = None
         self._kicad_simulating = False
         self._kicad_dataset_indices: list[int] = []
@@ -705,14 +704,14 @@ class MainWindow(QMainWindow):
         elif action == "kicad_unwatch":
             self._on_kicad_unwatch()
         elif action == "kicad_probe_net":
-            if self._kicad_cross_probe:
-                self._kicad_cross_probe.probe_net(kwargs["name"])
+            if self._kicad_bridge:
+                self._kicad_bridge.probe_net(kwargs["name"])
         elif action == "kicad_probe_part":
-            if self._kicad_cross_probe:
-                self._kicad_cross_probe.probe_part(kwargs["ref"], kwargs.get("pin"))
+            if self._kicad_bridge:
+                self._kicad_bridge.probe_part(kwargs["ref"], kwargs.get("pin"))
         elif action == "kicad_clear":
-            if self._kicad_cross_probe:
-                self._kicad_cross_probe.clear()
+            if self._kicad_bridge:
+                self._kicad_bridge.clear_probe()
         elif action == "lepton_watch":
             self._start_lepton_watch(kwargs["path"])
         elif action == "lepton_simulate":
@@ -771,17 +770,13 @@ class MainWindow(QMainWindow):
         """Initialize the KiCad bridge and start watching the schematic."""
         from pqwave.bridge.kicad.bridge import KiCadBridge
         from pqwave.bridge.kicad.file_watcher import KiCadFileWatcher
-        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
         from pqwave.bridge.kicad.control_bar import KiCadControlBar
 
-        if self._kicad_cross_probe:
-            self._kicad_cross_probe.disconnect()
         if self._kicad_watcher:
             self._kicad_watcher.unwatch()
 
         self._kicad_bridge = KiCadBridge()
         self._kicad_watcher = KiCadFileWatcher()
-        self._kicad_cross_probe = CrossProbeClient()
 
         if self.kicad_control_bar is None:
             self.kicad_control_bar = KiCadControlBar()
@@ -796,11 +791,6 @@ class MainWindow(QMainWindow):
         self._kicad_watched_path = sch_path
         self._kicad_last_path = sch_path
         self._kicad_connect_failed = False
-
-        self._kicad_cross_probe.error_occurred.connect(
-            lambda msg: self.chat_panel.append_output(f"[kicad] {msg}\n")
-        )
-
         self.kicad_control_bar.setVisible(True)
         basename = os.path.basename(sch_path)
         self.statusBar().showMessage(f"Watching {basename} — save in KiCad to auto-simulate")
@@ -831,8 +821,8 @@ class MainWindow(QMainWindow):
         self._kicad_last_path = self._kicad_watched_path
         if self._kicad_watcher:
             self._kicad_watcher.unwatch()
-        if self._kicad_cross_probe:
-            self._kicad_cross_probe.disconnect()
+        if self._kicad_bridge:
+            self._kicad_bridge._disconnect_ipc()
         if self.kicad_control_bar:
             self.kicad_control_bar.set_status("not watching (click Re-Watch to resume)")
         self._kicad_watched_path = None
@@ -927,15 +917,14 @@ class MainWindow(QMainWindow):
                 self.kicad_control_bar.set_simulating(False)
 
     def _kicad_probe_active_trace(self):
-        """Cross-probe the active panel's selected trace net in KiCad."""
-        if not self._kicad_cross_probe:
+        """Cross-probe the active panel's selected trace net in KiCad via IPC API."""
+        if not self._kicad_bridge:
             return
         if self._kicad_connect_failed:
             return
-        if not self._kicad_cross_probe.is_connected():
-            if not self._kicad_cross_probe.connect_to_kicad():
-                self._kicad_connect_failed = True
-                return
+        if not self._kicad_bridge._ensure_ipc():
+            self._kicad_connect_failed = True
+            return
         self._kicad_connect_failed = False
         panel = self.panel_grid.get_active_panel()
         if panel is None:
@@ -945,7 +934,7 @@ class MainWindow(QMainWindow):
             return
         _, trace = selected[0]
         net = self._extract_net_name(trace.expression)
-        self._kicad_cross_probe.probe_net(net)
+        self._kicad_bridge.probe_net(net)
 
     def _on_kicad_probe_selected(self):
         """Menu action: cross-probe the currently active trace's net in KiCad."""
@@ -954,8 +943,8 @@ class MainWindow(QMainWindow):
 
     def _on_kicad_clear_probe(self):
         """Clear cross-probe highlights in KiCad."""
-        if self._kicad_cross_probe and self._kicad_cross_probe.is_connected():
-            self._kicad_cross_probe.clear()
+        if self._kicad_bridge:
+            self._kicad_bridge.clear_probe()
 
     def _kicad_ba_debounced(self):
         """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
@@ -1024,7 +1013,7 @@ class MainWindow(QMainWindow):
         # Check for port conflicts before starting bridge
         from pqwave.models.state import ApplicationState as _AS
         lepton_port = getattr(_AS(), '_lepton_config', {}).get('port', 9424)
-        reserved = {4243: "KiCad cross-probe", 2026: "xschem server", 2021: "xschem back-annotation"}
+        reserved = {2026: "xschem server", 2021: "xschem back-annotation"}
         if lepton_port in reserved:
             self.chat_panel.append_output(
                 f"[lepton] ERROR: Port {lepton_port} conflicts with {reserved[lepton_port]}. "

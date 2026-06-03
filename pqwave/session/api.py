@@ -517,37 +517,38 @@ class SessionAPI:
         if self._on_mutation:
             self._on_mutation("kicad_probe_net", name=name)
             return {"status": "ok"}
-        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
-        client = CrossProbeClient()
-        if client.connect_to_kicad():
-            client.probe_net(name)
-            client.disconnect()
+        bridge = self._get_kicad_bridge()
+        if bridge and bridge._ensure_ipc():
+            bridge.probe_net(name)
             return {"status": "ok", "net": name}
-        return {"status": "error", "message": "KiCad not running"}
+        return {"status": "error", "message": "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"}
 
     def kicad_probe_part(self, ref: str, pin: str | None = None) -> dict:
         if self._on_mutation:
             self._on_mutation("kicad_probe_part", ref=ref, pin=pin)
             return {"status": "ok"}
-        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
-        client = CrossProbeClient()
-        if client.connect_to_kicad():
-            client.probe_part(ref, pin)
-            client.disconnect()
+        bridge = self._get_kicad_bridge()
+        if bridge and bridge._ensure_ipc():
+            bridge.probe_part(ref, pin)
             return {"status": "ok", "ref": ref}
-        return {"status": "error", "message": "KiCad not running"}
+        return {"status": "error", "message": "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"}
 
     def kicad_clear(self) -> dict:
         if self._on_mutation:
             self._on_mutation("kicad_clear")
             return {"status": "ok"}
-        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
-        client = CrossProbeClient()
-        if client.connect_to_kicad():
-            client.clear()
-            client.disconnect()
+        bridge = self._get_kicad_bridge()
+        if bridge and bridge._ipc_available:
+            bridge.clear_probe()
             return {"status": "ok"}
-        return {"status": "error", "message": "KiCad not running"}
+        return {"status": "error", "message": "No active IPC connection"}
+
+    def _get_kicad_bridge(self):
+        """Get a cached KiCadBridge instance for headless IPC operations."""
+        if not hasattr(self, "_kicad_bridge"):
+            from pqwave.bridge.kicad.bridge import KiCadBridge
+            self._kicad_bridge = KiCadBridge()
+        return self._kicad_bridge
 
     def kicad_config(self, key: str, value=None) -> dict:
         from pqwave.models.state import ApplicationState
@@ -555,7 +556,6 @@ class SessionAPI:
         if not hasattr(state, "_kicad_config"):
             state._kicad_config = {
                 "auto_simulate": True,
-                "crossprobe_port": 4243,
                 "fix_slashes": True,
                 "fix_diode_pins": True,
                 "fix_bjt_pins": True,
@@ -676,7 +676,7 @@ class SessionAPI:
 
         if key == "port":
             if value is not None:
-                reserved = {4243: "KiCad", 2026: "xschem (server)", 2021: "xschem (back-annotation)"}
+                reserved = {2026: "xschem (server)", 2021: "xschem (back-annotation)"}
                 if int(value) in reserved:
                     return {"status": "error", "message": f"Port {value} conflicts with {reserved[int(value)]}"}
 
