@@ -60,25 +60,47 @@ class KiCadBridge(SchematicBridge):
         return [StripSlashes(), FixDiodePins(), FixBJTPins(), MoveControlBlock()]
 
     def probe_net(self, net_name: str) -> None:
-        """Cross-probe: highlight a net in KiCad Eeschema.
-
-        Not yet functional — requires KiCad schematic IPC API
-        selection handlers (RunAction, AddToSelection) which are
-        not yet implemented for Eeschema (as of KiCad 10.99.0).
-        """
-        import logging
-        _log = logging.getLogger(__name__)
-        _log.debug("Cross-probe not available: KiCad schematic IPC API "
-                    "selection handlers not yet implemented.")
+        """Cross-probe: highlight a net in KiCad Eeschema via IPC API."""
+        probe = self._get_ipc_probe()
+        if probe:
+            probe.probe_net(net_name)
 
     def probe_part(self, ref: str, pin: Optional[str] = None) -> None:
-        """Cross-probe: highlight a component in KiCad Eeschema.
-
-        Not yet functional — see probe_net().
-        """
+        """Cross-probe: highlight a component in KiCad Eeschema via IPC API."""
+        probe = self._get_ipc_probe()
+        if probe:
+            probe.probe_part(ref, pin)
 
     def clear_probe(self) -> None:
-        """Clear cross-probe highlights. Not yet functional — see probe_net()."""
+        """Clear all cross-probe highlights via IPC API."""
+        probe = self._get_ipc_probe()
+        if probe:
+            probe.clear()
+
+    def _get_ipc_probe(self):
+        """Get or create an IpcProbeClient connected to the running KiCad."""
+        if hasattr(self, "_ipc_probe") and self._ipc_probe is not None:
+            if self._ipc_probe.is_connected():
+                return self._ipc_probe
+
+        try:
+            import kipy
+        except ImportError:
+            return None
+
+        socket_path = os.environ.get("KICAD_API_SOCKET", "/tmp/kicad/api.sock")
+        if not socket_path.startswith("ipc://"):
+            socket_path = f"ipc://{socket_path}"
+
+        try:
+            kicad = kipy.KiCad(socket_path=socket_path, timeout_ms=3000)
+            from pqwave.bridge.kicad.cross_probe import IpcProbeClient
+            probe = IpcProbeClient()
+            probe.set_kicad(kicad)
+            self._ipc_probe = probe
+            return probe
+        except Exception:
+            return None
 
     def detect_tool(self) -> Optional[str]:
         try:
