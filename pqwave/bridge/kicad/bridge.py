@@ -16,6 +16,17 @@ from pqwave.models.state import ApplicationState
 _log = logging.getLogger(__name__)
 
 _kipy_available = None  # None = unchecked, True/False = result
+# NOTE: This is a module-level cache shared across all KiCadBridge instances.
+# Once set to True/False, it persists for the process lifetime.  This is
+# intentional — kicad-python is either installed or it isn't, and we don't
+# want to re-import kipy on every _ensure_ipc() call.  Tests can reset it
+# via _reset_kipy_availability().
+
+
+def _reset_kipy_availability() -> None:
+    """Reset the module-level kipy availability cache.  For testing only."""
+    global _kipy_available
+    _kipy_available = None
 
 
 def _check_kipy_functionality() -> tuple[bool, str]:
@@ -252,7 +263,7 @@ class KiCadBridge(SchematicBridge):
         try:
             if self._ensure_ipc():
                 return self._extract_sim_pins_ipc()
-        except RuntimeError:
+        except Exception:
             _log.info("IPC not available for Sim.Pins, using regex fallback")
 
         return self._extract_sim_pins_regex(sch_path)
@@ -349,15 +360,20 @@ class KiCadBridge(SchematicBridge):
         return resolve_ngspice(self._ngspice)
 
     def _ensure_ipc_probe_client(self):
-        """Lazy-initialize the IpcProbeClient with the current KiCad instance.
+        """Lazy-initialize or reuse the IpcProbeClient.
 
-        Lesson learned #6: disconnect old client before creating new one.
+        Only creates a new client when the KiCad instance has changed
+        (e.g., after a reconnect).  Lesson learned #6: always disconnect
+        the old client before creating a new one.
         """
         from pqwave.bridge.kicad.cross_probe import IpcProbeClient
 
-        old = getattr(self, "_ipc_probe_client", None)
-        if old is not None:
-            old.disconnect()
+        existing = getattr(self, "_ipc_probe_client", None)
+        if existing is not None and existing._kicad is self._kipy_kicad:
+            return existing  # cache hit — same KiCad instance
+
+        if existing is not None:
+            existing.disconnect()
 
         client = IpcProbeClient()
         client.set_kicad(self._kipy_kicad)

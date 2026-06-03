@@ -65,8 +65,11 @@ class KiCadControlBar(QWidget):
         """
         if connected:
             self._status_label.setStyleSheet("color: green;")
+            self._status_label.setText("KiCad: connected via IPC API")
         elif fallback:
             self._status_label.setStyleSheet("color: orange;")
+            self._status_label.setText("KiCad: kicad-cli fallback (cross-probe unavailable)")
         else:
             self._status_label.setStyleSheet("color: red;")
+            self._status_label.setText("KiCad: disconnected")
         self.update()

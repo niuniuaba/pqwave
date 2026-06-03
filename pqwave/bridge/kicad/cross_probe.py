@@ -110,7 +110,14 @@ class IpcProbeClient(QObject):
         ]
 
     def _part_probe_actions(self, ref: str, pin: str | None) -> list[str]:
-        """Return action names to try for part probing."""
+        """Return action names to try for part probing.
+
+        Note: pin-level selection is not supported by the current
+        Eeschema IPC API. The pin parameter is accepted for API
+        compatibility with SchematicBridge but is not used in
+        action names. If the IPC API adds pin selection support,
+        this is where to wire it in.
+        """
         actions = [
             f'eeschema.InteractiveSelection.SelectSymbol "{ref}"',
             f'eeschema.InteractiveSelection.FindAndSelectSymbol "{ref}"',
