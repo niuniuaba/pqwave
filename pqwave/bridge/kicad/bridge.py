@@ -1,5 +1,6 @@
 """KiCad-specific SchematicBridge implementation."""
 
+import logging
 import os
 import re
 import shutil
@@ -7,10 +8,41 @@ import subprocess
 import tempfile
 from typing import Optional
 
+_log = logging.getLogger(__name__)
+
 from pqwave.bridge.schem_bridge import SchematicBridge, NetlistFix, resolve_ngspice
 from pqwave.bridge.kicad.fixes import StripSlashes, FixDiodePins, FixBJTPins, MoveControlBlock
 from pqwave.bridge.netlist_postprocessor import NetlistPostProcessor
 from pqwave.models.state import ApplicationState
+
+
+_KIPY_AVAILABLE = None  # None = unchecked, True/False = result
+
+
+def _check_kipy_functionality() -> tuple[bool, str]:
+    """Check if kipy has the APIs we need. Returns (ok, error_message)."""
+    global _KIPY_AVAILABLE
+    try:
+        import kipy
+    except ImportError:
+        _KIPY_AVAILABLE = False
+        return False, (
+            "kicad-python is required for KiCad IPC API integration.\n"
+            "Install it with:\n"
+            "  pip install git+https://gitlab.com/kicad/code/kicad-python.git\n"
+            "See: https://pypi.org/project/kicad-python/"
+        )
+
+    if not hasattr(kipy.KiCad, "get_schematic"):
+        _KIPY_AVAILABLE = False
+        return False, (
+            "Installed kicad-python lacks get_schematic().\n"
+            "Install the latest version from Git:\n"
+            "  pip install git+https://gitlab.com/kicad/code/kicad-python.git"
+        )
+
+    _KIPY_AVAILABLE = True
+    return True, ""
 
 
 class KiCadBridge(SchematicBridge):
@@ -27,6 +59,12 @@ class KiCadBridge(SchematicBridge):
         super().__init__()
         self._kicad_cli = kicad_cli_path
         self._ngspice = ngspice_path
+
+        # IPC API state (lazy-initialized)
+        self._kipy_kicad = None       # kipy.KiCad instance
+        self._ipc_failed = False      # True if IPC connection was attempted and failed
+        self._ipc_available = None    # None = unchecked, True/False = result
+        self._ipc_probe_client = None  # IpcProbeClient, lazily created
 
     # ---- SchematicBridge implementation ----
 
@@ -209,3 +247,74 @@ class KiCadBridge(SchematicBridge):
         if not hasattr(self, "_cross_probe") or self._cross_probe is None:
             self._cross_probe = CrossProbeClient()
         return self._cross_probe
+
+    # ---- IPC API connection ----
+
+    def _ensure_ipc(self) -> bool:
+        """Establish IPC connection to KiCad if not already connected.
+
+        Returns True if IPC is available and connected.
+        Returns False if IPC is unavailable (kicad-python missing, KiCad
+        not running, API disabled, or required APIs absent).
+        Caches the connection for reuse; reconnects if dropped.
+        """
+        # Already connected — reuse
+        if self._kipy_kicad is not None and self._ipc_available:
+            return True
+
+        # Already tried and failed — don't retry in same session
+        if self._ipc_failed:
+            return False
+
+        # Check kicad-python functionality
+        global _KIPY_AVAILABLE
+        if _KIPY_AVAILABLE is None:
+            ok, msg = _check_kipy_functionality()
+            if not ok:
+                self._ipc_failed = True
+                self._ipc_available = False
+                _log.warning(msg)
+                return False
+            _KIPY_AVAILABLE = True
+
+        if not _KIPY_AVAILABLE:
+            self._ipc_failed = True
+            self._ipc_available = False
+            return False
+
+        # Connect
+        import kipy
+
+        socket_path = os.environ.get("KICAD_API_SOCKET")
+        if not socket_path:
+            socket_path = os.path.join(tempfile.gettempdir(), "kicad", "api.sock")
+        if not socket_path.startswith("ipc://"):
+            socket_path = f"ipc://{socket_path}"
+
+        try:
+            self._kipy_kicad = kipy.KiCad(socket_path=socket_path, timeout_ms=5000)
+            # Verify we can get a schematic handle (confirms API server is active
+            # and the connected editor is Eeschema)
+            _ = self._kipy_kicad.get_schematic()
+            self._ipc_available = True
+            self._ipc_failed = False
+            return True
+        except Exception as e:
+            self._ipc_failed = True
+            self._ipc_available = False
+            self._kipy_kicad = None
+            _log.warning(
+                "KiCad IPC API connection failed: %s. Falling back to kicad-cli.", e
+            )
+            return False
+
+    def _disconnect_ipc(self) -> None:
+        """Close the IPC connection and reset state."""
+        if self._kipy_kicad is not None:
+            try:
+                self._kipy_kicad.close()
+            except Exception:
+                pass
+            self._kipy_kicad = None
+        self._ipc_available = None
+        self._ipc_failed = False
