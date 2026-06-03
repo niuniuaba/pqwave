@@ -452,13 +452,6 @@ def main():
     )
     # KiCad integration arguments
     parser.add_argument(
-        "--kicad-port",
-        type=int,
-        default=4243,
-        help="TCP port for KiCad cross-probe server (default: 4243)."
-    )
-
-    parser.add_argument(
         "files",
         nargs="*",  # Zero or more positional arguments
         help="Files to open (.raw, .vcd, .json for project)"
@@ -541,12 +534,11 @@ def main():
 
     # Create wave receiver and command handler if enabled
     wave_receiver = None
-    # Validate no port conflicts between xschem and KiCad cross-probe
+    # Validate no port conflicts
     _ports_used = {}
     for _name, _port in [
         ("xschem server (--xschem-port)", args.xschem_port),
         ("xschem back-annotation (--xschem-ba-port)", args.xschem_ba_port),
-        ("KiCad cross-probe (--kicad-port)", args.kicad_port),
     ]:
         if _port == 0:
             continue
@@ -560,7 +552,7 @@ def main():
         _ports_used[_port] = _name
 
     # Validate xschem cross-probe port against reserved ports
-    reserved_for_cross_probe = {4243: "KiCad", 2026: "xschem wave receiver"}
+    reserved_for_cross_probe = {2026: "xschem wave receiver"}
     if args.xschem_ba_port in reserved_for_cross_probe:
         print(
             f"ERROR: xschem back-annotation port {args.xschem_ba_port} "
