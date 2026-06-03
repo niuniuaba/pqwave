@@ -16,7 +16,7 @@ class TestEnsureIpc:
         assert result is False
         assert bridge._ipc_available is False
 
-    def test_returns_false_when_get_schematic_missing(self):
+    def test_returns_false_when_get_schematic_fails_during_connect(self):
         bridge = KiCadBridge()
         mock_kipy = MagicMock()
 
@@ -189,8 +189,24 @@ class TestIpcExportNetlist:
         mock_kicad.get_schematic.return_value = mock_sch
         bridge._kipy_kicad = mock_kicad
 
-        with patch("builtins.open", mock_open(read_data=".title test\nR1 1 0 1k\n.end\n")):
-            result = bridge._export_netlist_via_ipc()
+        # Mock kipy.proto.schematic so the import in _export_netlist_via_ipc
+        # works even in environments without kicad-python installed
+        mock_schematic_jobs = MagicMock()
+        mock_schematic_jobs.SNF_SPICE = 5
+        mock_proto = MagicMock()
+        mock_proto.schematic_jobs_pb2 = mock_schematic_jobs
+        kipy_mod = MagicMock()
+        kipy_mod.proto = MagicMock()
+        kipy_mod.proto.schematic = mock_proto
+
+        modules_patch = {
+            "kipy": kipy_mod,
+            "kipy.proto": kipy_mod.proto,
+            "kipy.proto.schematic": mock_proto,
+        }
+        with patch.dict("sys.modules", modules_patch):
+            with patch("builtins.open", mock_open(read_data=".title test\nR1 1 0 1k\n.end\n")):
+                result = bridge._export_netlist_via_ipc()
 
         assert ".title test" in result
         mock_sch.export_netlist.assert_called_once()

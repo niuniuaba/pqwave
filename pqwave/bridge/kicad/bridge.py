@@ -452,6 +452,11 @@ class KiCadBridge(SchematicBridge):
         except Exception as e:
             self._ipc_failed = True
             self._ipc_available = False
+            if self._kipy_kicad is not None:
+                try:
+                    self._kipy_kicad.close()
+                except Exception:
+                    pass
             self._kipy_kicad = None
             _log.warning(
                 "KiCad IPC API connection failed: %s. Falling back to kicad-cli.", e
