@@ -796,6 +796,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Watching {basename} — save in KiCad to auto-simulate")
         self.kicad_control_bar.set_status(f"watching {basename}")
 
+        self._kicad_sel_poll_timer.start()
         self._run_kicad_pipeline(sch_path)
 
     def _on_kicad_file_changed(self, path: str):
@@ -821,8 +822,7 @@ class MainWindow(QMainWindow):
         self._kicad_last_path = self._kicad_watched_path
         if self._kicad_watcher:
             self._kicad_watcher.unwatch()
-        if self._kicad_bridge:
-            self._kicad_bridge._disconnect_ipc()
+        self._kicad_sel_poll_timer.stop()
         if self.kicad_control_bar:
             self.kicad_control_bar.set_status("not watching (click Re-Watch to resume)")
         self._kicad_watched_path = None
@@ -961,6 +961,50 @@ class MainWindow(QMainWindow):
     def _kicad_ba_debounced(self):
         """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
         self._kicad_probe_active_trace()
+
+    def _poll_kicad_selection(self):
+        """Poll Eeschema selection every 500ms to detect KiCad→pqwave cross-probe."""
+        if not self._kicad_bridge:
+            return
+        probe = self._kicad_bridge._get_ipc_probe()
+        if probe is None:
+            return
+        try:
+            from kipy.proto.common.commands.editor_commands_pb2 import (
+                GetSelection, SelectionResponse,
+            )
+            from kipy.proto.common.types import (
+                ItemHeader, DocumentSpecifier, DocumentType,
+            )
+            doc = DocumentSpecifier()
+            doc.type = DocumentType.DOCTYPE_SCHEMATIC
+            hdr = ItemHeader()
+            hdr.document.CopyFrom(doc)
+            req = GetSelection()
+            req.header.CopyFrom(hdr)
+            resp = probe._kicad._client.send(req, SelectionResponse)
+
+            current_ids = {item.value for item in resp.items if hasattr(item, 'value')}
+            last = getattr(self, '_last_kicad_selection', None)
+            if last is not None and current_ids and current_ids != last:
+                sch = probe._kicad.get_schematic()
+                netlist = sch.get_netlist()
+                for net in netlist:
+                    net_ids = set()
+                    for sheet in net.sheets:
+                        for item in sheet.items:
+                            net_ids.add(item.value)
+                    if net_ids & current_ids:
+                        net_name = net.name.upper()
+                        for panel in self.panel_grid.panels.values():
+                            for trace in panel.trace_manager.state_traces:
+                                expr = trace.expression.upper()
+                                if net_name in expr or f"V({net_name})" in expr:
+                                    panel.trace_manager.select_trace(trace)
+                                    break
+            self._last_kicad_selection = current_ids
+        except Exception:
+            pass
 
     # ---- Lepton-EDA Bridge handlers ----
 
@@ -2012,6 +2056,11 @@ class MainWindow(QMainWindow):
         self._kicad_ba_timer.setSingleShot(True)
         self._kicad_ba_timer.setInterval(250)
         self._kicad_ba_timer.timeout.connect(self._kicad_ba_debounced)
+
+        # KiCad selection poll timer (KiCad → pqwave direction)
+        self._kicad_sel_poll_timer = QTimer()
+        self._kicad_sel_poll_timer.setInterval(500)
+        self._kicad_sel_poll_timer.timeout.connect(self._poll_kicad_selection)
 
         # Lepton-EDA cursor cross-probe timer (same debounce pattern)
         self._lepton_ba_timer = QTimer()
