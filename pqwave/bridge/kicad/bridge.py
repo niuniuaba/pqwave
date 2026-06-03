@@ -437,7 +437,9 @@ class KiCadBridge(SchematicBridge):
 
         socket_path = os.environ.get("KICAD_API_SOCKET")
         if not socket_path:
-            socket_path = os.path.join(tempfile.gettempdir(), "kicad", "api.sock")
+            # KiCad uses the system temp dir, not Python's tempfile.gettempdir()
+            # (which may be sandboxed, e.g. /tmp/claude-1000).
+            socket_path = "/tmp/kicad/api.sock"
         if not socket_path.startswith("ipc://"):
             socket_path = f"ipc://{socket_path}"
 
