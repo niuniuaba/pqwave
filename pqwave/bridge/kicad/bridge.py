@@ -28,6 +28,8 @@ class KiCadBridge(SchematicBridge):
         super().__init__()
         self._kicad_cli = kicad_cli_path
         self._ngspice = ngspice_path
+        self._ipc_probe = None       # IpcProbeClient, lazy-created
+        self._suppress_ipc_poll = False  # guard against feedback loop
 
     # ---- SchematicBridge implementation ----
 
@@ -61,15 +63,23 @@ class KiCadBridge(SchematicBridge):
 
     def probe_net(self, net_name: str) -> None:
         """Cross-probe: highlight a net in KiCad Eeschema via IPC API."""
-        probe = self._get_ipc_probe()
-        if probe:
-            probe.probe_net(net_name)
+        self._suppress_ipc_poll = True
+        try:
+            probe = self._get_ipc_probe()
+            if probe:
+                probe.probe_net(net_name)
+        finally:
+            self._suppress_ipc_poll = False
 
     def probe_part(self, ref: str, pin: Optional[str] = None) -> None:
         """Cross-probe: highlight a component in KiCad Eeschema via IPC API."""
-        probe = self._get_ipc_probe()
-        if probe:
-            probe.probe_part(ref, pin)
+        self._suppress_ipc_poll = True
+        try:
+            probe = self._get_ipc_probe()
+            if probe:
+                probe.probe_part(ref, pin)
+        finally:
+            self._suppress_ipc_poll = False
 
     def clear_probe(self) -> None:
         """Clear all cross-probe highlights via IPC API."""
@@ -78,10 +88,16 @@ class KiCadBridge(SchematicBridge):
             probe.clear()
 
     def _get_ipc_probe(self):
-        """Get or create an IpcProbeClient connected to the running KiCad."""
-        if hasattr(self, "_ipc_probe") and self._ipc_probe is not None:
+        """Get or create an IpcProbeClient connected to the running KiCad.
+
+        Caches the client for reuse.  On re-watch, the old client is
+        disconnected before creating a new one.
+        """
+        if self._ipc_probe is not None:
             if self._ipc_probe.is_connected():
                 return self._ipc_probe
+            self._ipc_probe.disconnect()
+            self._ipc_probe = None
 
         try:
             import kipy

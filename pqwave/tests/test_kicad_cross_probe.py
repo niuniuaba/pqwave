@@ -1,6 +1,10 @@
 """Tests for IPC-based IpcProbeClient."""
 
+import pytest
 from unittest.mock import MagicMock
+
+pytest.importorskip("kipy", reason="kicad-python is required for IPC cross-probe tests")
+
 from pqwave.bridge.kicad.cross_probe import IpcProbeClient
 
 

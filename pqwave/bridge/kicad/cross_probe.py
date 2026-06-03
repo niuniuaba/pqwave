@@ -147,10 +147,17 @@ class IpcProbeClient(QObject):
     # ---- Internal helpers ----
 
     def _select_items(self, kiids: list) -> bool:
-        """Clear previous selection, then add *kiids* to selection."""
-        self._send_clear_selection()
-        self._send_add_to_selection(kiids)
-        return True
+        """Clear previous selection, then add *kiids* to selection.
+
+        Returns True if both IPC calls succeeded.
+        """
+        try:
+            self._send_clear_selection()
+            self._send_add_to_selection(kiids)
+            return True
+        except Exception as e:
+            self.error_occurred.emit(f"Selection IPC failed: {e}")
+            return False
 
     def _send_clear_selection(self) -> None:
         """Send a ClearSelection IPC command."""
