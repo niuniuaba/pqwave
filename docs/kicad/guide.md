@@ -10,10 +10,11 @@ pqwave integrates with KiCad Eeschema through a netlist-based file-watching pipe
 - [Overview: How It Works](#overview-how-it-works)
 - [Netlist Pipeline](#netlist-pipeline)
 - [Netlist Post-Processor](#netlist-post-processor)
-- [Cross-Probe / Back-Annotation (Known Limitation)](#cross-probe--back-annotation-known-limitation)
+- [Cross-Probe / Back-Annotation](#cross-probe--back-annotation)
 - [Session API Commands](#session-api-commands)
 
-### Part 2 — Worked Tutorials
+### Part 2 — Setup and Worked Tutorials
+- [IPC API Setup (KiCad 10+)](#ipc-api-setup-kicad-10)
 - [Example Overview](#example-overview)
 - [Example 1: Full-Wave Bridge Rectifier](#example-1-full-wave-bridge-rectifier)
 - [Example 2: Nonlinear C-V Characterization](#example-2-nonlinear-c-v-characterization)
@@ -44,7 +45,7 @@ pqwave runs the simulation externally via ngspice and loads the results for anal
 
 > **Design note — why probing starts from pqwave, not KiCad:** Probing starts from pqwave — the user selects signals in the signal browser rather than clicking nets in the schematic. pqwave shows every signal from the simulation at once, and the user explores freely. The schematic is the design canvas; pqwave is the analysis cockpit.
 >
-> Net/node highlight back-annotation from pqwave to KiCad is a [known limitation](#cross-probe--back-annotation-known-limitation): KiCad's cross-probe channel is a private Eeschema–PcbNew link and is not exposed as a public API for external tools.
+> Net/node highlight back-annotation from pqwave to KiCad is supported via the KiCad IPC API (KiCad 10+). See [IPC API Setup](#ipc-api-setup-kicad-10) and [Cross-Probe / Back-Annotation](#cross-probe--back-annotation).
 
 The netlist post-processor fixes four known KiCad export issues automatically:
 
@@ -71,7 +72,7 @@ The KiCad Bridge processes schematics through a three-stage pipeline:
 | Auto-simulate | `true` | Run simulation automatically when schematic is saved |
 | Simulator | `ngspice` | SPICE simulator binary (must be in PATH) |
 | Raw output dir | `$PROJECT_DIR` | Where `.raw` files are written |
-| Cross-probe port | `4243` | Not yet available (see [known limitation](#cross-probe--back-annotation-known-limitation)) |
+| Cross-probe port | `4243` | IPC API port for highlight/back-annotation (requires KiCad 10+ with IPC API enabled) |
 | Netlist fix: strip slashes | `true` | Remove leading `/` from node names |
 | Netlist fix: diode pins | `true` | Swap diode pin order to SPICE convention |
 | Netlist fix: BJT/MOSFET pins | `true` | Reorder transistor pins to SPICE convention |
@@ -122,13 +123,18 @@ KiCad writes schematic text directives in visual order (left-to-right on the she
 
 **Disable individual fixes** via settings if you have manually corrected your schematic or symbol libraries.
 
-### Cross-Probe / Back-Annotation (Known Limitation)
+### Cross-Probe / Back-Annotation
 
 **What it is:** Cross-probe (also called back-annotation) is the ability to click a signal in pqwave and have KiCad Eeschema highlight the corresponding net or component in the schematic. This is a standard feature in integrated EDA+waveform tools — it lets you quickly navigate between simulation results and the circuit design.
 
-**Why it is not yet supported:** KiCad's internal cross-probe mechanism uses a TCP channel on port 4243, but this is a private channel between Eeschema and PcbNew — it is not exposed as a public API for external tools. There is no documented, stable way for a third-party application like pqwave to send highlight commands to Eeschema. Attempts to bridge this gap via KiCad's action plugin system were not viable because the plugin API is focused on PCB operations and offers no schematic highlighting entry point.
+**How it works:** pqwave communicates with KiCad Eeschema via the IPC API (KiCad 10+). When you select a trace in pqwave and choose "Probe in KiCad," pqwave sends a `HighlightNet` action to Eeschema through the `kipy` client library. Moving cursor A along the trace highlights the corresponding net in Eeschema in real time (250ms debounce). You can also clear all highlights from the Cross-Probe menu.
 
-The auto-watch pipeline provides a partial workaround for the Schematic → pqwave direction: saving the schematic in KiCad triggers a full re-export, post-process, and re-simulation in pqwave. New results appear in the signal browser automatically.
+**Requirements:**
+- KiCad 10 or newer with IPC API enabled (Preferences → Plugins → Enable IPC API Server)
+- `kicad-python` (`kipy`) installed in your pqwave Python environment
+- See [IPC API Setup](#ipc-api-setup-kicad-10) for detailed setup instructions
+
+**Fallback behavior:** If the IPC API is unavailable, pqwave falls back to `kicad-cli` for netlist export, but cross-probe highlighting is only available via the IPC API. Without the IPC API, the Schematic → pqwave direction still works: saving the schematic in KiCad triggers a full re-export, post-process, and re-simulation in pqwave. New results appear in the signal browser automatically.
 
 ### Session API Commands
 
@@ -151,13 +157,13 @@ All KiCad Bridge operations are available through the Session API.
 | `kicad_fix_netlist` | `kicad_fix_netlist(netlist_text)` | Apply all post-processing fixes to a netlist string. Returns fixed netlist. |
 | `kicad_fix_info` | `kicad_fix_info(netlist_text)` | Dry-run: report what fixes would be applied without changing anything. |
 
-**Cross-Probe (known limitation — see [above](#cross-probe--back-annotation-known-limitation)):**
+**Cross-Probe (requires IPC API — see [above](#cross-probe--back-annotation)):**
 
 | Command | Signature | Description |
 |---------|-----------|-------------|
-| `kicad_probe_net` | `kicad_probe_net(net_name)` | Not yet functional. |
-| `kicad_probe_part` | `kicad_probe_part(refdes, pin=None)` | Not yet functional. |
-| `kicad_clear` | `kicad_clear()` | Not yet functional. |
+| `kicad_probe_net` | `kicad_probe_net(net_name)` | Highlight a net in KiCad Eeschema (requires KiCad 10+ with IPC API). |
+| `kicad_probe_part` | `kicad_probe_part(refdes, pin=None)` | Highlight a component in KiCad Eeschema (requires KiCad 10+ with IPC API). |
+| `kicad_clear` | `kicad_clear()` | Clear all highlights in KiCad Eeschema. |
 
 **Configuration:**
 
@@ -167,7 +173,7 @@ All KiCad Bridge operations are available through the Session API.
 
 ---
 
-## Part 2 — Worked Tutorials
+## Part 2 — Setup and Worked Tutorials
 
 ### Example Overview
 
@@ -180,9 +186,88 @@ Every tutorial starts from a `.kicad_sch` file in `docs/kicad/examples/`. Open i
 | BJT Amplifier | `bjt_amplifier.kicad_sch` | Two-stage BJT amplifier | Transient 10 ms | BJT pin fix, multi-signal analysis |
 
 **Prerequisites:**
-- KiCad 8.0+ with `kicad-cli` in PATH
+- KiCad 8.0+ with `kicad-cli` in PATH (KiCad 10+ required for IPC API and cross-probe)
 - ngspice 42+ in PATH
 - pqwave installed
+
+---
+
+## IPC API Setup (KiCad 10+)
+
+pqwave supports the KiCad IPC API for netlist export, symbol data access,
+and cross-probe back-annotation.  This is the recommended path for KiCad 10
+and newer.
+
+### Prerequisites
+
+1. **KiCad 10 or newer** installed
+2. **IPC API enabled** in KiCad:
+   - Open KiCad → Preferences → Plugins
+   - Check "Enable IPC API Server"
+   - Restart KiCad
+3. **kicad-python** installed in your pqwave Python environment:
+   ```bash
+   pip install git+https://gitlab.com/kicad/code/kicad-python.git
+   ```
+
+### Verifying the Setup
+
+```bash
+python -c "import kipy; print('kicad-python OK')"
+```
+
+If you see `ModuleNotFoundError`, the package is not installed.
+If you see `kicad-python OK`, you're ready.
+
+### Cross-Probe Back-Annotation
+
+With the IPC API enabled, pqwave can highlight nets and components in
+KiCad Eeschema:
+
+1. **Click a trace** in pqwave to select it
+2. **Right-click → Probe in KiCad** to highlight the corresponding net
+3. **Move cursor A** along the trace — the highlighted net follows (250ms debounce)
+4. **Clear highlights** from the Cross-Probe menu or by clicking Clear
+
+### Connection Status
+
+The KiCad control bar shows the connection state:
+- **Green**: Connected via IPC API
+- **Orange**: Using kicad-cli fallback (cross-probe unavailable)
+- **Red**: Disconnected
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "kicad-python is required" | Install kicad-python from Git: `pip install git+https://gitlab.com/kicad/code/kicad-python.git` |
+| "get_schematic() missing" | Your kicad-python is too old. Reinstall from Git. |
+| "IPC API connection failed" | Check KiCad is running. Preferences → Plugins → Enable IPC API Server. Restart KiCad. |
+| "Connection refused" | KiCad may not have the API server enabled. See above. |
+| Cross-probe doesn't highlight | The action names used by `run_action` may differ in your KiCad version. Report the issue. |
+
+### Falling Back to kicad-cli
+
+If the IPC API is unavailable, pqwave automatically falls back to
+`kicad-cli` for netlist export.  However, **cross-probe is only available
+via the IPC API**.  If you need cross-probe, you must enable the IPC API.
+
+### Workflow (IPC API, Recommended)
+
+1. Open your schematic in **KiCad 10+** (IPC API enabled)
+2. In pqwave: **File → KiCad Bridge → Watch Schematic...**
+3. Select your `.kicad_sch` file
+4. pqwave connects to KiCad via IPC API, exports the SPICE netlist,
+   post-processes it, and runs ngspice
+5. The `.raw` results load automatically
+6. **Cross-probe**: click a trace → right-click "Probe in KiCad" →
+   the net highlights in Eeschema
+
+### Workflow (kicad-cli Fallback)
+
+1. Same as above, but without cross-probe capability
+2. The control bar shows orange "kicad-cli fallback"
+3. Netlist export and simulation still work
 
 ---
 
@@ -442,10 +527,10 @@ api.kicad_config("fix_bjt_pins", False)
 
 ### Cross-probe doesn't highlight in KiCad
 
-1. Verify KiCad Eeschema is running and a schematic is open.
-2. Verify the port: `api.kicad_config("crossprobe_port")` — default `4243`.
-3. Test manually from terminal: `echo '$NET: "GND"' | nc localhost 4243`.
-4. Cross-probe / back-annotation from pqwave to KiCad is a [known limitation](#cross-probe--back-annotation-known-limitation).
+1. Verify KiCad 10+ is running with IPC API enabled: Preferences → Plugins → Enable IPC API Server. Restart KiCad.
+2. Verify `kicad-python` is installed: `python -c "import kipy; print('kicad-python OK')"`.
+3. Check the KiCad control bar — it should show green "Connected via IPC API". If orange, the IPC API is unavailable and cross-probe is disabled.
+4. See [IPC API Setup](#ipc-api-setup-kicad-10) for detailed troubleshooting steps.
 
 ### "kicad-cli not found"
 
