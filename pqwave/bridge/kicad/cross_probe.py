@@ -1,8 +1,8 @@
 """IPC-based cross-probe client for KiCad Eeschema.
 
-Replaces the previous TCP port 4243 approach (which was KiCad's internal
-Eeschema-Pcbnew channel, not a public API).  Uses the IPC API's run_action()
-for highlighting nets and components.
+Uses the KiCad IPC API's AddToSelection and ClearSelection handlers
+to highlight nets and components by resolving names to KIIDs via
+get_netlist() and get_symbols().
 """
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -11,9 +11,12 @@ from PyQt6.QtCore import QObject, pyqtSignal
 class IpcProbeClient(QObject):
     """Sends cross-probe commands to KiCad via the IPC API.
 
-    Uses run_action() to execute Eeschema editor actions for highlighting
-    nets and components.  If run_action proves unreliable for probing
-    specific items, falls back to AddToSelection with KIID resolution.
+    Resolves net names to KIIDs via get_netlist() and component
+    reference designators to KIIDs via get_symbols(), then uses
+    ClearSelection + AddToSelection to highlight items.
+
+    Requires the Eeschema selection IPC handlers (GetSelection,
+    AddToSelection, ClearSelection) added in our KiCad build.
 
     Signals:
         connected():       IPC connection active
@@ -48,78 +51,142 @@ class IpcProbeClient(QObject):
     # ---- Probe operations ----
 
     def probe_net(self, name: str) -> bool:
-        """Highlight a net in the KiCad schematic."""
+        """Highlight a net in KiCad Eeschema by resolving net name → KIIDs.
+
+        Calls get_netlist() to find KIIDs for the named net, then
+        ClearSelection + AddToSelection to highlight them.
+        """
         if not self._kicad:
             self.error_occurred.emit("Not connected to KiCad")
             return False
 
         try:
-            for action in self._net_probe_actions(name):
-                try:
-                    response = self._kicad.run_action(action)
-                    if response.status == 1:  # RAS_OK
-                        return True
-                except Exception:
-                    continue
-            return False
+            schematic = self._kicad.get_schematic()
+            netlist = schematic.get_netlist()
+
+            # Case-insensitive exact match first, then substring
+            target = None
+            name_lower = name.lower()
+            for net in netlist:
+                if net.name.lower() == name_lower:
+                    target = net
+                    break
+            if target is None:
+                for net in netlist:
+                    if name_lower in net.name.lower():
+                        target = net
+                        break
+
+            if target is None:
+                self.error_occurred.emit(
+                    f"Net '{name}' not found in schematic")
+                return False
+
+            # Collect KIIDs from all sheets
+            kiids = []
+            for sheet in target.sheets:
+                kiids.extend(list(sheet.items))
+
+            if not kiids:
+                self.error_occurred.emit(
+                    f"Net '{name}' has no items to select")
+                return False
+
+            return self._select_items(kiids)
+
         except Exception as e:
             self.error_occurred.emit(f"Probe net '{name}' failed: {e}")
             return False
 
     def probe_part(self, ref: str, pin: str | None = None) -> bool:
-        """Highlight a component (and optionally a specific pin) in KiCad."""
+        """Highlight a component in KiCad Eeschema by resolving refdes → KIID.
+
+        Note: pin-level selection is not supported by the current
+        Eeschema IPC API. The pin parameter is accepted for API
+        compatibility with SchematicBridge but is not used.
+        """
         if not self._kicad:
             self.error_occurred.emit("Not connected to KiCad")
             return False
 
         try:
-            for action in self._part_probe_actions(ref, pin):
-                try:
-                    response = self._kicad.run_action(action)
-                    if response.status == 1:  # RAS_OK
-                        return True
-                except Exception:
-                    continue
-            return False
+            schematic = self._kicad.get_schematic()
+            symbols = schematic.get_symbols()
+
+            target_id = None
+            for sym in symbols:
+                if (sym.reference_field
+                        and sym.reference_field.text == ref):
+                    target_id = sym.id
+                    break
+
+            if target_id is None:
+                self.error_occurred.emit(
+                    f"Symbol '{ref}' not found in schematic")
+                return False
+
+            return self._select_items([target_id])
+
         except Exception as e:
             self.error_occurred.emit(f"Probe part '{ref}' failed: {e}")
             return False
 
     def clear(self) -> bool:
-        """Clear all cross-probe highlights in KiCad."""
+        """Clear all cross-probe highlights in KiCad Eeschema."""
         if not self._kicad:
             self.error_occurred.emit("Not connected to KiCad")
             return False
 
         try:
-            response = self._kicad.run_action(
-                "eeschema.InteractiveSelection.ClearSelection"
-            )
-            return response.status == 1  # RAS_OK
+            self._send_clear_selection()
+            return True
         except Exception as e:
             self.error_occurred.emit(f"Clear probe failed: {e}")
             return False
 
-    # ---- Action name generators ----
+    # ---- Internal helpers ----
 
-    def _net_probe_actions(self, name: str) -> list[str]:
-        """Return action names to try for net probing, ordered by preference."""
-        return [
-            f'eeschema.InteractiveSelection.SelectNet "{name}"',
-            f'eeschema.InteractiveSelection.FindAndSelectNet "{name}"',
-        ]
+    def _select_items(self, kiids: list) -> bool:
+        """Clear previous selection, then add *kiids* to selection."""
+        self._send_clear_selection()
+        self._send_add_to_selection(kiids)
+        return True
 
-    def _part_probe_actions(self, ref: str, pin: str | None) -> list[str]:
-        """Return action names to try for part probing.
+    def _send_clear_selection(self) -> None:
+        """Send a ClearSelection IPC command."""
+        from kipy.proto.common.commands.editor_commands_pb2 import (
+            ClearSelection,
+        )
+        from kipy.proto.common.types import (
+            ItemHeader, DocumentSpecifier, DocumentType,
+        )
+        from google.protobuf.empty_pb2 import Empty
 
-        Note: pin-level selection is not supported by the current
-        Eeschema IPC API. The pin parameter is accepted for API
-        compatibility with SchematicBridge but is not used in
-        action names. If the IPC API adds pin selection support,
-        this is where to wire it in.
-        """
-        actions = [
-            f'eeschema.InteractiveSelection.SelectSymbol "{ref}"',
-            f'eeschema.InteractiveSelection.FindAndSelectSymbol "{ref}"',
-        ]
-        return actions
+        doc = DocumentSpecifier()
+        doc.type = DocumentType.DOCTYPE_SCHEMATIC
+        hdr = ItemHeader()
+        hdr.document.CopyFrom(doc)
+
+        req = ClearSelection()
+        req.header.CopyFrom(hdr)
+        self._kicad._client.send(req, Empty)
+
+    def _send_add_to_selection(self, kiids: list) -> None:
+        """Send an AddToSelection IPC command with the given KIIDs."""
+        from kipy.proto.common.commands.editor_commands_pb2 import (
+            AddToSelection, SelectionResponse,
+        )
+        from kipy.proto.common.types import (
+            ItemHeader, DocumentSpecifier, DocumentType,
+        )
+
+        doc = DocumentSpecifier()
+        doc.type = DocumentType.DOCTYPE_SCHEMATIC
+        hdr = ItemHeader()
+        hdr.document.CopyFrom(doc)
+
+        req = AddToSelection()
+        req.header.CopyFrom(hdr)
+        for kiid in kiids:
+            req.items.append(kiid)
+        self._kicad._client.send(req, SelectionResponse)

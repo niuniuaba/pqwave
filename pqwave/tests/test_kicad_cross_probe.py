@@ -17,42 +17,79 @@ class TestIpcProbeClient:
         client.set_kicad(mock_kicad)
         assert client.is_connected()
 
-    def test_probe_net_calls_run_action(self):
+    def _make_kiid(self, value="12345678-1234-1234-1234-123456789abc"):
+        """Create a real KIID protobuf object."""
+        from kipy.proto.common.types import KIID
+        kiid = KIID()
+        kiid.value = value
+        return kiid
+
+    def test_probe_net_resolves_name_to_kiids(self):
         client = IpcProbeClient()
         mock_kicad = MagicMock()
-        mock_kicad.run_action.return_value = MagicMock(status=1)
-        client.set_kicad(mock_kicad)
 
+        mock_net = MagicMock()
+        mock_net.name = "R1"
+        mock_net_sheet = MagicMock()
+        mock_net_sheet.items = [self._make_kiid()]
+        mock_net.sheets = [mock_net_sheet]
+        mock_sch = MagicMock()
+        mock_sch.get_netlist.return_value = [mock_net]
+        mock_kicad.get_schematic.return_value = mock_sch
+        mock_kicad._client = MagicMock()
+
+        client.set_kicad(mock_kicad)
         result = client.probe_net("R1")
 
         assert result is True
-        mock_kicad.run_action.assert_called_once()
+        assert mock_kicad._client.send.call_count == 2
+
+    def test_probe_net_not_found(self):
+        client = IpcProbeClient()
+        mock_kicad = MagicMock()
+        mock_sch = MagicMock()
+        mock_sch.get_netlist.return_value = [MagicMock(name="OTHER")]
+        mock_kicad.get_schematic.return_value = mock_sch
+        mock_kicad._client = MagicMock()
+
+        client.set_kicad(mock_kicad)
+        result = client.probe_net("R1")
+
+        assert result is False
 
     def test_probe_net_when_not_connected(self):
         client = IpcProbeClient()
         result = client.probe_net("R1")
         assert result is False
 
-    def test_probe_part_calls_run_action(self):
+    def test_probe_part_resolves_refdes_to_kiid(self):
         client = IpcProbeClient()
         mock_kicad = MagicMock()
-        mock_kicad.run_action.return_value = MagicMock(status=1)
-        client.set_kicad(mock_kicad)
 
+        mock_sym = MagicMock()
+        mock_sym.reference_field.text = "Q1"
+        mock_sym.id = self._make_kiid()
+        mock_sch = MagicMock()
+        mock_sch.get_symbols.return_value = [mock_sym]
+        mock_kicad.get_schematic.return_value = mock_sch
+        mock_kicad._client = MagicMock()
+
+        client.set_kicad(mock_kicad)
         result = client.probe_part("Q1")
 
         assert result is True
+        assert mock_kicad._client.send.call_count == 2
 
-    def test_clear_probe(self):
+    def test_clear_probe_sends_clear_selection(self):
         client = IpcProbeClient()
         mock_kicad = MagicMock()
-        mock_kicad.run_action.return_value = MagicMock(status=1)
+        mock_kicad._client = MagicMock()
         client.set_kicad(mock_kicad)
 
         result = client.clear()
 
         assert result is True
-        mock_kicad.run_action.assert_called_once()
+        mock_kicad._client.send.assert_called_once()
 
     def test_disconnect_clears_kicad_ref(self):
         client = IpcProbeClient()
