@@ -919,11 +919,22 @@ class MainWindow(QMainWindow):
     def _kicad_probe_active_trace(self):
         """Cross-probe the active panel's selected trace net in KiCad via IPC API."""
         if not self._kicad_bridge:
+            self.chat_panel.append_output(
+                "[kicad] No KiCad bridge active. "
+                "Use File → KiCad Bridge → Watch Schematic first.\n"
+            )
             return
         if self._kicad_connect_failed:
+            self.chat_panel.append_output(
+                "[kicad] Cross-probe unavailable — KiCad IPC API not reachable. "
+                "Ensure KiCad is running with IPC API enabled.\n"
+            )
             return
         if not self._kicad_bridge._ensure_ipc():
             self._kicad_connect_failed = True
+            self.chat_panel.append_output(
+                "[kicad] Cross-probe unavailable — KiCad IPC API not reachable.\n"
+            )
             return
         self._kicad_connect_failed = False
         panel = self.panel_grid.get_active_panel()
@@ -935,6 +946,7 @@ class MainWindow(QMainWindow):
         _, trace = selected[0]
         net = self._extract_net_name(trace.expression)
         self._kicad_bridge.probe_net(net)
+        self.chat_panel.append_output(f"[kicad] Probing net: {net}\n")
 
     def _on_kicad_probe_selected(self):
         """Menu action: cross-probe the currently active trace's net in KiCad."""
@@ -4012,11 +4024,15 @@ class MainWindow(QMainWindow):
             a.triggered.connect(
                 lambda _, _tm=tm: _tm.ungroup_bus(trace_name))
 
-        # Lepton-EDA cross-probe (only when bridge is active)
-        if self._lepton_cross_probe is not None:
-            menu.addSeparator()
-            a = menu.addAction("Probe in Lepton-EDA")
-            a.triggered.connect(lambda _: self._lepton_probe_active_trace(force_reconnect=True))
+        # KiCad cross-probe (lazy-creates bridge on first use)
+        menu.addSeparator()
+        a = menu.addAction("Probe in KiCad")
+        a.triggered.connect(lambda _: self._kicad_probe_active_trace())
+
+        # Lepton-EDA cross-probe (lazy-creates client on first use)
+        menu.addSeparator()
+        a = menu.addAction("Probe in Lepton-EDA")
+        a.triggered.connect(lambda _: self._lepton_probe_active_trace(force_reconnect=True))
 
         # Xschem cross-probe (lazy-creates client on first use)
         menu.addSeparator()
