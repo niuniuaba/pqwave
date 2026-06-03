@@ -76,10 +76,10 @@ class KiCadBridge(SchematicBridge):
         try:
             if self._ensure_ipc():
                 return self._export_netlist_via_ipc()
-        except Exception:
+        except Exception as e:
             # Any IPC failure (kicad-python missing, connection dropped,
             # export failed, etc.) — fall through to kicad-cli
-            _log.info("IPC API not available, using kicad-cli fallback")
+            _log.info("IPC API not available, using kicad-cli fallback: %s", e)
 
         # Fallback: kicad-cli subprocess
         return self._export_netlist_via_kicad_cli(sch_path)
