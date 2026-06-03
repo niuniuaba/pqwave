@@ -1,6 +1,5 @@
 """KiCad-specific SchematicBridge implementation."""
 
-import logging
 import os
 import re
 import shutil
@@ -13,60 +12,13 @@ from pqwave.bridge.kicad.fixes import StripSlashes, FixDiodePins, FixBJTPins, Mo
 from pqwave.bridge.netlist_postprocessor import NetlistPostProcessor
 from pqwave.models.state import ApplicationState
 
-_log = logging.getLogger(__name__)
-
-_kipy_available = None  # None = unchecked, True/False = result
-# NOTE: This is a module-level cache shared across all KiCadBridge instances.
-# Once set to True/False, it persists for the process lifetime.  This is
-# intentional — kicad-python is either installed or it isn't, and we don't
-# want to re-import kipy on every _ensure_ipc() call.  Tests can reset it
-# via _reset_kipy_availability().
-
-
-def _reset_kipy_availability() -> None:
-    """Reset the module-level kipy availability cache.  For testing only."""
-    global _kipy_available
-    _kipy_available = None
-
-
-def _check_kipy_functionality() -> tuple[bool, str]:
-    """Check if kipy has the APIs we need. Returns (ok, error_message)."""
-    global _kipy_available
-    try:
-        import kipy
-    except ImportError as e:
-        _kipy_available = False
-        return False, (
-            f"kicad-python import failed: {e}\n"
-            "kicad-python is required for KiCad IPC API integration.\n"
-            "Install it with:\n"
-            "  pip install git+https://gitlab.com/kicad/code/kicad-python.git\n"
-            "See: https://pypi.org/project/kicad-python/"
-        )
-
-    # Only check get_schematic at import time — export_netlist and
-    # get_symbols are methods on the Schematic handle returned by
-    # get_schematic() and cannot be verified without a live connection.
-    # If get_schematic() exists, the returned object is virtually
-    # guaranteed to have those methods on KiCad 10+.
-    if not hasattr(kipy.KiCad, "get_schematic"):
-        _kipy_available = False
-        return False, (
-            "Installed kicad-python lacks get_schematic().\n"
-            "Install the latest version from Git:\n"
-            "  pip install git+https://gitlab.com/kicad/code/kicad-python.git"
-        )
-
-    _kipy_available = True
-    return True, ""
-
 
 class KiCadBridge(SchematicBridge):
     """SchematicBridge for KiCad Eeschema.
 
-    Uses the KiCad IPC API (primary) or kicad-cli (fallback) for netlist
-    export, ngspice for simulation, and the IPC API via IpcProbeClient for
-    cross-probe back-annotation (KiCad 10+).
+    Uses kicad-cli for netlist export and ngspice for simulation.
+    Cross-probe back-annotation requires KiCad's schematic IPC API
+    (selection/action handlers — not yet available in KiCad 10.99.0).
 
     Tool detection follows the same pattern as FstAdapter._resolve_tool()
     and GhwAdapter._resolve_tool(): shutil.which() with tool_paths override.
@@ -77,57 +29,9 @@ class KiCadBridge(SchematicBridge):
         self._kicad_cli = kicad_cli_path
         self._ngspice = ngspice_path
 
-        # IPC API state (lazy-initialized)
-        self._kipy_kicad = None       # kipy.KiCad instance
-        self._ipc_failed = False      # True if IPC connection was attempted and failed
-        self._ipc_available = None    # None = unchecked, True/False = result
-        self._ipc_probe_client = None  # IpcProbeClient, lazy-initialized
-
     # ---- SchematicBridge implementation ----
 
     def export_netlist(self, sch_path: str) -> str:
-        """Export SPICE netlist from a .kicad_sch file.
-
-        Primary path: IPC API schematic.export_netlist(SNF_SPICE).
-        Fallback path: kicad-cli sch export netlist --format spice.
-        """
-        # Try IPC path first
-        try:
-            if self._ensure_ipc():
-                return self._export_netlist_via_ipc()
-        except Exception as e:
-            # Any IPC failure (kicad-python missing, connection dropped,
-            # export failed, etc.) — fall through to kicad-cli
-            _log.info("IPC API not available, using kicad-cli fallback: %s", e)
-
-        # Fallback: kicad-cli subprocess
-        return self._export_netlist_via_kicad_cli(sch_path)
-
-    def _export_netlist_via_ipc(self) -> str:
-        """Export netlist via IPC API schematic.export_netlist(SNF_SPICE)."""
-        from kipy.proto.schematic import schematic_jobs_pb2
-
-        fd, tmp_path = tempfile.mkstemp(suffix=".cir", prefix="pqwave_kicad_ipc_")
-        os.close(fd)
-        try:
-            schematic = self._kipy_kicad.get_schematic()
-            result = schematic.export_netlist(
-                tmp_path, format=schematic_jobs_pb2.SNF_SPICE
-            )
-            if not result.succeeded:
-                raise RuntimeError(f"IPC netlist export failed: {result}")
-
-            # Read back the exported file
-            output_path = result.output_path[0] if result.output_path else tmp_path
-            with open(output_path, "r") as f:
-                return f.read()
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-    def _export_netlist_via_kicad_cli(self, sch_path: str) -> str:
         """Export SPICE netlist from a .kicad_sch file via kicad-cli."""
         kicad_cli = self._resolve_kicad_cli()
 
@@ -156,31 +60,25 @@ class KiCadBridge(SchematicBridge):
         return [StripSlashes(), FixDiodePins(), FixBJTPins(), MoveControlBlock()]
 
     def probe_net(self, net_name: str) -> None:
-        """Cross-probe: highlight a net in the KiCad schematic via IPC API."""
-        if not self._ensure_ipc():
-            _log.warning(
-                "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"
-            )
-            return
-        self._ensure_ipc_probe_client().probe_net(net_name)
+        """Cross-probe: highlight a net in KiCad Eeschema.
+
+        Not yet functional — requires KiCad schematic IPC API
+        selection handlers (RunAction, AddToSelection) which are
+        not yet implemented for Eeschema (as of KiCad 10.99.0).
+        """
+        import logging
+        _log = logging.getLogger(__name__)
+        _log.debug("Cross-probe not available: KiCad schematic IPC API "
+                    "selection handlers not yet implemented.")
 
     def probe_part(self, ref: str, pin: Optional[str] = None) -> None:
-        """Cross-probe: highlight a component or pin in the KiCad schematic."""
-        if not self._ensure_ipc():
-            _log.warning(
-                "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"
-            )
-            return
-        self._ensure_ipc_probe_client().probe_part(ref, pin)
+        """Cross-probe: highlight a component in KiCad Eeschema.
+
+        Not yet functional — see probe_net().
+        """
 
     def clear_probe(self) -> None:
-        """Clear all cross-probe highlights via IPC API."""
-        if self._ipc_available:
-            client = getattr(self, "_ipc_probe_client", None)
-            if client:
-                client.clear()
-        else:
-            _log.debug("No active IPC connection; nothing to clear")
+        """Clear cross-probe highlights. Not yet functional — see probe_net()."""
 
     def detect_tool(self) -> Optional[str]:
         try:
@@ -262,55 +160,6 @@ class KiCadBridge(SchematicBridge):
         return {"sim_pins": self.extract_sim_pins(sch_path)}
 
     def extract_sim_pins(self, sch_path: str) -> dict[str, dict[str, str]]:
-        """Parse Sim.Pins from the schematic.
-
-        Primary path: IPC API schematic.get_symbols() — structured objects.
-        Fallback path: S-expression regex parsing of .kicad_sch file.
-        """
-        try:
-            if self._ensure_ipc():
-                return self._extract_sim_pins_ipc()
-        except Exception:
-            _log.info("IPC not available for Sim.Pins, using regex fallback")
-
-        return self._extract_sim_pins_regex(sch_path)
-
-    def _extract_sim_pins_ipc(self) -> dict[str, dict[str, str]]:
-        """Extract Sim.Pins from all symbols via IPC API.
-
-        Returns a dict mapping reference designator → {pin_number: pin_name, ...}.
-        Example: {"Q1": {"1": "E", "2": "B", "3": "C"}, "D1": {"1": "K", "2": "A"}}
-        """
-        schematic = self._kipy_kicad.get_schematic()
-        symbols = schematic.get_symbols()
-
-        result: dict[str, dict[str, str]] = {}
-        for sym in symbols:
-            # Get reference designator
-            ref = None
-            if sym.reference_field and sym.reference_field.text:
-                ref = sym.reference_field.text
-
-            if not ref:
-                continue
-
-            pin_map: dict[str, str] = {}
-            if sym.definition:
-                for child in sym.definition.items:
-                    item = getattr(child, "item", None)
-                    if item is None:
-                        continue
-                    number = getattr(item, "number", None)
-                    name = getattr(item, "name", None)
-                    if number is not None and name is not None:
-                        pin_map[str(number)] = str(name)
-
-            if pin_map:
-                result[ref] = pin_map
-
-        return result
-
-    def _extract_sim_pins_regex(self, sch_path: str) -> dict[str, dict[str, str]]:
         """Parse Sim.Pins from a .kicad_sch S-expression file.
 
         Returns a dict mapping reference designators to pin mappings:
@@ -365,118 +214,3 @@ class KiCadBridge(SchematicBridge):
 
     def _resolve_ngspice(self) -> str:
         return resolve_ngspice(self._ngspice)
-
-    def _ensure_ipc_probe_client(self):
-        """Lazy-initialize or reuse the IpcProbeClient.
-
-        Only creates a new client when the KiCad instance has changed
-        (e.g., after a reconnect).  Lesson learned #6: always disconnect
-        the old client before creating a new one.
-        """
-        from pqwave.bridge.kicad.cross_probe import IpcProbeClient
-
-        existing = getattr(self, "_ipc_probe_client", None)
-        if existing is not None and existing._kicad is self._kipy_kicad:
-            return existing  # cache hit — same KiCad instance
-
-        if existing is not None:
-            existing.disconnect()
-
-        client = IpcProbeClient()
-        client.set_kicad(self._kipy_kicad)
-        self._ipc_probe_client = client
-        return client
-
-    # ---- IPC API connection ----
-
-    def _ensure_ipc(self) -> bool:
-        """Establish IPC connection to KiCad if not already connected.
-
-        Returns True if IPC is available and connected.
-        Returns False if IPC is unavailable (kicad-python missing, KiCad
-        not running, API disabled, or required APIs absent).
-        Caches the connection for reuse; reconnects if dropped.
-        """
-        # Already connected — verify liveness before reuse
-        if self._kipy_kicad is not None and self._ipc_available:
-            try:
-                self._kipy_kicad.ping()
-                return True
-            except Exception:
-                _log.debug("IPC connection lost, reconnecting...")
-                self._kipy_kicad = None
-                self._ipc_available = None
-                if self._ipc_probe_client is not None:
-                    self._ipc_probe_client.disconnect()
-                    self._ipc_probe_client = None
-                # Fall through to reconnect logic below
-
-        # Already tried and failed — don't retry in same session
-        if self._ipc_failed:
-            return False
-
-        # Check kicad-python functionality
-        if _kipy_available is None:
-            ok, msg = _check_kipy_functionality()
-            if not ok:
-                self._ipc_failed = True
-                self._ipc_available = False
-                _log.warning(msg)
-                return False
-
-        if not _kipy_available:
-            self._ipc_failed = True
-            self._ipc_available = False
-            _log.warning(
-                "kicad-python is not available for KiCad IPC API integration."
-            )
-            return False
-
-        # Connect
-        import kipy
-
-        socket_path = os.environ.get("KICAD_API_SOCKET")
-        if not socket_path:
-            # KiCad uses the system temp dir, not Python's tempfile.gettempdir()
-            # (which may be sandboxed, e.g. /tmp/claude-1000).
-            socket_path = "/tmp/kicad/api.sock"
-        if not socket_path.startswith("ipc://"):
-            socket_path = f"ipc://{socket_path}"
-
-        try:
-            self._kipy_kicad = kipy.KiCad(socket_path=socket_path, timeout_ms=5000)
-            # Verify the API server is serving schematic data (confirms we're
-            # connected to Eeschema, not just any KiCad instance)
-            self._kipy_kicad.get_schematic()
-            self._ipc_available = True
-            self._ipc_failed = False
-            return True
-        except Exception as e:
-            self._ipc_failed = True
-            self._ipc_available = False
-            if self._kipy_kicad is not None:
-                try:
-                    self._kipy_kicad.close()
-                except Exception:
-                    pass
-            self._kipy_kicad = None
-            _log.warning(
-                "KiCad IPC API connection failed: %s. Falling back to kicad-cli.", e
-            )
-            return False
-
-    def _disconnect_ipc(self) -> None:
-        """Close the IPC connection and reset state.
-
-        Resets per-connection state (_ipc_failed, _ipc_available) but does
-        NOT reset the module-level _kipy_available cache — kicad-python
-        is either installed or it isn't for the process lifetime.
-        """
-        if self._kipy_kicad is not None:
-            try:
-                self._kipy_kicad.close()
-            except Exception:
-                pass
-            self._kipy_kicad = None
-        self._ipc_available = None
-        self._ipc_failed = False
