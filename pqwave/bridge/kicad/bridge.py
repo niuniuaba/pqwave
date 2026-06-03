@@ -8,24 +8,23 @@ import subprocess
 import tempfile
 from typing import Optional
 
-_log = logging.getLogger(__name__)
-
 from pqwave.bridge.schem_bridge import SchematicBridge, NetlistFix, resolve_ngspice
 from pqwave.bridge.kicad.fixes import StripSlashes, FixDiodePins, FixBJTPins, MoveControlBlock
 from pqwave.bridge.netlist_postprocessor import NetlistPostProcessor
 from pqwave.models.state import ApplicationState
 
+_log = logging.getLogger(__name__)
 
-_KIPY_AVAILABLE = None  # None = unchecked, True/False = result
+_kipy_available = None  # None = unchecked, True/False = result
 
 
 def _check_kipy_functionality() -> tuple[bool, str]:
     """Check if kipy has the APIs we need. Returns (ok, error_message)."""
-    global _KIPY_AVAILABLE
+    global _kipy_available
     try:
         import kipy
     except ImportError:
-        _KIPY_AVAILABLE = False
+        _kipy_available = False
         return False, (
             "kicad-python is required for KiCad IPC API integration.\n"
             "Install it with:\n"
@@ -34,14 +33,14 @@ def _check_kipy_functionality() -> tuple[bool, str]:
         )
 
     if not hasattr(kipy.KiCad, "get_schematic"):
-        _KIPY_AVAILABLE = False
+        _kipy_available = False
         return False, (
             "Installed kicad-python lacks get_schematic().\n"
             "Install the latest version from Git:\n"
             "  pip install git+https://gitlab.com/kicad/code/kicad-python.git"
         )
 
-    _KIPY_AVAILABLE = True
+    _kipy_available = True
     return True, ""
 
 
@@ -273,15 +272,15 @@ class KiCadBridge(SchematicBridge):
             return False
 
         # Check kicad-python functionality
-        global _KIPY_AVAILABLE
-        if _KIPY_AVAILABLE is None:
+        global _kipy_available
+        if _kipy_available is None:
             ok, msg = _check_kipy_functionality()
             if not ok:
                 self._ipc_failed = True
                 self._ipc_available = False
                 raise RuntimeError(msg)
 
-        if not _KIPY_AVAILABLE:
+        if not _kipy_available:
             self._ipc_failed = True
             self._ipc_available = False
             raise RuntimeError(
@@ -299,9 +298,9 @@ class KiCadBridge(SchematicBridge):
 
         try:
             self._kipy_kicad = kipy.KiCad(socket_path=socket_path, timeout_ms=5000)
-            # Verify we can get a schematic handle (confirms API server is active
-            # and the connected editor is Eeschema)
-            _ = self._kipy_kicad.get_schematic()
+            # Verify the API server is serving schematic data (confirms we're
+            # connected to Eeschema, not just any KiCad instance)
+            self._kipy_kicad.get_schematic()
             self._ipc_available = True
             self._ipc_failed = False
             return True

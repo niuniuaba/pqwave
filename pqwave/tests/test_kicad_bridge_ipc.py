@@ -11,7 +11,7 @@ class TestEnsureIpc:
 
     def test_raises_runtime_error_when_kipy_not_installed(self):
         bridge = KiCadBridge()
-        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", False):
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", False):
             with pytest.raises(RuntimeError, match="kicad-python"):
                 bridge._ensure_ipc()
 
@@ -26,7 +26,7 @@ class TestEnsureIpc:
         mock_kicad_class.return_value = mock_kicad_instance
         mock_kipy.KiCad = mock_kicad_class
 
-        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", True):
             with patch.dict("sys.modules", {"kipy": mock_kipy}):
                 result = bridge._ensure_ipc()
         assert result is False
@@ -38,7 +38,7 @@ class TestEnsureIpc:
         mock_kicad.get_schematic = MagicMock()  # hasattr passes
         mock_kipy.KiCad.return_value = mock_kicad
 
-        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", True):
             with patch.dict("sys.modules", {"kipy": mock_kipy}):
                 result = bridge._ensure_ipc()
 
@@ -54,7 +54,7 @@ class TestEnsureIpc:
         mock_kicad.get_schematic = MagicMock()
         mock_kipy.KiCad.return_value = mock_kicad
 
-        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", True):
             with patch.dict("sys.modules", {"kipy": mock_kipy}):
                 bridge._ensure_ipc()
                 bridge._ensure_ipc()
@@ -71,7 +71,7 @@ class TestEnsureIpc:
         mock_kicad2.get_schematic = MagicMock()
         mock_kipy.KiCad.side_effect = [mock_kicad1, mock_kicad2]
 
-        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", True):
             with patch.dict("sys.modules", {"kipy": mock_kipy}):
                 bridge._ensure_ipc()
                 # Simulate connection check failure
@@ -87,7 +87,7 @@ class TestEnsureIpc:
         mock_kipy = MagicMock()
         mock_kipy.KiCad.side_effect = Exception("Connection refused")
 
-        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", True):
             with patch.dict("sys.modules", {"kipy": mock_kipy}):
                 result = bridge._ensure_ipc()
 
@@ -100,7 +100,7 @@ class TestEnsureIpc:
         mock_kipy = MagicMock()
         mock_kipy.KiCad.side_effect = Exception("Connection refused")
 
-        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", True):
             with patch.dict("sys.modules", {"kipy": mock_kipy}):
                 result = bridge._ensure_ipc()
 
@@ -116,3 +116,58 @@ class TestEnsureIpc:
         bridge = KiCadBridge()
         bridge._ipc_available = None
         assert bridge._ipc_available is None
+
+    def test_uses_kicad_api_socket_env_var(self):
+        bridge = KiCadBridge()
+        mock_kipy = MagicMock()
+        mock_kicad = MagicMock()
+        mock_kicad.get_schematic = MagicMock()
+        mock_kipy.KiCad.return_value = mock_kicad
+
+        with patch("pqwave.bridge.kicad.bridge._kipy_available", True):
+            with patch.dict("sys.modules", {"kipy": mock_kipy}):
+                with patch.dict("os.environ", {"KICAD_API_SOCKET": "/custom/path/api.sock"}):
+                    bridge._ensure_ipc()
+
+        # Connection should have been called with the custom socket path
+        call_kwargs = mock_kipy.KiCad.call_args
+        socket_arg = (
+            call_kwargs[1].get("socket_path", call_kwargs[0][0] if call_kwargs[0] else None)
+        )
+        assert "/custom/path/api.sock" in str(socket_arg)
+
+
+class TestDisconnectIpc:
+    """Tests for _disconnect_ipc() cleanup."""
+
+    def test_disconnect_closes_kicad_instance(self):
+        bridge = KiCadBridge()
+        mock_kicad = MagicMock()
+        bridge._kipy_kicad = mock_kicad
+        bridge._ipc_available = True
+        bridge._ipc_failed = False
+
+        bridge._disconnect_ipc()
+
+        assert bridge._kipy_kicad is None
+        assert bridge._ipc_available is None
+        assert bridge._ipc_failed is False
+        mock_kicad.close.assert_called_once()
+
+    def test_disconnect_handles_close_error_gracefully(self):
+        bridge = KiCadBridge()
+        mock_kicad = MagicMock()
+        mock_kicad.close.side_effect = Exception("socket already closed")
+        bridge._kipy_kicad = mock_kicad
+
+        bridge._disconnect_ipc()  # should not raise
+
+        assert bridge._kipy_kicad is None
+
+    def test_disconnect_when_not_connected_is_noop(self):
+        bridge = KiCadBridge()
+        bridge._kipy_kicad = None
+
+        bridge._disconnect_ipc()  # should not raise
+
+        assert bridge._kipy_kicad is None
