@@ -63,6 +63,7 @@ class KiCadBridge(SchematicBridge):
         self._kipy_kicad = None       # kipy.KiCad instance
         self._ipc_failed = False      # True if IPC connection was attempted and failed
         self._ipc_available = None    # None = unchecked, True/False = result
+        self._ipc_probe_client = None  # IpcProbeClient, lazy-initialized
 
     # ---- SchematicBridge implementation ----
 
@@ -137,13 +138,31 @@ class KiCadBridge(SchematicBridge):
         return [StripSlashes(), FixDiodePins(), FixBJTPins(), MoveControlBlock()]
 
     def probe_net(self, net_name: str) -> None:
-        self._ensure_cross_probe().probe_net(net_name)
+        """Cross-probe: highlight a net in the KiCad schematic via IPC API."""
+        if not self._ensure_ipc():
+            _log.warning(
+                "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"
+            )
+            return
+        self._ensure_ipc_probe_client().probe_net(net_name)
 
     def probe_part(self, ref: str, pin: Optional[str] = None) -> None:
-        self._ensure_cross_probe().probe_part(ref, pin)
+        """Cross-probe: highlight a component or pin in the KiCad schematic."""
+        if not self._ensure_ipc():
+            _log.warning(
+                "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"
+            )
+            return
+        self._ensure_ipc_probe_client().probe_part(ref, pin)
 
     def clear_probe(self) -> None:
-        self._ensure_cross_probe().clear()
+        """Clear all cross-probe highlights via IPC API."""
+        if self._ipc_available:
+            client = getattr(self, "_ipc_probe_client", None)
+            if client:
+                client.clear()
+        else:
+            _log.debug("No active IPC connection; nothing to clear")
 
     def detect_tool(self) -> Optional[str]:
         try:
@@ -329,13 +348,21 @@ class KiCadBridge(SchematicBridge):
     def _resolve_ngspice(self) -> str:
         return resolve_ngspice(self._ngspice)
 
-    def _ensure_cross_probe(self):
-        """Lazy-import CrossProbeClient to avoid circular dependencies."""
-        from pqwave.bridge.kicad.cross_probe import CrossProbeClient
+    def _ensure_ipc_probe_client(self):
+        """Lazy-initialize the IpcProbeClient with the current KiCad instance.
 
-        if not hasattr(self, "_cross_probe") or self._cross_probe is None:
-            self._cross_probe = CrossProbeClient()
-        return self._cross_probe
+        Lesson learned #6: disconnect old client before creating new one.
+        """
+        from pqwave.bridge.kicad.cross_probe import IpcProbeClient
+
+        old = getattr(self, "_ipc_probe_client", None)
+        if old is not None:
+            old.disconnect()
+
+        client = IpcProbeClient()
+        client.set_kicad(self._kipy_kicad)
+        self._ipc_probe_client = client
+        return client
 
     # ---- IPC API connection ----
 
