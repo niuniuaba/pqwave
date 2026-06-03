@@ -9,11 +9,12 @@ from pqwave.bridge.kicad.bridge import KiCadBridge
 class TestEnsureIpc:
     """Tests for _ensure_ipc() lazy connection."""
 
-    def test_raises_runtime_error_when_kipy_not_installed(self):
+    def test_returns_false_when_kipy_not_installed(self):
         bridge = KiCadBridge()
         with patch("pqwave.bridge.kicad.bridge._kipy_available", False):
-            with pytest.raises(RuntimeError, match="kicad-python"):
-                bridge._ensure_ipc()
+            result = bridge._ensure_ipc()
+        assert result is False
+        assert bridge._ipc_available is False
 
     def test_returns_false_when_get_schematic_missing(self):
         bridge = KiCadBridge()

@@ -34,15 +34,21 @@ def _check_kipy_functionality() -> tuple[bool, str]:
     global _kipy_available
     try:
         import kipy
-    except ImportError:
+    except ImportError as e:
         _kipy_available = False
         return False, (
+            f"kicad-python import failed: {e}\n"
             "kicad-python is required for KiCad IPC API integration.\n"
             "Install it with:\n"
             "  pip install git+https://gitlab.com/kicad/code/kicad-python.git\n"
             "See: https://pypi.org/project/kicad-python/"
         )
 
+    # Only check get_schematic at import time — export_netlist and
+    # get_symbols are methods on the Schematic handle returned by
+    # get_schematic() and cannot be verified without a live connection.
+    # If get_schematic() exists, the returned object is virtually
+    # guaranteed to have those methods on KiCad 10+.
     if not hasattr(kipy.KiCad, "get_schematic"):
         _kipy_available = False
         return False, (
@@ -58,8 +64,9 @@ def _check_kipy_functionality() -> tuple[bool, str]:
 class KiCadBridge(SchematicBridge):
     """SchematicBridge for KiCad Eeschema.
 
-    Uses kicad-cli for netlist export, ngspice for simulation, and KiCad's
-    built-in cross-probe server (port 4243) for back-annotation.
+    Uses the KiCad IPC API (primary) or kicad-cli (fallback) for netlist
+    export, ngspice for simulation, and the IPC API via IpcProbeClient for
+    cross-probe back-annotation (KiCad 10+).
 
     Tool detection follows the same pattern as FstAdapter._resolve_tool()
     and GhwAdapter._resolve_tool(): shutil.which() with tool_paths override.
@@ -399,6 +406,9 @@ class KiCadBridge(SchematicBridge):
                 _log.debug("IPC connection lost, reconnecting...")
                 self._kipy_kicad = None
                 self._ipc_available = None
+                if self._ipc_probe_client is not None:
+                    self._ipc_probe_client.disconnect()
+                    self._ipc_probe_client = None
                 # Fall through to reconnect logic below
 
         # Already tried and failed — don't retry in same session
@@ -406,20 +416,21 @@ class KiCadBridge(SchematicBridge):
             return False
 
         # Check kicad-python functionality
-        global _kipy_available
         if _kipy_available is None:
             ok, msg = _check_kipy_functionality()
             if not ok:
                 self._ipc_failed = True
                 self._ipc_available = False
-                raise RuntimeError(msg)
+                _log.warning(msg)
+                return False
 
         if not _kipy_available:
             self._ipc_failed = True
             self._ipc_available = False
-            raise RuntimeError(
+            _log.warning(
                 "kicad-python is not available for KiCad IPC API integration."
             )
+            return False
 
         # Connect
         import kipy
@@ -448,7 +459,12 @@ class KiCadBridge(SchematicBridge):
             return False
 
     def _disconnect_ipc(self) -> None:
-        """Close the IPC connection and reset state."""
+        """Close the IPC connection and reset state.
+
+        Resets per-connection state (_ipc_failed, _ipc_available) but does
+        NOT reset the module-level _kipy_available cache — kicad-python
+        is either installed or it isn't for the process lifetime.
+        """
         if self._kipy_kicad is not None:
             try:
                 self._kipy_kicad.close()

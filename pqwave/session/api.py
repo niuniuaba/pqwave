@@ -538,6 +538,8 @@ class SessionAPI:
             self._on_mutation("kicad_clear")
             return {"status": "ok"}
         bridge = self._get_kicad_bridge()
+        # Check _ipc_available directly rather than calling _ensure_ipc():
+        # we don't want to trigger a connection just to clear highlights.
         if bridge and bridge._ipc_available:
             bridge.clear_probe()
             return {"status": "ok"}

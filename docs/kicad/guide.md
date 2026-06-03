@@ -72,7 +72,7 @@ The KiCad Bridge processes schematics through a three-stage pipeline:
 | Auto-simulate | `true` | Run simulation automatically when schematic is saved |
 | Simulator | `ngspice` | SPICE simulator binary (must be in PATH) |
 | Raw output dir | `$PROJECT_DIR` | Where `.raw` files are written |
-| Cross-probe port | `4243` | IPC API port for highlight/back-annotation (requires KiCad 10+ with IPC API enabled) |
+| IPC API | auto-detected | Automatically uses IPC API when KiCad 10+ is running with API enabled; falls back to kicad-cli |
 | Netlist fix: strip slashes | `true` | Remove leading `/` from node names |
 | Netlist fix: diode pins | `true` | Swap diode pin order to SPICE convention |
 | Netlist fix: BJT/MOSFET pins | `true` | Reorder transistor pins to SPICE convention |
@@ -169,7 +169,7 @@ All KiCad Bridge operations are available through the Session API.
 
 | Command | Signature | Description |
 |---------|-----------|-------------|
-| `kicad_config` | `kicad_config(key, value=None)` | Get or set bridge configuration. Keys: `watch_paths`, `auto_simulate`, `simulator`, `raw_output_dir`, `crossprobe_port`, `fix_slashes`, `fix_diode_pins`, `fix_bjt_pins`. |
+| `kicad_config` | `kicad_config(key, value=None)` | Get or set bridge configuration. Keys: `watch_paths`, `auto_simulate`, `simulator`, `raw_output_dir`, `fix_slashes`, `fix_diode_pins`, `fix_bjt_pins`. |
 
 ---
 
