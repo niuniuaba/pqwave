@@ -9,20 +9,22 @@ from pqwave.bridge.kicad.bridge import KiCadBridge
 class TestEnsureIpc:
     """Tests for _ensure_ipc() lazy connection."""
 
-    def test_returns_false_when_kipy_not_installed(self):
+    def test_raises_runtime_error_when_kipy_not_installed(self):
         bridge = KiCadBridge()
         with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", False):
-            result = bridge._ensure_ipc()
-        assert result is False
-        assert bridge._ipc_available is False
+            with pytest.raises(RuntimeError, match="kicad-python"):
+                bridge._ensure_ipc()
 
     def test_returns_false_when_get_schematic_missing(self):
         bridge = KiCadBridge()
         mock_kipy = MagicMock()
-        mock_kicad = MagicMock()
-        # get_schematic not present
-        del mock_kicad.get_schematic
-        mock_kipy.KiCad.return_value = mock_kicad
+
+        # Use spec=[] so only explicitly set attrs exist — get_schematic
+        # is NOT set on the instance, so accessing it will raise AttributeError.
+        mock_kicad_class = MagicMock()
+        mock_kicad_instance = MagicMock(spec=[])
+        mock_kicad_class.return_value = mock_kicad_instance
+        mock_kipy.KiCad = mock_kicad_class
 
         with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
             with patch.dict("sys.modules", {"kipy": mock_kipy}):
@@ -91,6 +93,19 @@ class TestEnsureIpc:
 
         assert result is False
         assert bridge._ipc_available is False
+
+    def test_connection_error_returns_false_not_raises(self):
+        """Connection failures should gracefully return False, not raise."""
+        bridge = KiCadBridge()
+        mock_kipy = MagicMock()
+        mock_kipy.KiCad.side_effect = Exception("Connection refused")
+
+        with patch("pqwave.bridge.kicad.bridge._KIPY_AVAILABLE", True):
+            with patch.dict("sys.modules", {"kipy": mock_kipy}):
+                result = bridge._ensure_ipc()
+
+        assert result is False
+        assert bridge._ipc_failed is True
 
     def test_ipc_available_property_when_connected(self):
         bridge = KiCadBridge()

@@ -64,7 +64,6 @@ class KiCadBridge(SchematicBridge):
         self._kipy_kicad = None       # kipy.KiCad instance
         self._ipc_failed = False      # True if IPC connection was attempted and failed
         self._ipc_available = None    # None = unchecked, True/False = result
-        self._ipc_probe_client = None  # IpcProbeClient, lazily created
 
     # ---- SchematicBridge implementation ----
 
@@ -258,9 +257,16 @@ class KiCadBridge(SchematicBridge):
         not running, API disabled, or required APIs absent).
         Caches the connection for reuse; reconnects if dropped.
         """
-        # Already connected — reuse
+        # Already connected — verify liveness before reuse
         if self._kipy_kicad is not None and self._ipc_available:
-            return True
+            try:
+                self._kipy_kicad.ping()
+                return True
+            except Exception:
+                _log.debug("IPC connection lost, reconnecting...")
+                self._kipy_kicad = None
+                self._ipc_available = None
+                # Fall through to reconnect logic below
 
         # Already tried and failed — don't retry in same session
         if self._ipc_failed:
@@ -273,14 +279,14 @@ class KiCadBridge(SchematicBridge):
             if not ok:
                 self._ipc_failed = True
                 self._ipc_available = False
-                _log.warning(msg)
-                return False
-            _KIPY_AVAILABLE = True
+                raise RuntimeError(msg)
 
         if not _KIPY_AVAILABLE:
             self._ipc_failed = True
             self._ipc_available = False
-            return False
+            raise RuntimeError(
+                "kicad-python is not available for KiCad IPC API integration."
+            )
 
         # Connect
         import kipy
