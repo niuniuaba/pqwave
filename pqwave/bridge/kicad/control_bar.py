@@ -55,3 +55,18 @@ class KiCadControlBar(QWidget):
         self._rewatch_btn.setEnabled(not active)
         if active:
             self.set_status("simulating...")
+
+    def set_ipc_status(self, connected: bool, fallback: bool = False) -> None:
+        """Update the status label to reflect IPC API connection state.
+
+        Args:
+            connected: True if IPC API is connected
+            fallback: True if using kicad-cli fallback
+        """
+        if connected:
+            self._status_label.setStyleSheet("color: green;")
+        elif fallback:
+            self._status_label.setStyleSheet("color: orange;")
+        else:
+            self._status_label.setStyleSheet("color: red;")
+        self.update()
