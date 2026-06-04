@@ -518,7 +518,7 @@ class SessionAPI:
             self._on_mutation("kicad_probe_net", name=name)
             return {"status": "ok"}
         bridge = self._get_kicad_bridge()
-        if bridge and bridge._ensure_ipc():
+        if bridge and bridge.ensure_ipc():
             bridge.probe_net(name)
             return {"status": "ok", "net": name}
         return {"status": "error", "message": "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"}
@@ -528,7 +528,7 @@ class SessionAPI:
             self._on_mutation("kicad_probe_part", ref=ref, pin=pin)
             return {"status": "ok"}
         bridge = self._get_kicad_bridge()
-        if bridge and bridge._ensure_ipc():
+        if bridge and bridge.ensure_ipc():
             bridge.probe_part(ref, pin)
             return {"status": "ok", "ref": ref}
         return {"status": "error", "message": "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"}
@@ -538,9 +538,8 @@ class SessionAPI:
             self._on_mutation("kicad_clear")
             return {"status": "ok"}
         bridge = self._get_kicad_bridge()
-        # Check _ipc_available directly rather than calling _ensure_ipc():
-        # we don't want to trigger a connection just to clear highlights.
-        if bridge and bridge._ipc_available:
+        # Use has_ipc() to check availability without blocking.
+        if bridge and bridge.has_ipc():
             bridge.clear_probe()
             return {"status": "ok"}
         return {"status": "error", "message": "No active IPC connection"}
@@ -777,9 +776,15 @@ class SessionAPI:
                 return {"status": "error", "message": "install_server is write-only"}
             return {"status": "ok", key: state._xschem_config.get(key)}
         if key == "install_server":
-            from pqwave.bridge.xschem.cross_probe import deploy_tcl_server
-            result = deploy_tcl_server()
-            return {"status": "ok", "deploy_result": result}
+            return {
+                "status": "ok",
+                "message": (
+                    "Xschem integration no longer requires Tcl file deployment. "
+                    "Add to ~/.xschem/xschemrc: "
+                    "set gaw_tcp_address {localhost 2026}; "
+                    "set xschem_listen_port 2021"
+                ),
+            }
         state._xschem_config[key] = value
         return {"status": "ok", key: value}
 
