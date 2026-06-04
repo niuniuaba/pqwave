@@ -171,7 +171,6 @@ class MainWindow(QMainWindow):
         self._kicad_dataset_indices: list[int] = []
         self._kicad_last_path: str = ""
         self._kicad_connect_failed: bool = False
-        self._last_kicad_selection: set | None = None
 
         # Lepton-EDA bridge (lazy, same pattern as KiCad)
         self.lepton_control_bar = None
@@ -970,50 +969,21 @@ class MainWindow(QMainWindow):
         # Skip if a programmatic probe just changed the selection (feedback guard)
         if self._kicad_bridge._suppress_ipc_poll:
             return
-        probe = self._kicad_bridge._get_ipc_probe()
-        if probe is None:
-            return
-        try:
-            from kipy.proto.common.commands.editor_commands_pb2 import (
-                GetSelection, SelectionResponse,
-            )
-            from kipy.proto.common.types import (
-                ItemHeader, DocumentSpecifier, DocumentType,
-            )
-            doc = DocumentSpecifier()
-            doc.type = DocumentType.DOCTYPE_SCHEMATIC
-            hdr = ItemHeader()
-            hdr.document.CopyFrom(doc)
-            req = GetSelection()
-            req.header.CopyFrom(hdr)
-            resp = probe._kicad._client.send(req, SelectionResponse)
 
-            current_ids = {item.value for item in resp.items if hasattr(item, 'value')}
-            last = self._last_kicad_selection
-            if last is not None and current_ids and current_ids != last:
-                sch = probe._kicad.get_schematic()
-                netlist = sch.get_netlist()
-                for net in netlist:
-                    net_ids = set()
-                    for sheet in net.sheets:
-                        for item in sheet.items:
-                            net_ids.add(item.value)
-                    if net_ids & current_ids:
-                        net_name = net.name.upper()
-                        for panel in self.panel_grid.panels.values():
-                            for trace in panel.trace_manager.state_traces:
-                                expr = trace.expression.upper()
-                                # Exact match or V(net) or I(net) pattern
-                                if (f"V({net_name})" in expr
-                                        or f"I({net_name})" in expr
-                                        or expr == net_name):
-                                    panel.trace_manager.select_trace(trace)
-                                    break
-            self._last_kicad_selection = current_ids
-        except Exception:
-            import logging
-            _log = logging.getLogger(__name__)
-            _log.debug("KiCad selection poll failed", exc_info=True)
+        net_names = self._kicad_bridge.poll_selection()
+        if not net_names:
+            return
+
+        for net_name in net_names:
+            net_upper = net_name.upper()
+            for panel in self.panel_grid.panels.values():
+                for i, trace in enumerate(panel.trace_manager.state_traces):
+                    expr = trace.expression.upper()
+                    if (f"V({net_upper})" in expr
+                            or f"I({net_upper})" in expr
+                            or expr == net_upper):
+                        panel.trace_manager.select_trace(i)
+                        break
 
     # ---- Lepton-EDA Bridge handlers ----
 

@@ -72,10 +72,14 @@ class IpcProbeClient(QObject):
                     target = net
                     break
             if target is None:
+                # Fallback: prefix match at word boundary (avoids R1 matching R10)
                 for net in netlist:
-                    if name_lower in net.name.lower():
-                        target = net
-                        break
+                    n = net.name.lower()
+                    if n.startswith(name_lower):
+                        # Check boundary: next char is not alphanumeric
+                        if len(n) == len(name_lower) or not n[len(name_lower)].isalnum():
+                            target = net
+                            break
 
             if target is None:
                 self.error_occurred.emit(
@@ -160,7 +164,12 @@ class IpcProbeClient(QObject):
             return False
 
     def _send_clear_selection(self) -> None:
-        """Send a ClearSelection IPC command."""
+        """Send a ClearSelection IPC command.
+
+        kipy's client.send() raises ApiError on failure, so no
+        explicit return value check is needed — exceptions are
+        caught by _select_items.
+        """
         from kipy.proto.common.commands.editor_commands_pb2 import (
             ClearSelection,
         )

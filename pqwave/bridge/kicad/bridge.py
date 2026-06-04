@@ -30,6 +30,7 @@ class KiCadBridge(SchematicBridge):
         self._ngspice = ngspice_path
         self._ipc_probe = None       # IpcProbeClient, lazy-created
         self._suppress_ipc_poll = False  # guard against feedback loop
+        self._last_sel_ids: set | None = None  # for poll_selection()
 
     # ---- SchematicBridge implementation ----
 
@@ -117,6 +118,63 @@ class KiCadBridge(SchematicBridge):
             return probe
         except Exception:
             return None
+
+    def poll_selection(self) -> list[str]:
+        """Poll Eeschema selection and return newly selected net names.
+
+        Returns a list of net names that are currently selected in
+        Eeschema.  Returns an empty list if nothing is selected, IPC
+        is unavailable, or the selection hasn't changed since the
+        last poll.  The caller is responsible for mapping net names
+        to pqwave traces.
+        """
+        probe = self._get_ipc_probe()
+        if probe is None or not probe.is_connected():
+            return []
+
+        try:
+            from kipy.proto.common.commands.editor_commands_pb2 import (
+                GetSelection, SelectionResponse,
+            )
+            from kipy.proto.common.types import (
+                ItemHeader, DocumentSpecifier, DocumentType,
+            )
+
+            doc = DocumentSpecifier()
+            doc.type = DocumentType.DOCTYPE_SCHEMATIC
+            hdr = ItemHeader()
+            hdr.document.CopyFrom(doc)
+            req = GetSelection()
+            req.header.CopyFrom(hdr)
+            resp = probe._kicad._client.send(req, SelectionResponse)
+
+            current_ids = {item.value for item in resp.items
+                          if hasattr(item, 'value')}
+            if not current_ids or current_ids == self._last_sel_ids:
+                self._last_sel_ids = current_ids
+                return []
+
+            self._last_sel_ids = current_ids
+            sch = probe._kicad.get_schematic()
+            netlist = sch.get_netlist()
+
+            result = []
+            for net in netlist:
+                net_ids = set()
+                for sheet in net.sheets:
+                    for item in sheet.items:
+                        net_ids.add(item.value)
+                if net_ids & current_ids:
+                    result.append(net.name)
+            return result
+
+        except (OSError, ConnectionError, TimeoutError):
+            return []
+        except Exception:
+            import logging
+            _log = logging.getLogger(__name__)
+            _log.warning("KiCad selection poll failed", exc_info=True)
+            return []
 
     def detect_tool(self) -> Optional[str]:
         try:
