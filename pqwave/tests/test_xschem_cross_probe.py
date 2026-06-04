@@ -1,100 +1,119 @@
-import os
+"""Tests for XschemCrossProbeClient — stateless, pure-Tcl TCP client."""
+
 import socket
-import tempfile
 from unittest.mock import patch, MagicMock
-import pytest
-from pqwave.bridge.xschem.cross_probe import (
-    XschemCrossProbeClient,
-    check_tcl_server,
-    deploy_tcl_server,
-    _get_tcl_target_path,
-    _get_xschem_config_dir,
-    _get_xschemrc_path,
-)
+
+from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
 
 
-class TestDeployment:
-    def test_get_config_dir(self):
-        with patch.dict(os.environ, {"HOME": "/home/testuser"}):
-            assert _get_xschem_config_dir() == "/home/testuser/.xschem"
+def test_send_command_sends_tcl_and_reads_response():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+    mock_sock = MagicMock()
+    mock_sock.recv.side_effect = [b"some_result\n", b""]
 
-    def test_get_xschemrc_path(self):
-        with patch.dict(os.environ, {"HOME": "/home/testuser"}):
-            assert _get_xschemrc_path() == "/home/testuser/.xschem/xschemrc"
+    with patch("socket.create_connection", return_value=mock_sock):
+        ok, result = client.send_command("probe_net VOUT 1")
 
-    def test_check_tcl_server_not_installed(self):
-        with patch("os.path.exists", return_value=False):
-            result = check_tcl_server()
-            assert result["installed"] is False
-            assert result["needs_deploy"] is True
-            assert len(result["missing"]) == 2  # both scripts
-
-    def test_check_tcl_server_installed_no_xschemrc_line(self):
-        with patch("os.path.exists") as mock_exists, \
-             patch("builtins.open", MagicMock()) as mock_open:
-            mock_exists.return_value = True
-            mock_file = MagicMock()
-            mock_file.read.return_value = "# just comments\n"
-            mock_open.return_value.__enter__.return_value = mock_file
-
-            result = check_tcl_server()
-            assert result["installed"] is False
-            assert len(result["missing"]) == 2  # files exist but rc not configured
-
-    def test_check_tcl_server_fully_installed(self):
-        with patch("os.path.exists", return_value=True), \
-             patch("builtins.open", MagicMock()) as mock_open:
-            mock_file = MagicMock()
-            mock_file.read.return_value = (
-                "lappend tcl_files ~/.xschem/pqwave-server.tcl\n"
-                "set user_startup_commands"
-                " { source $env(HOME)/.xschem/pqwave_override.tcl }\n"
-            )
-            mock_open.return_value.__enter__.return_value = mock_file
-
-            result = check_tcl_server()
-            assert result["installed"] is True
-            assert len(result["missing"]) == 0
+    assert ok is True
+    assert result == "some_result"
+    mock_sock.sendall.assert_called_once_with(b"probe_net VOUT 1\n")
 
 
-class TestCrossProbeClient:
-    def test_probe_net_sends_command(self):
-        client = XschemCrossProbeClient(port=9999)
-        mock_sock = MagicMock()
-        client._sock = mock_sock
-        result = client.probe_net("Vout")
-        assert result is True
-        mock_sock.sendall.assert_called_once()
-        sent_data = mock_sock.sendall.call_args[0][0]
-        assert b'$NET: "Vout"' in sent_data
+def test_send_command_connection_refused():
+    client = XschemCrossProbeClient(port=9999, timeout=0.1)
 
-    def test_probe_part_sends_command(self):
-        client = XschemCrossProbeClient(port=9999)
-        mock_sock = MagicMock()
-        client._sock = mock_sock
-        result = client.probe_part("Q1")
-        assert result is True
-        mock_sock.sendall.assert_called_once()
-        sent_data = mock_sock.sendall.call_args[0][0]
-        assert b'$PART: "Q1"' in sent_data
+    with patch(
+        "socket.create_connection", side_effect=ConnectionRefusedError("refused")
+    ):
+        ok, result = client.send_command("probe_net VOUT 1")
 
-    def test_clear_sends_command(self):
-        client = XschemCrossProbeClient(port=9999)
-        mock_sock = MagicMock()
-        client._sock = mock_sock
-        result = client.clear()
-        assert result is True
-        mock_sock.sendall.assert_called_once()
-        sent_data = mock_sock.sendall.call_args[0][0]
-        assert b"$CLEAR" in sent_data
+    assert ok is False
+    assert "refused" in result
 
-    def test_send_when_not_connected_emits_error(self, qtbot):
-        client = XschemCrossProbeClient(port=9999)
-        with qtbot.waitSignal(client.error_occurred, timeout=1000) as blocker:
-            result = client.probe_net("Vout")
-        assert result is False
 
-    def test_connect_refused_emits_error(self, qtbot):
-        client = XschemCrossProbeClient(port=1, timeout=0.5)
-        with qtbot.waitSignal(client.error_occurred, timeout=2000):
-            client.connect_to_server()
+def test_probe_net_sends_correct_tcl():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+
+    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+        ok = client.probe_net("VOUT")
+
+    assert ok is True
+    mock_send.assert_called_once_with("probe_net VOUT 1")
+
+
+def test_probe_part_with_pin():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+
+    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+        ok = client.probe_part("R1", pin="1")
+
+    assert ok is True
+    mock_send.assert_called_once_with("select_inst R1 1")
+
+
+def test_probe_part_without_pin():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+
+    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+        ok = client.probe_part("R1")
+
+    assert ok is True
+    mock_send.assert_called_once_with("select_inst R1 1")
+
+
+def test_clear_sends_unhilight_tcl():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+
+    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+        ok = client.clear()
+
+    assert ok is True
+    mock_send.assert_called_once_with("xschem unhilight_all; xschem redraw")
+
+
+def test_is_connected_always_true():
+    client = XschemCrossProbeClient()
+    assert client.is_connected() is True
+
+
+def test_connect_to_server_is_noop():
+    client = XschemCrossProbeClient()
+    assert client.connect_to_server() is True
+
+
+def test_annotate_values_builds_correct_tcl():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+
+    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+        ok = client.annotate_values({"v(vout)": "1.234", "v(vin)": "0.567"})
+
+    assert ok is True
+    sent = mock_send.call_args[0][0]
+    assert "::ngspice::ngspice_data(v(vout))" in sent
+    assert "::ngspice::ngspice_data(v(vin))" in sent
+    assert "xschem set_modify -2" in sent
+    assert "xschem redraw" in sent
+
+
+def test_annotate_out_of_range_sets_dash():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+
+    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+        ok = client.annotate_out_of_range(["v(vout)", "v(vin)"])
+
+    assert ok is True
+    sent = mock_send.call_args[0][0]
+    assert "::ngspice::ngspice_data(v(vout)) {-}" in sent
+    assert "::ngspice::ngspice_data(v(vin)) {-}" in sent
+
+
+def test_annotate_values_empty_dict():
+    client = XschemCrossProbeClient(port=9999, timeout=1.0)
+
+    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+        ok = client.annotate_values({})
+
+    assert ok is True
+    sent = mock_send.call_args[0][0]
+    assert "xschem set_modify -2" in sent
+    assert "xschem redraw" in sent
