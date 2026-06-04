@@ -1,176 +1,36 @@
-"""TCP client for pqwave-server.tcl running inside xschem.
+"""TCP client for xschem's setup_tcp_xschem Tcl eval server.
 
-Auto-deploys companion Tcl scripts on first use.  Does NOT modify
-xschem C source code — purely additive Tcl via xschemrc.
+Sends raw Tcl commands to xschem's built-in TCP Tcl server on the port
+configured via ``xschem_listen_port`` (default 2021).  xschem evaluates
+each command, sends back the result, and closes the connection — every
+command opens a fresh TCP connection.
+
+The old pqwave-server.tcl custom protocol ($NET:, $PART:, $CLEAR) is
+replaced by direct Tcl commands that call xschem's built-in procs:
+
+  $NET: "VOUT"     -->  probe_net VOUT 1     (Tcl proc in xschem.tcl)
+  $PART: "R1"      -->  select_inst R1 1      (Tcl proc in xschem.tcl)
+  $CLEAR           -->  xschem unhilight_all; xschem redraw
+
+Back-annotation sets values directly in the ::ngspice::ngspice_data Tcl
+array, then triggers xschem to redraw — no C patch needed.
 """
 
-import os
-import re
-import shutil
 import socket
-from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
 
 
-# ---- Path helpers ----
-
-_THIS_DIR = Path(__file__).parent  # non-resolving: matches pip-installed layout
-
-
-def _get_package_tcl_path(name: str = "pqwave-server.tcl") -> str:
-    """Return the path to a Tcl script alongside this module."""
-    return str(_THIS_DIR / name)
-
-
-def _get_xschem_config_dir() -> str:
-    """Return the xschem user config directory (~/.xschem)."""
-    return os.path.join(os.path.expanduser("~"), ".xschem")
-
-
-def _get_tcl_target_path(name: str = "pqwave-server.tcl") -> str:
-    """Return the target path for a Tcl script in user config."""
-    return os.path.join(_get_xschem_config_dir(), name)
-
-
-def _get_xschemrc_path() -> str:
-    """Return the path to the user xschemrc."""
-    return os.path.join(os.path.expanduser("~"), ".xschem", "xschemrc")
-
-
-def _extract_tcl_version(path: str) -> int:
-    """Extract VERSION number from the Tcl script. Returns 0 if not found."""
-    try:
-        with open(path, "r") as f:
-            for line in f:
-                if line.startswith("# VERSION:"):
-                    return int(line.split(":")[1].strip())
-    except (OSError, ValueError):
-        pass
-    return 0
-
-
-# ---- Tcl scripts deployed to ~/.xschem/ ----
-
-_TCL_SCRIPTS = [
-    {
-        "name": "pqwave-server.tcl",
-        "description": "cross-probe server",
-        # Match the actual lappend line, not just a substring mention.
-        "xschemrc_re": re.compile(
-            r"^\s*lappend\s+tcl_files\s+.*pqwave-server\.tcl", re.MULTILINE
-        ),
-        "xschemrc_line": "lappend tcl_files ~/.xschem/pqwave-server.tcl\n",
-    },
-    {
-        "name": "pqwave_override.tcl",
-        "description": "Alt+G wave push override",
-        # Match a user_startup_commands or source line referencing this file.
-        "xschemrc_re": re.compile(
-            r"(?:user_startup_commands|source\b).*pqwave_override\.tcl",
-            re.MULTILINE,
-        ),
-        "xschemrc_line": (
-            "set user_startup_commands"
-            ' { source $env(HOME)/.xschem/pqwave_override.tcl }\n'
-        ),
-    },
-]
-
-
-# ---- Check / Deploy ----
-
-def check_tcl_server() -> dict:
-    """Check whether pqwave Tcl scripts are installed in ~/.xschem/.
-
-    Returns dict with keys:
-        installed: bool
-        needs_deploy: bool — files missing or outdated
-        missing: list[str] — names of scripts that need deployment
-    """
-    xschemrc_path = _get_xschemrc_path()
-    xschemrc_content = ""
-    if os.path.exists(xschemrc_path):
-        with open(xschemrc_path, "r") as f:
-            xschemrc_content = f.read()
-
-    missing = []
-    for script in _TCL_SCRIPTS:
-        target = _get_tcl_target_path(script["name"])
-        file_ok = os.path.exists(target)
-        rc_ok = bool(script["xschemrc_re"].search(xschemrc_content))
-
-        if not file_ok or not rc_ok:
-            missing.append(script["name"])
-            continue
-
-        # Check version — redeploy if bundled is newer
-        src_ver = _extract_tcl_version(_get_package_tcl_path(script["name"]))
-        installed_ver = _extract_tcl_version(target)
-        if installed_ver < src_ver:
-            missing.append(script["name"])
-
-    return {
-        "installed": len(missing) == 0,
-        "needs_deploy": len(missing) > 0,
-        "missing": missing,
-        "xschemrc_path": xschemrc_path,
-    }
-
-
-def deploy_tcl_server() -> dict:
-    """Deploy Tcl scripts to ~/.xschem/ and configure xschemrc.
-
-    Copies both pqwave-server.tcl and pqwave_override.tcl from
-    pqwave/bridge/xschem/ to ~/.xschem/, then ensures xschemrc
-    has the required load lines.
-
-    Returns {"status": "ok"} or {"status": "error", "message": str}.
-    """
-    try:
-        config_dir = _get_xschem_config_dir()
-        os.makedirs(config_dir, exist_ok=True)
-        xschemrc = _get_xschemrc_path()
-        os.makedirs(os.path.dirname(xschemrc), exist_ok=True)
-
-        # Read existing xschemrc content
-        xschemrc_content = ""
-        if os.path.exists(xschemrc):
-            with open(xschemrc, "r") as f:
-                xschemrc_content = f.read()
-
-        deployed = []
-        for script in _TCL_SCRIPTS:
-            # Copy the Tcl script
-            src = _get_package_tcl_path(script["name"])
-            dst = _get_tcl_target_path(script["name"])
-            shutil.copy2(src, dst)
-            deployed.append(dst)
-
-            # Ensure xschemrc has the load line
-            if not script["xschemrc_re"].search(xschemrc_content):
-                with open(xschemrc, "a") as f:
-                    f.write(f"\n# pqwave {script['description']}\n"
-                            f"{script['xschemrc_line']}")
-                xschemrc_content += script["xschemrc_line"]
-
-        return {"status": "ok", "deployed": deployed, "xschemrc_path": xschemrc}
-    except OSError as e:
-        return {"status": "error", "message": str(e)}
-
-
-# ---- Client ----
-
 class XschemCrossProbeClient(QObject):
-    """TCP client for pqwave-server.tcl running inside xschem.
+    """Stateless TCP client for xschem's setup_tcp_xschem Tcl eval server.
 
-    Sends cross-probe commands. Unlike the Lepton client, this does
-    NOT support reverse cross-probe ($SELECTED:* events) because
-    xschem's Alt+G push workflow uses the separate WaveReceiver channel.
+    Each command opens a new TCP connection, sends raw Tcl, reads the
+    response, and closes the socket — xschem closes the connection after
+    each evaluation.
 
-    Signals:
-        connected():          TCP connection established
-        disconnected():       TCP connection closed
-        error_occurred(str):  connection or send error message
+    Signals (kept for backward compatibility):
+        connected():          emitted on connect_to_server() (no-op, always)
+        disconnected():       emitted on disconnect() (no-op, never)
+        error_occurred(str):  TCP connection or send error
     """
 
     connected = pyqtSignal()
@@ -181,60 +41,133 @@ class XschemCrossProbeClient(QObject):
         super().__init__()
         self._port = port
         self._timeout = timeout
-        self._sock: socket.socket | None = None
-        self._running = False
+
+    # ---- Stateless connection lifecycle ----
 
     def is_connected(self) -> bool:
-        return self._sock is not None
+        """Always True — client is stateless (connects per command)."""
+        return True
 
     def connect_to_server(self) -> bool:
-        """Open TCP connection to localhost:port. Returns True on success."""
-        try:
-            self._sock = socket.create_connection(
-                ("localhost", self._port), timeout=self._timeout
-            )
-            self._sock.settimeout(None)
-            self._running = True
-            self.connected.emit()
-            return True
-        except (socket.timeout, ConnectionRefusedError, OSError) as e:
-            self.error_occurred.emit(
-                f"xschem not running or pqwave server not active "
-                f"on localhost:{self._port}: {e}"
-            )
-            return False
+        """No-op in stateless mode.  Returns True."""
+        self.connected.emit()
+        return True
 
     def disconnect(self) -> None:
-        self._running = False
-        if self._sock:
+        """No-op in stateless mode."""
+        pass
+
+    # ---- Command send ----
+
+    def send_command(self, text: str) -> tuple[bool, str]:
+        """Send a Tcl command to xschem's setup_tcp_xschem server.
+
+        Opens a new TCP connection, sends *text*, reads the response
+        (until EOF — xschem closes after eval), then closes.
+
+        Args:
+            text: Raw Tcl command string (semicolons for multiple commands).
+
+        Returns:
+            (True, response_text) on success,
+            (False, error_message) on failure.
+        """
+        try:
+            sock = socket.create_connection(
+                ("127.0.0.1", self._port), timeout=self._timeout
+            )
+        except (ConnectionRefusedError, socket.timeout, OSError) as exc:
+            msg = (
+                f"xschem not running or not listening "
+                f"on localhost:{self._port}: {exc}"
+            )
+            self.error_occurred.emit(msg)
+            return False, msg
+
+        try:
+            payload = text.rstrip("\n") + "\n"
+            sock.sendall(payload.encode("utf-8"))
+
+            # Read response until EOF (xschem closes the connection).
+            response = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+
+            return True, response.decode("utf-8").strip()
+        except OSError as exc:
+            msg = f"xschem send/recv failed: {exc}"
+            self.error_occurred.emit(msg)
+            return False, msg
+        finally:
             try:
-                self._sock.close()
+                sock.close()
             except OSError:
                 pass
-            self._sock = None
-            self.disconnected.emit()
 
-    def send_command(self, text: str) -> bool:
-        sock = self._sock
-        if not sock:
-            self.error_occurred.emit("Not connected to xschem")
-            return False
-        try:
-            msg = text.rstrip("\n") + "\n"
-            sock.sendall(msg.encode("utf-8"))
-            return True
-        except OSError as e:
-            self.error_occurred.emit(f"Send failed: {e}")
-            self.disconnect()
-            return False
+    # ---- Cross-probe commands ----
 
     def probe_net(self, name: str) -> bool:
-        return self.send_command(f'$NET: "{name}"')
+        """Highlight *name* net in xschem.
+
+        Sends:  probe_net <name> 1
+        """
+        success, _ = self.send_command(f"probe_net {name} 1")
+        return success
 
     def probe_part(self, ref: str, pin: str | None = None) -> bool:
+        """Select/highlight component *ref* in xschem.
+
+        With *pin*:  select_inst <ref> <pin>
+        Without:     select_inst <ref> 1
+        """
         if pin:
-            return self.send_command(f'$PART: "{ref}" $PAD: "{pin}"')
-        return self.send_command(f'$PART: "{ref}"')
+            success, _ = self.send_command(f"select_inst {ref} {pin}")
+        else:
+            success, _ = self.send_command(f"select_inst {ref} 1")
+        return success
 
     def clear(self) -> bool:
-        return self.send_command("$CLEAR")
+        """Clear all highlights in xschem.
+
+        Sends:  xschem unhilight_all; xschem redraw
+        """
+        success, _ = self.send_command(
+            "xschem unhilight_all; xschem redraw"
+        )
+        return success
+
+    # ---- Back-annotation ----
+
+    def annotate_values(self, values: dict[str, str]) -> bool:
+        """Push back-annotation display values into xschem.
+
+        Sets each entry in the ``::ngspice::ngspice_data`` Tcl array,
+        then triggers xschem to redraw.  xschem reads from this array
+        when displaying schematic annotations.
+
+        Args:
+            values: Mapping of variable name to display string, e.g.
+                    ``{"v(vout)": "1.234", "v(vin)": "0.567"}``.
+        """
+        commands: list[str] = []
+        for varname, value in values.items():
+            # Brace-quote the value so Tcl treats it as a literal
+            # string, even if it contains spaces or special chars.
+            commands.append(
+                f"set ::ngspice::ngspice_data({varname}) {{{value}}}"
+            )
+        commands.append("xschem set_modify -2")
+        commands.append("xschem redraw")
+        success, _ = self.send_command("; ".join(commands))
+        return success
+
+    def annotate_out_of_range(self, varnames: list[str]) -> bool:
+        """Set all back-annotation values to ``-`` (out of range).
+
+        Args:
+            varnames: List of variable names to mark as unavailable.
+        """
+        return self.annotate_values({v: "-" for v in varnames})
