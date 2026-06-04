@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QDialog, QCheckBox, QDialogButtonBox, QLabel, QApplication, QSplitter,
 )
 from PyQt6.QtCore import Qt as QtCore_Qt
-from PyQt6.QtCore import QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QColor, QFont
 
 from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme, FontConfig, AxisConfig
@@ -776,6 +776,8 @@ class MainWindow(QMainWindow):
             self._kicad_watcher.unwatch()
 
         self._kicad_bridge = KiCadBridge()
+        self._kicad_bridge.set_probe_error_handler(
+            lambda msg: self.chat_panel.append_output(f"[kicad] ERROR: {msg}\n"))
         self._kicad_watcher = KiCadFileWatcher()
 
         if self.kicad_control_bar is None:
@@ -796,7 +798,24 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Watching {basename} — save in KiCad to auto-simulate")
         self.kicad_control_bar.set_status(f"watching {basename}")
 
-        self._kicad_sel_poll_timer.start()
+        # Clean up any previous poll worker/thread
+        if self._kicad_poll_worker:
+            self._kicad_poll_worker.stop()
+        if self._kicad_poll_thread:
+            self._kicad_poll_thread.quit()
+            self._kicad_poll_thread.wait()
+
+        # Start background poll worker on a dedicated thread
+        from pqwave.bridge.kicad.bridge import KiCadPollWorker
+        self._kicad_poll_thread = QThread()
+        self._kicad_poll_worker = KiCadPollWorker(self._kicad_bridge)
+        self._kicad_poll_worker.moveToThread(self._kicad_poll_thread)
+        self._kicad_poll_worker.nets_found.connect(self._poll_kicad_selection)
+        self._kicad_poll_worker.error_occurred.connect(
+            lambda msg: self.chat_panel.append_output(f"[kicad] poll error: {msg}\n"))
+        self._kicad_poll_thread.started.connect(self._kicad_poll_worker.start)
+        self._kicad_poll_thread.start()
+
         self._run_kicad_pipeline(sch_path)
 
     def _on_kicad_file_changed(self, path: str):
@@ -822,7 +841,11 @@ class MainWindow(QMainWindow):
         self._kicad_last_path = self._kicad_watched_path
         if self._kicad_watcher:
             self._kicad_watcher.unwatch()
-        self._kicad_sel_poll_timer.stop()
+        if self._kicad_poll_worker:
+            self._kicad_poll_worker.stop()
+        if self._kicad_poll_thread:
+            self._kicad_poll_thread.quit()
+            self._kicad_poll_thread.wait()
         if self.kicad_control_bar:
             self.kicad_control_bar.set_status("not watching (click Re-Watch to resume)")
         self._kicad_watched_path = None
@@ -916,37 +939,91 @@ class MainWindow(QMainWindow):
             if self.kicad_control_bar:
                 self.kicad_control_bar.set_simulating(False)
 
-    def _kicad_probe_active_trace(self):
-        """Cross-probe the active panel's selected trace net in KiCad via IPC API."""
+    def _kicad_check_ipc_ready(self) -> bool:
+        """Check IPC readiness; emit messages on failure.  Returns True if ready."""
         if not self._kicad_bridge:
             self.chat_panel.append_output(
                 "[kicad] No KiCad bridge active. "
-                "Use File → KiCad Bridge → Watch Schematic first.\n"
-            )
-            return
+                "Use File → KiCad Bridge → Watch Schematic first.\n")
+            return False
         if self._kicad_connect_failed:
             self.chat_panel.append_output(
                 "[kicad] Cross-probe unavailable — KiCad IPC API not reachable. "
-                "Ensure KiCad is running with IPC API enabled.\n"
-            )
-            return
-        if not self._kicad_bridge._ensure_ipc():
+                "Ensure KiCad is running with IPC API enabled.\n")
+            return False
+        if not self._kicad_bridge.ensure_ipc():
             self._kicad_connect_failed = True
             self.chat_panel.append_output(
-                "[kicad] Cross-probe unavailable — KiCad IPC API not reachable.\n"
-            )
-            return
+                "[kicad] Cross-probe unavailable — KiCad IPC API not reachable.\n")
+            return False
         self._kicad_connect_failed = False
+        return True
+
+    @staticmethod
+    def _kicad_collect_probe_traces(state, cursor_x, panel):
+        """Return list of (panel_id, Trace) to probe.
+
+        Cursor path: all visible traces from all panels.
+        Menu path: currently selected trace only.
+        """
+        if cursor_x is not None:
+            result = []
+            for pid, pstate in (state.panels.items() if state else []):
+                for t in pstate.traces:
+                    if t.visible:
+                        result.append((pid, t))
+            return result
+        selected = panel.trace_manager.get_selected_traces()
+        return [(panel.panel_id, t) for _, t in selected] if selected else []
+
+    @staticmethod
+    def _kicad_format_values(probe_traces, data_points):
+        """Build (lines, net_values) from probe traces and data points."""
+        lines = []
+        net_values = {}
+        for _pid, trace in probe_traces:
+            net = MainWindow._extract_net_name(trace.expression)
+            value_str = ""
+            for dp in data_points:
+                if dp.get("name") == trace.expression:
+                    mag = dp.get("magnitude")
+                    if mag is not None:
+                        value_str = f"{mag:.6g}"
+                        net_values[net] = value_str
+                    else:
+                        yv = dp.get("y_value")
+                        if yv is not None:
+                            value_str = f"{yv:.6g}"
+                            net_values[net] = value_str
+                    break
+            lines.append(f"{net}={value_str}" if value_str else net)
+        return lines, net_values
+
+    def _kicad_probe_active_trace(self):
+        """Cross-probe + back-annotation: highlight net in Eeschema, show values."""
+        if not self._kicad_check_ipc_ready():
+            return
         panel = self.panel_grid.get_active_panel()
         if panel is None:
             return
-        selected = panel.trace_manager.get_selected_traces()
-        if not selected:
+
+        cursor_x = self._kicad_ba_x if self._kicad_ba_x is not None else self._pending_x_value
+        probe_traces = self._kicad_collect_probe_traces(self.state, cursor_x, panel)
+        if not probe_traces:
             return
-        _, trace = selected[0]
-        net = self._extract_net_name(trace.expression)
-        self._kicad_bridge.probe_net(net)
-        self.chat_panel.append_output(f"[kicad] Probing net: {net}\n")
+
+        data_points = self._query_data_point(cursor_x) if cursor_x is not None else []
+        self._kicad_bridge.probe_net(
+            self._extract_net_name(probe_traces[0][1].expression))
+
+        lines, net_values = self._kicad_format_values(probe_traces, data_points)
+        output = ", ".join(lines) if lines else "(no values)"
+        self.chat_panel.append_output(f"[kicad] {output}\n")
+
+        if cursor_x is not None:
+            self.statusBar().showMessage(f"KiCad: {output}", 5000)
+            if net_values:
+                self._kicad_bridge.annotate_values(net_values)
 
     def _on_kicad_probe_selected(self):
         """Menu action: cross-probe the currently active trace's net in KiCad."""
@@ -960,31 +1037,58 @@ class MainWindow(QMainWindow):
 
     def _kicad_ba_debounced(self):
         """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
-        self._kicad_probe_active_trace()
+        if self._kicad_ba_x is not None:
+            self._kicad_probe_active_trace()
+            self._kicad_ba_x = None
 
-    def _poll_kicad_selection(self):
-        """Poll Eeschema selection every 500ms to detect KiCad→pqwave cross-probe."""
-        if not self._kicad_bridge:
-            return
-        # Skip if a programmatic probe just changed the selection (feedback guard)
-        if self._kicad_bridge._suppress_ipc_poll:
+    def _poll_kicad_selection(self, net_names: list):
+        """Handle nets detected by the background poll worker.
+
+        Called via signal from KiCadPollWorker when Eeschema selection
+        changes.  Matches net names against existing traces and
+        auto-plots new ones for unmatched nets.
+        """
+        if self.state is None:
             return
 
-        net_names = self._kicad_bridge.poll_selection()
-        if not net_names:
-            return
+        # Collect all traces from all panels (may be empty if none plotted yet)
+        all_traces = []
+        for pid, pstate in self.state.panels.items():
+            for t in pstate.traces:
+                all_traces.append((pid, t))
 
         for net_name in net_names:
             net_upper = net_name.upper()
-            for panel in self.panel_grid.panels.values():
-                for i, trace in enumerate(panel.trace_manager.state_traces):
-                    expr = trace.expression.upper()
-                    if (f"V({net_upper})" in expr
-                            or f"I({net_upper})" in expr
-                            or expr == net_upper):
-                        panel.trace_manager.select_trace(i)
+            found = False
+            for pid, trace in all_traces:
+                expr = trace.expression.upper()
+                if (f"V({net_upper})" in expr
+                        or f"I({net_upper})" in expr
+                        or expr == net_upper):
+                    # Find the trace index within its panel
+                    panel = self.panel_grid.get_panel(pid)
+                    if panel:
+                        for i, t in enumerate(panel.trace_manager.state_traces):
+                            if t.expression == trace.expression:
+                                panel.trace_manager.select_trace(i)
+                                panel.trace_manager.refresh_legend()
+                                found = True
+                                break
+                    if found:
                         break
-
+            if not found:
+                # Auto-plot: add a new trace for this net
+                panel = self.panel_grid.get_active_panel()
+                if panel and panel.trace_manager.raw_file is not None:
+                    x_var = (self.state.current_x_var
+                             if self.state and self.state.current_x_var
+                             else "time")
+                    from pqwave.models.state import AxisAssignment
+                    # Try lower-case first (ngspice convention), then original case
+                    for expr in (f"v({net_name.lower()})", f"v({net_name})"):
+                        if panel.trace_manager.add_trace(
+                                expr, x_var, AxisAssignment.Y1) is not None:
+                            break
     # ---- Lepton-EDA Bridge handlers ----
 
     def _on_lepton_watch(self):
@@ -1325,34 +1429,15 @@ class MainWindow(QMainWindow):
         self._start_xschem_watch(path)
 
     def _start_xschem_watch(self, sch_path: str):
-        """Initialize the xschem bridge and start watching the schematic."""
-        from PyQt6.QtWidgets import QMessageBox
+        """Initialize the xschem bridge and start watching the schematic.
+
+        xschem must be configured with ``set xschem_listen_port 2021`` in
+        xschemrc (user responsibility -- no Tcl files are deployed).
+        """
         from pqwave.bridge.xschem.bridge import XschemBridge
         from pqwave.bridge.xschem.file_watcher import XschemFileWatcher
-        from pqwave.bridge.xschem.cross_probe import (
-            XschemCrossProbeClient, check_tcl_server, deploy_tcl_server
-        )
+        from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
         from pqwave.bridge.xschem.control_bar import XschemControlBar
-
-        # Check/offer Tcl server deployment
-        check = check_tcl_server()
-        if check["needs_deploy"]:
-            reply = QMessageBox.question(
-                self,
-                "Install Xschem Bridge Files",
-                "The pqwave companion Tcl scripts need to be installed for "
-                "cross-probe and Alt+G to work. Install now?\n\n"
-                f"Missing: {', '.join(check['missing'])}\n"
-                f"Config: {check['xschemrc_path']}\n\n"
-                "Restart xschem after installation.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                deploy_tcl_server()
-                self.chat_panel.append_output(
-                    "[xschem] Companion Tcl scripts deployed. "
-                    "Restart xschem to enable cross-probe and Alt+G.\n"
-                )
 
         if self._xschem_cross_probe:
             self._xschem_cross_probe.disconnect()
@@ -1486,24 +1571,17 @@ class MainWindow(QMainWindow):
         self._xschem_cross_probe.clear()
 
     def _xschem_ensure_client(self, force_reconnect: bool = False) -> bool:
-        """Ensure the cross-probe client exists and is connected.
+        """Ensure XschemCrossProbeClient can reach xschem's setup_tcp_xschem.
 
-        If *force_reconnect* is True, disconnects any existing connection
-        first so a fresh TCP connection is established.
+        No longer deploys Tcl files -- xschem must be configured with
+        ``set xschem_listen_port 2021`` in xschemrc (user responsibility).
+        The client is stateless and opens a fresh TCP connection per command,
+        so this always returns True.
         """
         if self._xschem_cross_probe is None:
             from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
             self._xschem_cross_probe = XschemCrossProbeClient()
-        if force_reconnect and self._xschem_cross_probe.is_connected():
-            self._xschem_cross_probe.disconnect()
-        if not self._xschem_cross_probe.is_connected():
-            if not self._xschem_cross_probe.connect_to_server():
-                self._xschem_connect_failed = True
-                self._xschem_connect_failed_at = time.monotonic()
-                return False
-        self._xschem_connect_failed = False
-        self._xschem_connect_failed_at = 0.0
-        return True
+        return True  # one-shot connections are checked per-command
 
     def _xschem_should_retry(self) -> bool:
         """Return True if enough time has passed since the last connect
@@ -2035,11 +2113,11 @@ class MainWindow(QMainWindow):
         self._kicad_ba_timer.setSingleShot(True)
         self._kicad_ba_timer.setInterval(250)
         self._kicad_ba_timer.timeout.connect(self._kicad_ba_debounced)
+        self._kicad_ba_x = None  # XA cursor value for KiCad back-annotation
 
-        # KiCad selection poll timer (KiCad → pqwave direction)
-        self._kicad_sel_poll_timer = QTimer()
-        self._kicad_sel_poll_timer.setInterval(500)
-        self._kicad_sel_poll_timer.timeout.connect(self._poll_kicad_selection)
+        # KiCad selection poll (runs on background thread, created in _start_kicad_watch)
+        self._kicad_poll_worker = None
+        self._kicad_poll_thread = None
 
         # Lepton-EDA cursor cross-probe timer (same debounce pattern)
         self._lepton_ba_timer = QTimer()
@@ -4591,6 +4669,7 @@ class MainWindow(QMainWindow):
             self._xschem_ba_timer.start()
 
         # KiCad cross-probe: highlight net corresponding to cursor position
+        self._kicad_ba_x = x_linear
         self._kicad_ba_timer.start()
 
         # Lepton-EDA cross-probe (only when bridge is active)
@@ -4700,18 +4779,51 @@ class MainWindow(QMainWindow):
             self._xschem_ba_x = None
 
     def _send_xschem_backannotation(self, x_value: float):
-        """Send cursor X position to xschem for value annotation.
+        """Send cursor position values to xschem for back-annotation.
 
-        Uses the persistent cross-probe channel (port 2021).  The
-        companion Tcl script calls ``xschem set annotate_cursor_x``
-        so xschem can display the trace value at the cursor position
-        on its built-in graph.
+        Populates ``::ngspice::ngspice_data`` directly with pre-computed
+        values from pqwave's trace data, then triggers floater cache
+        clear + redraw.  No C patch required -- pure Tcl over
+        setup_tcp_xschem.
         """
         if not self._xschem_ensure_client():
             return
-        self._xschem_cross_probe.send_command(
-            f'$ANNOTATE:X {x_value:.10g}'
-        )
+
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+
+        # Collect variable name -> value at cursor position
+        cursor_y = panel.trace_manager.last_cursor_y
+        if not cursor_y:
+            return
+
+        values: dict[str, str] = {}
+        for _trace_idx, trace in panel.trace_manager.get_selected_traces():
+            y_val = cursor_y.get(trace.name)
+            if y_val is None:
+                continue
+            net = self._extract_net_name(trace.expression)
+            if trace.expression.lower().startswith("i("):
+                varname = f"i({net.lower()})"
+            else:
+                varname = f"v({net.lower()})"
+            values[varname] = f"{y_val:.6g}"
+
+        if values:
+            self._xschem_cross_probe.annotate_values(values)
+        else:
+            # Cursor outside range -- send dashes for all dataset variables
+            state = self.state
+            if state and state.datasets:
+                ds_idx = panel.trace_manager.current_dataset
+                if 0 <= ds_idx < len(state.datasets):
+                    ds = state.datasets[ds_idx]
+                    varnames = [var.name for var in ds.variables
+                                if not var.name.startswith("time")
+                                and not var.name.startswith("frequency")]
+                    if varnames:
+                        self._xschem_cross_probe.annotate_out_of_range(varnames)
 
     def _send_data_point_update(self, x_value: float):
         """
