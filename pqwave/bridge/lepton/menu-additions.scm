@@ -1,8 +1,7 @@
 ;; pqwave menu additions for lepton-schematic.
-;; Loaded via a (load ...) line appended to lepton-eda's menu.scm.
-;; This code runs after conf/schematic/menu.scm has populated the
-;; built-in menus, but before make-main-menu builds the menu bar.
-;; VERSION: 5
+;; Load via user gafrc: add (load "/path/to/menu-additions.scm") to
+;;   ~/.config/lepton-eda/gafrc
+;; VERSION: 6
 
 (define (&spice-netlist)
   (let* ((page (active-page))

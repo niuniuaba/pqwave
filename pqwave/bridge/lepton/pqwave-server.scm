@@ -1,10 +1,11 @@
 ;; pqwave-server.scm — cross-probe and back-annotation TCP server for lepton-schematic
-;; Loaded via a (load ...) line appended to lepton-eda's menu.scm.
+;; Load via user gafrc: add (load "/path/to/pqwave-server.scm") to
+;;   ~/.config/lepton-eda/gafrc
 ;; Menu additions are in menu-additions.scm (loaded separately).
-;; This file only contains the TCP server and cross-probe logic.
-;; VERSION: 7
+;; This file contains the TCP server, cross-probe logic, and back-annotation.
+;; VERSION: 8
 
-(use-modules (srfi srfi-1) (srfi srfi-13) (ice-9 rdelim) (ice-9 threads))
+(use-modules (srfi srfi-1) (srfi srfi-13) (ice-9 rdelim) (ice-9 threads) (ice-9 hash-table))
 (use-modules (lepton attrib) (lepton object) (lepton page) (lepton log))
 (use-modules (schematic hook) (schematic selection))
 (use-modules (schematic window) (system foreign))
@@ -12,7 +13,8 @@
 (define pqwave-port 9424)
 (define pqwave-server-socket #f)
 (define pqwave-client #f)
-(define pqwave-label-objects '())
+;; Label tracking: netname → text-object for in-place updates
+(define pqwave-label-map (make-hash-table))
 
 ;; ---- TCP Server ----
 
@@ -174,17 +176,36 @@
          (y (string->number y-str)))
     (let ((page (active-page)))
       (when (and page x y)
-        (let ((txt (make-text (cons x y) 'lower-left 0 text 8 #t 'both 2)))
-          (page-append! page txt)
-          (set! pqwave-label-objects (cons txt pqwave-label-objects)))))))
+        (let ((existing (hash-ref pqwave-label-map netname)))
+          (if existing
+              ;; Update existing — preserves user position/rotation
+              (set-text-string! existing text)
+              ;; Create new at computed position
+              (let ((txt (make-text (cons x y) 'lower-left 0 text 8 #t 'both 2)))
+                (page-append! page txt)
+                (hash-set! pqwave-label-map netname txt))))))))
 
 (define (pqwave-clear-labels)
   (let ((page (active-page)))
     (when page
-      (for-each (lambda (lbl)
-                  (catch #t (lambda () (page-remove! page lbl)) (lambda _ #f)))
-                pqwave-label-objects)
-      (set! pqwave-label-objects '()))))
+      (hash-for-each
+       (lambda (netname txt)
+         (catch #t (lambda () (page-remove! page txt)) (lambda _ #f)))
+       pqwave-label-map)
+      (set! pqwave-label-map (make-hash-table)))))
+
+(define (pqwave-remove-stale-labels active-nets)
+  "Remove tracked labels for nets not in ACTIVE-NETS (list of netname strings)."
+  (let ((page (active-page)))
+    (when page
+      (let ((to-remove '()))
+        (hash-for-each
+         (lambda (netname txt)
+           (unless (member netname active-nets)
+             (catch #t (lambda () (page-remove! page txt)) (lambda _ #f))
+             (set! to-remove (cons netname to-remove))))
+         pqwave-label-map)
+        (for-each (lambda (n) (hash-remove! pqwave-label-map n)) to-remove)))))
 
 (define (pqwave-clear-dc-stamps)
   (let ((page (active-page)))
