@@ -191,6 +191,7 @@
 
 (define (pqwave-annotate-label cmd)
   ;; Format: $ANNOTATE:LABEL|<netname>|<text>|<x>|<y>
+  ;; When x=0 and y=0, auto-positions the label near the net.
   (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
          (text (if (> (length parts) 2) (list-ref parts 2) "?"))
@@ -204,8 +205,18 @@
           (if existing
               ;; Update existing — preserves user position/rotation
               (set-text-string! existing text)
-              ;; Create new at computed position
-              (let ((txt (make-text (cons x y) 'lower-left 0 text 8 #t 'both 2)))
+              ;; Create new label.  Auto-position near net if (0,0).
+              (let* ((pos (if (and (= x 0) (= y 0))
+                            (let ((nets (pqwave-find-nets-by-name page netname)))
+                              (if (pair? nets)
+                                  (let ((bbox (object-bounds (car nets))))
+                                    (if bbox
+                                        (cons (car bbox)      ; left
+                                              (+ (cadddr bbox) 50))  ; bottom+50
+                                        (cons 0 0)))
+                                  (cons 0 0)))
+                            (cons x y)))
+                     (txt (make-text pos 'lower-left 0 text 8 #t 'both 2)))
                 (page-append! page txt)
                 (hash-set! pqwave-label-map netname txt))))))))
 
