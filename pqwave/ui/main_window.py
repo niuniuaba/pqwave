@@ -4791,15 +4791,11 @@ class MainWindow(QMainWindow):
             self._xschem_ba_x = None
 
     def _send_xschem_backannotation(self, x_value: float):
-        """Send cursor position values to xschem for back-annotation.
+        """Stamp trace values onto xschem lab_pin labels.
 
-        Populates ``::ngspice::ngspice_data`` directly with pre-computed
-        values from pqwave's trace data, then triggers floater cache
-        clear + redraw.  No C patch required -- pure Tcl over
-        setup_tcp_xschem.
-
-        Iterates ALL plotted traces (not just checkbox-selected ones)
-        because back-annotation should work for every visible waveform.
+        Directly modifies the ``lab`` attribute of matching lab_pin
+        instances (e.g. ``R1`` → ``R1 = 1.234V``).  Pure Tcl — no C
+        patch, no ``tcleval``, no layer 15 dependency.
         """
         if not self._xschem_ensure_client():
             return
@@ -4808,7 +4804,6 @@ class MainWindow(QMainWindow):
         if panel is None:
             return
 
-        # Collect variable name -> value at cursor position
         cursor_y = panel.trace_manager.last_cursor_y
         if not cursor_y:
             return
@@ -4819,23 +4814,15 @@ class MainWindow(QMainWindow):
             if y_val is None:
                 continue
             net = self._extract_net_name(trace.expression)
-            if trace.expression.lower().startswith("i("):
-                varname = f"i({net.lower()})"
-            else:
-                varname = f"v({net.lower()})"
-            values[varname] = f"{y_val:.6g}"
+            values[net] = f"{y_val:.6g}"
 
         if values:
-            self._xschem_cross_probe.annotate_values(values)
+            self._xschem_cross_probe.stamp_values(values)
         else:
-            # Cursor outside range -- send dashes for plotted traces only
             varnames = []
             for trace in panel.trace_manager.state_traces:
                 net = self._extract_net_name(trace.expression)
-                if trace.expression.lower().startswith("i("):
-                    varnames.append(f"i({net.lower()})")
-                else:
-                    varnames.append(f"v({net.lower()})")
+                varnames.append(net)
             if varnames:
                 self._xschem_cross_probe.annotate_out_of_range(varnames)
 
