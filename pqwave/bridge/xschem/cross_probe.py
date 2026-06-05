@@ -150,7 +150,7 @@ class XschemCrossProbeClient(QObject):
     # ---- Back-annotation (label stamping) ----
 
     def stamp_values(self, net_values: dict[str, str]) -> bool:
-        """Stamp trace values onto pqwave_pin ``value`` attributes.
+        """Stamp trace values onto lab_generic ``value`` attributes.
 
         Finds lab_generic.sym instances whose ``lab`` attribute matches
         a net name in *net_values* (case-insensitive) and sets the
@@ -187,7 +187,7 @@ class XschemCrossProbeClient(QObject):
         return stamp_count > 0
 
     def clear_stamps(self) -> bool:
-        """Clear pqwave_pin ``value`` attributes set by ``stamp_values()``."""
+        """Clear lab_generic ``value`` attributes set by ``stamp_values()``."""
         label_map = self._build_label_map()
         if not label_map:
             return False
