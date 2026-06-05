@@ -119,12 +119,8 @@ class XschemCrossProbeClient(QObject):
         """
         for attempt in (name, name.upper()):
             ok, result = self.send_command(
-                f"set _r [probe_net {attempt} 1];"
-                f"if {{$_r ne {{}}}} {{"
-                f"  xschem select_hilight_net;"
-                f"  xschem unhilight_all;"
-                f"  xschem redraw;"
-                f"}};"
+                f"set _r [probe_net {attempt} 0];"  # 0 = no-redraw
+                f"xschem unhilight_all; xschem redraw;"
                 f"set _r"
             )
             if ok and result.strip():
