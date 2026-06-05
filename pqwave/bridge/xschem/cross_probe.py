@@ -158,7 +158,11 @@ class XschemCrossProbeClient(QObject):
             values: Mapping of variable name to display string, e.g.
                     ``{"v(vout)": "1.234", "v(vin)": "0.567"}``.
         """
-        commands: list[str] = []
+        commands: list[str] = [
+            # Ensure the ::ngspice namespace exists — vanilla xschem
+            # (without the C patch) does not pre-create it.
+            "namespace eval ::ngspice { variable ngspice_data }",
+        ]
         for varname, value in values.items():
             # Brace-quote the value so Tcl treats it as a literal
             # string, even if it contains spaces or special chars.
