@@ -16,6 +16,7 @@ Back-annotation sets values directly in the ::ngspice::ngspice_data Tcl
 array, then triggers xschem to redraw — no C patch needed.
 """
 
+import re
 import socket
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -245,11 +246,16 @@ class XschemCrossProbeClient(QObject):
             self._label_map_cache = {}
             return {}
 
-        # Batch: xschem getprop for all label instances in one command.
-        # Each getprop result is separated by newline — we collect them.
-        getprop_cmd = "; ".join(
-            f"puts [xschem getprop instance {n} lab]"
-            for n in label_insts
+        # Batch getprop into one TCP round-trip.  Use lappend + set
+        # (not puts) because xschem_getdata's redef_puts can only
+        # capture a single value — multiple puts overwrite each other.
+        getprop_cmd = (
+            "set _res {}; "
+            + "; ".join(
+                f"lappend _res [xschem getprop instance {n} lab]"
+                for n in label_insts
+            )
+            + "; set _res"
         )
         ok_get, getprop_result = self.send_command(getprop_cmd)
         if not ok_get:
@@ -257,7 +263,8 @@ class XschemCrossProbeClient(QObject):
             return {}
 
         label_map: dict[str, str] = {}
-        lab_values = getprop_result.splitlines()
+        # Parse Tcl list: {R2} {AC_p} {AC_n} — only values.
+        lab_values = re.findall(r"\{([^}]*)\}", getprop_result)
         for inst_name, lab_val in zip(label_insts, lab_values):
             lab_val = lab_val.strip()
             if lab_val:
