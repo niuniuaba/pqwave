@@ -189,8 +189,6 @@ class MainWindow(QMainWindow):
         self._xschem_cross_probe = None
         self._xschem_watched_path = None
         self._xschem_simulating = False
-        self._xschem_connect_failed: bool = False
-        self._xschem_connect_failed_at: float = 0.0
         self._xschem_last_path = ""
 
         # Xschem cursor cross-probe timer (debounce net highlight in schematic).
@@ -1439,8 +1437,7 @@ class MainWindow(QMainWindow):
         from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
         from pqwave.bridge.xschem.control_bar import XschemControlBar
 
-        if self._xschem_cross_probe:
-            self._xschem_cross_probe.disconnect()
+        # cross_probe is stateless — no disconnect needed
         if self._xschem_watcher:
             self._xschem_watcher.unwatch()
 
@@ -1500,8 +1497,7 @@ class MainWindow(QMainWindow):
         self._xschem_last_path = self._xschem_watched_path
         if self._xschem_watcher:
             self._xschem_watcher.unwatch()
-        if self._xschem_cross_probe:
-            self._xschem_cross_probe.disconnect()
+        # cross_probe is stateless — no disconnect needed
         if self.xschem_control_bar:
             self.xschem_control_bar.set_status("not watching")
             self.xschem_control_bar.set_watching(False)
@@ -1574,49 +1570,29 @@ class MainWindow(QMainWindow):
 
     def _on_xschem_probe_net_selected(self):
         """Cross-probe menu: Probe Selected Net."""
-        if not self._xschem_ensure_client(force_reconnect=True):
-            self.chat_panel.append_output(
-                "[xschem] Cross-probe: xschem not running or "
-                "pqwave server not active. Start xschem and try again.\n"
-            )
-            return
+        self._xschem_ensure_client()
         self._xschem_probe_active_trace()
 
     def _on_xschem_clear_probe(self):
         """Cross-probe menu: Clear Highlight."""
-        if not self._xschem_ensure_client(force_reconnect=True):
+        self._xschem_ensure_client(force_reconnect=True)
             return
         self._xschem_cross_probe.clear()
 
-    def _xschem_ensure_client(self, force_reconnect: bool = False) -> bool:
-        """Ensure XschemCrossProbeClient can reach xschem's setup_tcp_xschem.
+    def _xschem_ensure_client(self, force_reconnect: bool = False) -> None:
+        """Create the stateless XschemCrossProbeClient if it doesn't exist.
 
-        No longer deploys Tcl files -- xschem must be configured with
-        ``set xschem_listen_port 2021`` in xschemrc (user responsibility).
-        The client is stateless and opens a fresh TCP connection per command,
-        so this always returns True.
+        The client opens a fresh TCP connection per command — connection
+        errors are reported per-command via error_occurred signal.
         """
         if self._xschem_cross_probe is None:
             from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
             self._xschem_cross_probe = XschemCrossProbeClient()
-        return True  # one-shot connections are checked per-command
 
-    def _xschem_should_retry(self) -> bool:
-        """Return True if enough time has passed since the last connect
-        failure for an auto-recovery retry (30 s cooldown)."""
-        if not self._xschem_connect_failed:
-            return True
-        if time.monotonic() - self._xschem_connect_failed_at > 30.0:
-            self._xschem_connect_failed = False
-            return True
-        return False
 
     def _xschem_probe_trace(self, trace, force_reconnect: bool = False):
         """Cross-probe a specific trace's net in xschem."""
-        if self._xschem_connect_failed and not force_reconnect:
-            logger.debug("xschem probe: skipped (connect failed)")
-            return
-        if not self._xschem_ensure_client(force_reconnect=force_reconnect):
+        self._xschem_ensure_client()
             logger.debug("xschem probe: client not available")
             return
         net = self._extract_net_name(trace.expression)
@@ -1631,9 +1607,7 @@ class MainWindow(QMainWindow):
         probes, use ``_xschem_probe_trace()`` instead (it receives the
         specific trace object directly).
         """
-        if self._xschem_connect_failed and not force_reconnect:
-            return
-        if not self._xschem_ensure_client(force_reconnect=force_reconnect):
+        self._xschem_ensure_client(force_reconnect=force_reconnect)
             return
         panel = self.panel_grid.get_active_panel()
         if panel is None:
@@ -1654,9 +1628,6 @@ class MainWindow(QMainWindow):
 
     def _xschem_cp_debounced(self):
         """Send cross-probe command after debounce."""
-        if not self._xschem_should_retry():
-            self._xschem_cp_net = None  # stale — clear it
-            return
         net_to_probe = self._xschem_cp_net
         self._xschem_cp_net = None
         if net_to_probe is not None:
@@ -4660,7 +4631,7 @@ class MainWindow(QMainWindow):
         # Trigger xschem back-annotation from cross-hair position when ON.
         # Skip if the last connect attempt failed — prevents TCP connection
         # storms when xschem is not running.
-        if self.plot_widget.cross_hair_visible and self._xschem_should_retry():
+        if self.plot_widget.cross_hair_visible:
             self._xschem_ba_x = x  # x is already in linear space
             self._xschem_ba_timer.start()
 
@@ -4683,7 +4654,7 @@ class MainWindow(QMainWindow):
 
         # Also trigger xschem schematic back-annotation
         self._xschem_ba_x = x_linear
-        if self._xschem_should_retry():
+        if True:  # stateless client, always retry
             self._xschem_ba_timer.start()
 
         # KiCad cross-probe: highlight net corresponding to cursor position
@@ -4695,7 +4666,7 @@ class MainWindow(QMainWindow):
             self._lepton_ba_timer.start()
 
         # Xschem cross-probe — skip if last connect failed (auto-retry after 30s).
-        if self._xschem_should_retry():
+        if True:  # stateless client, always retry
             self._xschem_cp_timer.start()
 
         self._update_cursor_status()
@@ -4713,7 +4684,7 @@ class MainWindow(QMainWindow):
 
         # Store and start debounce timer for xschem back-annotation.
         self._xschem_ba_x = x_linear
-        if self._xschem_should_retry():
+        if True:  # stateless client, always retry
             self._xschem_ba_timer.start()
 
         self._sync_x_cursor_to_same_domain_panels('XB', value)
@@ -4798,7 +4769,7 @@ class MainWindow(QMainWindow):
 
     def _send_xschem_backannotation(self, x_value: float):
         """Stamp trace values onto xschem lab_generic labels."""
-        if not self._xschem_ensure_client():
+        self._xschem_ensure_client()
             return
 
         panel = self.panel_grid.get_active_panel()

@@ -41,6 +41,7 @@ class XschemCrossProbeClient(QObject):
         super().__init__()
         self._port = port
         self._timeout = timeout
+        self._label_map_cache: dict[str, str] | None = None
 
     # ---- Stateless connection lifecycle ----
 
@@ -110,12 +111,13 @@ class XschemCrossProbeClient(QObject):
     # ---- Cross-probe commands ----
 
     def probe_net(self, name: str) -> bool:
-        """Highlight *name* net in xschem and select it so Alt+G works.
+        """Highlight *name* net in xschem.
 
         xschem net names are case-sensitive.  Tries verbatim first,
-        then uppercase (SPICE convention).  After highlighting, also
-        runs ``xschem select_hilight_net`` so the net is selected
-        (Alt+G reads the selection, not highlight state).
+        then uppercase (SPICE convention).
+
+        Note: highlighted nets cannot be re-sent via Alt+G (xschem
+        skips already-highlighted nodes).  Use Clear Highlight first.
         """
         for attempt in (name, name.upper()):
             ok, result = self.send_command(f"probe_net {attempt} 1")
@@ -201,8 +203,6 @@ class XschemCrossProbeClient(QObject):
 
     # ---- Label map helpers ----
 
-    _label_map_cache: dict[str, str] | None = None
-
     def _build_label_map(self) -> dict[str, str]:
         """Build ``{lab_value_lower: instance_name}`` from xschem's
         instance list.  Result is cached until ``invalidate_label_map()``
@@ -273,4 +273,3 @@ class XschemCrossProbeClient(QObject):
     def invalidate_label_map(self) -> None:
         """Clear the cached label map (call after schematic changes)."""
         self._label_map_cache = None
-        self._original_labs.clear()
