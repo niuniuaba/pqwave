@@ -181,6 +181,11 @@ class MainWindow(QMainWindow):
         self._lepton_simulating = False
         self._lepton_connect_failed: bool = False
         self._lepton_last_path = ""
+        # Cross-thread signals for lepton pipeline results.
+        self._lepton_result_signal = pyqtSignal(dict)
+        self._lepton_result_signal.connect(self._on_lepton_pipeline_result)
+        self._lepton_error_signal = pyqtSignal(str)
+        self._lepton_error_signal.connect(self._on_lepton_pipeline_error)
 
         # Xschem bridge (same pattern as KiCad / Lepton)
         self.xschem_control_bar = None
@@ -1230,28 +1235,41 @@ class MainWindow(QMainWindow):
         self._lepton_simulating = True
         if self.lepton_control_bar:
             self.lepton_control_bar.set_simulating(True)
-        try:
-            result = self._lepton_bridge.simulate(sch_path)
-            if result["returncode"] is not None and result["returncode"] != 0:
-                self.chat_panel.append_output(
-                    f"[lepton] Simulation failed (code {result['returncode']}):\n"
-                    f"{result['stderr']}\n"
-                )
-                return
-            if result["raw_file"]:
-                self._load_raw_file(result["raw_file"])
-                self.chat_panel.append_output(
-                    f"[lepton] Simulation complete: "
-                    f"{len(self.state.datasets[-1].variables)} signals loaded\n"
-                )
-                if self.lepton_control_bar:
-                    self.lepton_control_bar.set_simulation_complete()
-        except (FileNotFoundError, RuntimeError) as e:
-            self.chat_panel.append_output(f"[lepton] {e}\n")
-        finally:
-            self._lepton_simulating = False
+        self.chat_panel.append_output("[lepton] Exporting netlist + running simulation...\n")
+        # Run in background to avoid freezing the UI.
+        from threading import Thread
+        def _run():
+            try:
+                result = self._lepton_bridge.simulate(sch_path)
+                # Back to main thread for UI updates.
+                self._lepton_result_signal.emit(result)
+            except (FileNotFoundError, RuntimeError) as e:
+                self._lepton_error_signal.emit(str(e))
+        Thread(target=_run, daemon=True).start()
+
+    def _on_lepton_pipeline_result(self, result: dict):
+        if result["returncode"] is not None and result["returncode"] != 0:
+            self.chat_panel.append_output(
+                f"[lepton] Simulation failed (code {result['returncode']}):\n"
+                f"{result['stderr']}\n"
+            )
+        elif result["raw_file"]:
+            self._load_raw_file(result["raw_file"])
+            self.chat_panel.append_output(
+                f"[lepton] Simulation complete: "
+                f"{len(self.state.datasets[-1].variables)} signals loaded\n"
+            )
             if self.lepton_control_bar:
-                self.lepton_control_bar.set_simulating(False)
+                self.lepton_control_bar.set_simulation_complete()
+        self._lepton_simulating = False
+        if self.lepton_control_bar:
+            self.lepton_control_bar.set_simulating(False)
+
+    def _on_lepton_pipeline_error(self, msg: str):
+        self.chat_panel.append_output(f"[lepton] {msg}\n")
+        self._lepton_simulating = False
+        if self.lepton_control_bar:
+            self.lepton_control_bar.set_simulating(False)
 
     def _on_lepton_annotate_dc(self, voltages: dict[str, float] | None = None):
         if self._lepton_cross_probe is None:
