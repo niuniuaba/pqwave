@@ -152,24 +152,20 @@ class XschemCrossProbeClient(QObject):
     # ---- Back-annotation (label stamping) ----
 
     def stamp_values(self, net_values: dict[str, str]) -> bool:
-        """Stamp trace values onto lab_pin label attributes.
+        """Stamp trace values onto pqwave_pin ``value`` attributes.
 
-        Finds lab_pin instances whose ``lab`` attribute matches a net
-        name in *net_values* (case-insensitive) and appends the value
-        to the label text, e.g. ``R1`` → ``R1 = 1.234V``.
+        Finds pqwave_pin.sym instances whose ``lab`` attribute matches
+        a net name in *net_values* (case-insensitive) and sets the
+        ``value`` attribute to the voltage, e.g. ``96.0117V``.
 
-        All Tcl commands are batched into a single TCP round-trip to
-        avoid the ``redef_puts`` rename collision in ``xschem_getdata``
-        when multiple connections arrive in rapid succession.
+        Unlike modifying ``lab``, the ``value`` attribute is only used
+        for display — it does NOT affect netlisting.
 
-        Original lab values are tracked so ``clear_stamps()`` can
-        restore them.  Much simpler than the ``tcleval`` / ``@spice``
-        approach — pure Tcl attribute modification with no C-level
-        dependencies.
+        All Tcl commands are batched into a single TCP round-trip.
 
         Args:
             net_values: dict mapping net name → display value,
-                        e.g. ``{"r1": "1.234", "r2": "5.678"}``.
+                        e.g. ``{"r1": "96.0117", "r2": "48.3"}``.
         """
         label_map = self._build_label_map()
         _log.debug("stamp_values: label_map=%s", label_map)
@@ -178,7 +174,6 @@ class XschemCrossProbeClient(QObject):
             _log.debug("stamp_values: empty label map, returning False")
             return False
 
-        # Build a single batched Tcl script for all setprop calls.
         tcl_lines: list[str] = []
         stamp_count = 0
         for net_name, value in net_values.items():
@@ -187,19 +182,8 @@ class XschemCrossProbeClient(QObject):
             if inst_name is None:
                 continue
 
-            # Save original lab value once (read from cached map).
-            if inst_name not in self._original_labs:
-                orig_lab = net_name.upper()
-                # Try to read the real original from the label map keys
-                for lab_key, mapped_inst in label_map.items():
-                    if mapped_inst == inst_name and lab_key != net_name.lower():
-                        orig_lab = lab_key.upper()
-                        break
-                self._original_labs[inst_name] = orig_lab
-
-            label = f"{net_name.upper()} = {value}V"
             tcl_lines.append(
-                f"xschem setprop instance {inst_name} lab {{{label}}}"
+                f"xschem setprop instance {inst_name} value {{{value}V}}"
             )
             stamp_count += 1
 
@@ -209,23 +193,23 @@ class XschemCrossProbeClient(QObject):
         return stamp_count > 0
 
     def clear_stamps(self) -> bool:
-        """Restore original lab_pin label values cleared by ``stamp_values()``."""
-        if not self._original_labs:
+        """Clear pqwave_pin ``value`` attributes set by ``stamp_values()``."""
+        label_map = self._build_label_map()
+        if not label_map:
             return False
 
-        tcl_lines = [
-            f"xschem setprop instance {n} lab {{{lab}}}"
-            for n, lab in self._original_labs.items()
-        ]
+        tcl_lines = []
+        for inst_name in label_map.values():
+            tcl_lines.append(
+                f"xschem setprop instance {inst_name} value {{}}"
+            )
         tcl_lines.append("xschem redraw")
-        self._original_labs.clear()
         self.send_command("; ".join(tcl_lines))
         return True
 
     # ---- Label map helpers ----
 
     _label_map_cache: dict[str, str] | None = None
-    _original_labs: dict[str, str] = {}
 
     def _build_label_map(self) -> dict[str, str]:
         """Build ``{lab_value_lower: instance_name}`` from xschem's
@@ -247,7 +231,7 @@ class XschemCrossProbeClient(QObject):
         label_insts: list[str] = []
         for i in range(0, len(tokens) - 2, 3):
             inst_name, sym_name = tokens[i], tokens[i + 1]
-            if sym_name in ("lab_pin.sym", "pqwave_lab_pin.sym"):
+            if sym_name in ("pqwave_pin.sym",):
                 label_insts.append(inst_name)
 
         _log.debug("_build_label_map: label_insts=%s", label_insts)
