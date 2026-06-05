@@ -1517,12 +1517,24 @@ class MainWindow(QMainWindow):
             self.xschem_control_bar.set_simulating(True)
         try:
             result = self._xschem_bridge.simulate(sch_path)
-            if result["returncode"] != 0:
+            if result["returncode"] is not None and result["returncode"] != 0:
                 self.chat_panel.append_output(
                     f"[xschem] Simulation failed (code {result['returncode']}):\n"
                     f"{result['stderr']}\n"
                 )
                 return
+            if result["returncode"] is None:
+                # Terminal-launched simulator — check if .raw was produced.
+                if result["raw_file"]:
+                    self.chat_panel.append_output(
+                        f"[xschem] Terminal simulation detected: {result['raw_file']}\n"
+                    )
+                else:
+                    self.chat_panel.append_output(
+                        f"[xschem] Simulation launched in terminal.\n"
+                        f"Waiting for .raw output...\n"
+                    )
+                    return
             if result["raw_file"]:
                 self._load_raw_file(result["raw_file"])
                 self.chat_panel.append_output(

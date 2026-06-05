@@ -174,6 +174,17 @@ class XschemBridge(SchematicBridge):
             returncode = None
             stdout = ""
             stderr = f"detached terminal simulator; stderr in {_err_path}"
+
+            # Poll for .raw file — ngspice with .control blocks typically
+            # writes output within a few seconds after terminal launch.
+            import time as _time
+            _raw_candidate = os.path.join(netlist_dir, f"{sch_basename}.raw")
+            for _ in range(50):  # 5 seconds max
+                _time.sleep(0.1)
+                if (os.path.exists(_raw_candidate)
+                        and os.path.getmtime(_raw_candidate) > _raw_mtime_before
+                        and os.path.getsize(_raw_candidate) > 0):
+                    break
         else:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=300,
