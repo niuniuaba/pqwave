@@ -1179,7 +1179,7 @@ class MainWindow(QMainWindow):
                 ),
                 # Clear any back-annotation stamps left from a previous
                 # session (netnames are persisted in the .sch file).
-                self._lepton_cross_probe.send_command("$CLEAR:DC"),
+                self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS"),
             )
         )
         self._lepton_cross_probe.disconnected.connect(
@@ -1299,7 +1299,7 @@ class MainWindow(QMainWindow):
             self._lepton_cross_probe.connect_to_server()
         if self._lepton_cross_probe.is_connected():
             self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
-            self._lepton_cross_probe.send_command("$CLEAR:DC")
+            self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
             self.chat_panel.append_output("[lepton] Annotations cleared\n")
 
     def _on_lepton_disconnected(self):
@@ -1355,7 +1355,7 @@ class MainWindow(QMainWindow):
                     break
                 net = self._extract_net_name(trace.expression)
                 self._lepton_cross_probe.send_command(
-                    f"$ANNOTATE:DC|{net}|{y_val:.6g}"
+                    f"$ANNOTATE:LABEL|{net}|{y_val:.6g}V|0|0"
                 )
 
     def _on_lepton_net_selected(self, netname: str):
