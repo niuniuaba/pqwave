@@ -34,7 +34,7 @@ def test_send_command_connection_refused():
 def test_probe_net_sends_correct_tcl():
     client = XschemCrossProbeClient(port=9999, timeout=1.0)
 
-    with patch.object(client, "send_command", return_value=(True, "")) as mock_send:
+    with patch.object(client, "send_command", return_value=(True, "VOUT")) as mock_send:
         ok = client.probe_net("VOUT")
 
     assert ok is True
