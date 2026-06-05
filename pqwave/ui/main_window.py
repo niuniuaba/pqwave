@@ -4787,27 +4787,20 @@ class MainWindow(QMainWindow):
     def _xschem_ba_debounced(self):
         """Send xschem back-annotation after debounce timer fires."""
         if self._xschem_ba_x is not None:
-            logger.debug("xschem BA: timer fired, calling _send_xschem_backannotation")
             self._send_xschem_backannotation(self._xschem_ba_x)
             self._xschem_ba_x = None
-        else:
-            logger.debug("xschem BA: timer fired but _xschem_ba_x is None")
 
     def _send_xschem_backannotation(self, x_value: float):
-        """Stamp trace values onto xschem lab_pin labels."""
-        logger.debug(f"xschem BA: _send_xschem_backannotation({x_value:.6g})")
+        """Stamp trace values onto xschem pqwave_pin labels."""
         if not self._xschem_ensure_client():
-            logger.debug("xschem BA: no client")
             return
 
         panel = self.panel_grid.get_active_panel()
         if panel is None:
-            logger.debug("xschem BA: no panel")
             return
 
         cursor_y = panel.trace_manager.last_cursor_y
         if not cursor_y:
-            logger.debug("xschem BA: no cursor_y")
             return
 
         values: dict[str, str] = {}
@@ -4818,12 +4811,9 @@ class MainWindow(QMainWindow):
             net = self._extract_net_name(trace.expression)
             values[net] = f"{y_val:.6g}"
 
-        logger.debug(f"xschem BA: values={values}")
         if values:
-            ok = self._xschem_cross_probe.stamp_values(values)
-            logger.debug(f"xschem BA: stamp_values returned {ok}")
+            self._xschem_cross_probe.stamp_values(values)
         else:
-            logger.debug("xschem BA: no values, clearing stamps")
             self._xschem_cross_probe.clear_stamps()
 
     def _send_data_point_update(self, x_value: float):

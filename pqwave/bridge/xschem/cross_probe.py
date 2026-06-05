@@ -12,16 +12,12 @@ replaced by direct Tcl commands that call xschem's built-in procs:
   $PART: "R1"      -->  select_inst R1 1      (Tcl proc in xschem.tcl)
   $CLEAR           -->  xschem unhilight_all; xschem redraw
 
-Back-annotation sets values directly in the ::ngspice::ngspice_data Tcl
-array, then triggers xschem to redraw — no C patch needed.
+Back-annotation stamps trace values onto pqwave_pin.sym ``value``
+attributes via xschem setprop — no C patch needed.
 """
 
-import logging
-import re
 import socket
 from PyQt6.QtCore import QObject, pyqtSignal
-
-_log = logging.getLogger(__name__)
 
 
 class XschemCrossProbeClient(QObject):
@@ -168,17 +164,13 @@ class XschemCrossProbeClient(QObject):
                         e.g. ``{"r1": "96.0117", "r2": "48.3"}``.
         """
         label_map = self._build_label_map()
-        _log.debug("stamp_values: label_map=%s", label_map)
-        _log.debug("stamp_values: net_values=%s", net_values)
         if not label_map:
-            _log.debug("stamp_values: empty label map, returning False")
             return False
 
         tcl_lines: list[str] = []
         stamp_count = 0
         for net_name, value in net_values.items():
             inst_name = self._find_label_instance(label_map, net_name)
-            _log.debug("stamp_values: net=%s -> inst=%s", net_name, inst_name)
             if inst_name is None:
                 continue
 
@@ -222,7 +214,6 @@ class XschemCrossProbeClient(QObject):
             return self._label_map_cache
 
         ok, result = self.send_command("xschem instance_list")
-        _log.debug("_build_label_map: instance_list ok=%s result=%s", ok, result[:200] if result else "")
         if not ok:
             return {}
 
@@ -234,7 +225,6 @@ class XschemCrossProbeClient(QObject):
             if sym_name in ("pqwave_pin.sym",):
                 label_insts.append(inst_name)
 
-        _log.debug("_build_label_map: label_insts=%s", label_insts)
         if not label_insts:
             self._label_map_cache = {}
             return {}
@@ -251,7 +241,6 @@ class XschemCrossProbeClient(QObject):
             + "; set _res"
         )
         ok_get, getprop_result = self.send_command(getprop_cmd)
-        _log.debug("_build_label_map: getprop ok=%s result=%s", ok_get, getprop_result)
         if not ok_get:
             self._label_map_cache = {}
             return {}
