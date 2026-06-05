@@ -118,11 +118,7 @@ class XschemCrossProbeClient(QObject):
         (Alt+G reads the selection, not highlight state).
         """
         for attempt in (name, name.upper()):
-            ok, result = self.send_command(
-                f"set _r [probe_net {attempt} 0];"  # 0 = no-redraw
-                f"xschem unhilight_all; xschem redraw;"
-                f"set _r"
-            )
+            ok, result = self.send_command(f"probe_net {attempt} 1")
             if ok and result.strip():
                 return True
         return False
