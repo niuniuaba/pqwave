@@ -1122,11 +1122,6 @@ class MainWindow(QMainWindow):
                 "  (load \"/path/to/pqwave/bridge/lepton/menu-additions.scm\")\n"
                 "[lepton] Then restart lepton-schematic.\n"
             )
-                    )
-                else:
-                    self.chat_panel.append_output(
-                        f"[lepton] Install failed: {result['message']}\n"
-                    )
 
         # Check for port conflicts before starting bridge
         from pqwave.models.state import ApplicationState as _AS
