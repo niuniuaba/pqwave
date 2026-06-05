@@ -3988,6 +3988,11 @@ class MainWindow(QMainWindow):
         if self.menu_manager:
             self.menu_manager.set_x_cursor_a_checked(checked)
         self._update_cursor_status()
+        # Clear back-annotation stamps when cursor is hidden.
+        if not checked:
+            self._on_lepton_clear_annotations()
+            if self._xschem_cross_probe:
+                self._xschem_cross_probe.clear_stamps()
 
     def _toggle_x_cursor_b(self, checked: bool) -> None:
         """Toggle X cursor b on/off."""

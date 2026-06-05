@@ -80,6 +80,10 @@ class LeptonBridge(SchematicBridge):
         Places netlist and .raw output alongside the schematic in a
         ``simulation/`` subdirectory, matching xschem's behaviour.
         """
+        # Clear back-annotation stamps before export — netlist must
+        # have clean netnames ('R1', not 'R1 96.7417V').
+        self._ensure_cross_probe().send_command("$CLEAR:DC")
+
         netlist = self.export_netlist(sch_path)
         processor = NetlistPostProcessor(self.get_netlist_fixes())
         fixed = processor.process(netlist)
