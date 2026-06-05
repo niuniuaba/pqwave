@@ -97,15 +97,15 @@
                         (and (string=? "netname" (attrib-name a))
                              (let ((val (attrib-value a)))
                                (and (string? val)
-                               ;; Match exact name, or name with [DC:...] suffix
-                               ;; left by prior $ANNOTATE:DC calls.  Require the
-                               ;; character after the prefix to be '[' so that
-                               ;; e.g. "Vout" does not falsely match "Vout2".
+                               ;; Match exact name, or name with annotation suffix
+                               ;; (old [DC:...] format or new "R1 96.7417V" format).
                                (or (string=? name val)
                                    (and (string-prefix? name val)
                                         (< (string-length name) (string-length val))
-                                        (char=? (string-ref val (string-length name)) #\[)
-                                        (string-contains val "[DC:")))))))
+                                        (let ((c (string-ref val (string-length name))))
+                                          (or (char=? c #\[)   ; old [DC:...] format
+                                              (char=? c #\ ))) ; new "R1 96.7417V" format
+                                        ))))))
                       (object-attribs o))))
           (page-contents page)))
 
