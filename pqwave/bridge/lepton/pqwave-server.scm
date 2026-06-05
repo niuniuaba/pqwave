@@ -209,10 +209,10 @@
               (let* ((pos (if (and (= x 0) (= y 0))
                             (let ((nets (pqwave-find-nets-by-name page netname)))
                               (if (pair? nets)
-                                  (let ((bbox (object-bounds (car nets))))
-                                    (if bbox
-                                        (cons (car bbox)      ; left
-                                              (+ (cadddr bbox) 50))  ; bottom+50
+                                  (let ((b (object-bounds (car nets))))
+                                    (if b
+                                        (cons (car b)           ; left
+                                              (+ (list-ref b 3) 50))  ; bottom+50
                                         (cons 0 0)))
                                   (cons 0 0)))
                             (cons x y)))
