@@ -3,6 +3,8 @@
 ;;   ~/.config/lepton-eda/gafrc
 ;; VERSION: 6
 
+(use-modules (srfi srfi-13) (lepton page) (lepton log) (schematic menu))
+
 (define (&spice-netlist)
   (let* ((page (active-page))
          (filename (if page (page-filename page) #f)))
