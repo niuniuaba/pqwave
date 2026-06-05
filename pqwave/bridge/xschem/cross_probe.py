@@ -238,6 +238,7 @@ class XschemCrossProbeClient(QObject):
             return self._label_map_cache
 
         ok, result = self.send_command("xschem instance_list")
+        _log.debug("_build_label_map: instance_list ok=%s result=%s", ok, result[:200] if result else "")
         if not ok:
             return {}
 
@@ -249,6 +250,7 @@ class XschemCrossProbeClient(QObject):
             if sym_name in ("lab_pin.sym", "pqwave_lab_pin.sym"):
                 label_insts.append(inst_name)
 
+        _log.debug("_build_label_map: label_insts=%s", label_insts)
         if not label_insts:
             self._label_map_cache = {}
             return {}
@@ -265,6 +267,7 @@ class XschemCrossProbeClient(QObject):
             + "; set _res"
         )
         ok_get, getprop_result = self.send_command(getprop_cmd)
+        _log.debug("_build_label_map: getprop ok=%s result=%s", ok_get, getprop_result)
         if not ok_get:
             self._label_map_cache = {}
             return {}
