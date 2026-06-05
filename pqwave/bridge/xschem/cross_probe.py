@@ -191,6 +191,10 @@ class XschemCrossProbeClient(QObject):
         name in *net_values* (case-insensitive) and appends the value
         to the label text, e.g. ``R1`` → ``R1 = 1.234V``.
 
+        All Tcl commands are batched into a single TCP round-trip to
+        avoid the ``redef_puts`` rename collision in ``xschem_getdata``
+        when multiple connections arrive in rapid succession.
+
         Original lab values are tracked so ``clear_stamps()`` can
         restore them.  Much simpler than the ``tcleval`` / ``@spice``
         approach — pure Tcl attribute modification with no C-level
@@ -204,28 +208,33 @@ class XschemCrossProbeClient(QObject):
         if not label_map:
             return False
 
+        # Build a single batched Tcl script for all setprop calls.
+        tcl_lines: list[str] = []
         stamp_count = 0
         for net_name, value in net_values.items():
             inst_name = self._find_label_instance(label_map, net_name)
             if inst_name is None:
                 continue
 
-            # Save original lab value once.
+            # Save original lab value once (read from cached map).
             if inst_name not in self._original_labs:
-                ok, orig = self.send_command(
-                    f"xschem getprop instance {inst_name} lab"
-                )
-                if ok and orig.strip():
-                    self._original_labs[inst_name] = orig.strip()
+                orig_lab = net_name.upper()
+                # Try to read the real original from the label map keys
+                for lab_key, mapped_inst in label_map.items():
+                    if mapped_inst == inst_name and lab_key != net_name.lower():
+                        orig_lab = lab_key.upper()
+                        break
+                self._original_labs[inst_name] = orig_lab
 
             label = f"{net_name.upper()} = {value}V"
-            self.send_command(
+            tcl_lines.append(
                 f"xschem setprop instance {inst_name} lab {{{label}}}"
             )
             stamp_count += 1
 
         if stamp_count:
-            self.send_command("xschem redraw")
+            tcl_lines.append("xschem redraw")
+            self.send_command("; ".join(tcl_lines))
         return stamp_count > 0
 
     def clear_stamps(self) -> bool:
@@ -233,12 +242,13 @@ class XschemCrossProbeClient(QObject):
         if not self._original_labs:
             return False
 
-        for inst_name, orig_lab in self._original_labs.items():
-            self.send_command(
-                f"xschem setprop instance {inst_name} lab {{{orig_lab}}}"
-            )
+        tcl_lines = [
+            f"xschem setprop instance {n} lab {{{lab}}}"
+            for n, lab in self._original_labs.items()
+        ]
+        tcl_lines.append("xschem redraw")
         self._original_labs.clear()
-        self.send_command("xschem redraw")
+        self.send_command("; ".join(tcl_lines))
         return True
 
     # ---- Label map helpers ----
@@ -249,7 +259,10 @@ class XschemCrossProbeClient(QObject):
     def _build_label_map(self) -> dict[str, str]:
         """Build ``{lab_value_lower: instance_name}`` from xschem's
         instance list.  Result is cached until ``invalidate_label_map()``
-        is called."""
+        is called.
+
+        Batches all getprop calls into a single TCP round-trip.
+        """
         if self._label_map_cache is not None:
             return self._label_map_cache
 
@@ -257,17 +270,35 @@ class XschemCrossProbeClient(QObject):
         if not ok:
             return {}
 
-        label_map: dict[str, str] = {}
         # Output: {p2} {lab_pin.sym} {label} {p3} {lab_pin.sym} {label} ...
         tokens = result.replace("{", "").replace("}", "").split()
+        label_insts: list[str] = []
         for i in range(0, len(tokens) - 2, 3):
             inst_name, sym_name = tokens[i], tokens[i + 1]
             if sym_name in ("lab_pin.sym", "pqwave_lab_pin.sym"):
-                ok_lab, lab_val = self.send_command(
-                    f"xschem getprop instance {inst_name} lab"
-                )
-                if ok_lab and lab_val.strip():
-                    label_map[lab_val.strip().lower()] = inst_name
+                label_insts.append(inst_name)
+
+        if not label_insts:
+            self._label_map_cache = {}
+            return {}
+
+        # Batch: xschem getprop for all label instances in one command.
+        # Each getprop result is separated by newline — we collect them.
+        getprop_cmd = "; ".join(
+            f"puts [xschem getprop instance {n} lab]"
+            for n in label_insts
+        )
+        ok_get, getprop_result = self.send_command(getprop_cmd)
+        if not ok_get:
+            self._label_map_cache = {}
+            return {}
+
+        label_map: dict[str, str] = {}
+        lab_values = getprop_result.splitlines()
+        for inst_name, lab_val in zip(label_insts, lab_values):
+            lab_val = lab_val.strip()
+            if lab_val:
+                label_map[lab_val.lower()] = inst_name
 
         self._label_map_cache = label_map
         return label_map
