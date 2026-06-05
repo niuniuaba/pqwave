@@ -4797,6 +4797,9 @@ class MainWindow(QMainWindow):
         values from pqwave's trace data, then triggers floater cache
         clear + redraw.  No C patch required -- pure Tcl over
         setup_tcp_xschem.
+
+        Iterates ALL plotted traces (not just checkbox-selected ones)
+        because back-annotation should work for every visible waveform.
         """
         if not self._xschem_ensure_client():
             return
@@ -4811,7 +4814,7 @@ class MainWindow(QMainWindow):
             return
 
         values: dict[str, str] = {}
-        for _trace_idx, trace in panel.trace_manager.get_selected_traces():
+        for trace in panel.trace_manager.state_traces:
             y_val = cursor_y.get(trace.name)
             if y_val is None:
                 continue
@@ -4825,17 +4828,16 @@ class MainWindow(QMainWindow):
         if values:
             self._xschem_cross_probe.annotate_values(values)
         else:
-            # Cursor outside range -- send dashes for all dataset variables
-            state = self.state
-            if state and state.datasets:
-                ds_idx = panel.trace_manager.current_dataset
-                if 0 <= ds_idx < len(state.datasets):
-                    ds = state.datasets[ds_idx]
-                    varnames = [var.name for var in ds.variables
-                                if not var.name.startswith("time")
-                                and not var.name.startswith("frequency")]
-                    if varnames:
-                        self._xschem_cross_probe.annotate_out_of_range(varnames)
+            # Cursor outside range -- send dashes for plotted traces only
+            varnames = []
+            for trace in panel.trace_manager.state_traces:
+                net = self._extract_net_name(trace.expression)
+                if trace.expression.lower().startswith("i("):
+                    varnames.append(f"i({net.lower()})")
+                else:
+                    varnames.append(f"v({net.lower()})")
+            if varnames:
+                self._xschem_cross_probe.annotate_out_of_range(varnames)
 
     def _send_data_point_update(self, x_value: float):
         """
