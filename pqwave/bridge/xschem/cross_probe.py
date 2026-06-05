@@ -145,44 +145,7 @@ class XschemCrossProbeClient(QObject):
         )
         return success
 
-    # ---- Back-annotation ----
-
-    def annotate_values(self, values: dict[str, str]) -> bool:
-        """Push back-annotation display values into xschem.
-
-        Sets each entry in the ``::ngspice::ngspice_data`` Tcl array,
-        then triggers xschem to redraw.  xschem reads from this array
-        when displaying schematic annotations.
-
-        Args:
-            values: Mapping of variable name to display string, e.g.
-                    ``{"v(vout)": "1.234", "v(vin)": "0.567"}``.
-        """
-        commands: list[str] = [
-            # Ensure the ::ngspice namespace exists — vanilla xschem
-            # (without the C patch) does not pre-create it.
-            "namespace eval ::ngspice { variable ngspice_data }",
-        ]
-        for varname, value in values.items():
-            # Brace-quote the value so Tcl treats it as a literal
-            # string, even if it contains spaces or special chars.
-            commands.append(
-                f"set ::ngspice::ngspice_data({varname}) {{{value}}}"
-            )
-        commands.append("xschem set_modify -2")
-        commands.append("xschem redraw")
-        success, _ = self.send_command("; ".join(commands))
-        return success
-
-    def annotate_out_of_range(self, varnames: list[str]) -> bool:
-        """Set all back-annotation values to ``-`` (out of range).
-
-        Args:
-            varnames: List of variable names to mark as unavailable.
-        """
-        return self.annotate_values({v: "-" for v in varnames})
-
-    # ---- Label stamping (direct lab_pin attribute modification) ----
+    # ---- Back-annotation (label stamping) ----
 
     def stamp_values(self, net_values: dict[str, str]) -> bool:
         """Stamp trace values onto lab_pin label attributes.

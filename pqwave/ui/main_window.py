@@ -4819,12 +4819,7 @@ class MainWindow(QMainWindow):
         if values:
             self._xschem_cross_probe.stamp_values(values)
         else:
-            varnames = []
-            for trace in panel.trace_manager.state_traces:
-                net = self._extract_net_name(trace.expression)
-                varnames.append(net)
-            if varnames:
-                self._xschem_cross_probe.annotate_out_of_range(varnames)
+            self._xschem_cross_probe.clear_stamps()
 
     def _send_data_point_update(self, x_value: float):
         """
