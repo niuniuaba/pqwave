@@ -3,7 +3,6 @@
 import os
 import shutil
 import subprocess
-import tempfile
 from typing import Optional
 
 from pqwave.bridge.schem_bridge import SchematicBridge, NetlistFix, resolve_ngspice
@@ -76,40 +75,47 @@ class LeptonBridge(SchematicBridge):
     # ---- Simulation pipeline ----
 
     def simulate(self, sch_path: str, raw_output: Optional[str] = None) -> dict:
-        """Run full pipeline: export -> post-process -> ngspice -> .raw."""
+        """Run full pipeline: export -> post-process -> ngspice -> .raw.
+
+        Places netlist and .raw output alongside the schematic in a
+        ``simulation/`` subdirectory, matching xschem's behaviour.
+        """
         netlist = self.export_netlist(sch_path)
         processor = NetlistPostProcessor(self.get_netlist_fixes())
         fixed = processor.process(netlist)
 
-        fd, cir_path = tempfile.mkstemp(suffix=".cir", prefix="pqwave_lepton_")
-        os.close(fd)
-        try:
-            with open(cir_path, "w") as f:
-                f.write(fixed)
-            if raw_output is None:
-                fd, raw_output = tempfile.mkstemp(suffix=".raw", prefix="pqwave_lepton_")
-                os.close(fd)
-                os.unlink(raw_output)  # ngspice -r creates the file fresh
-            ngspice = self._resolve_ngspice()
-            result = subprocess.run(
-                [ngspice, "-b", "-r", raw_output, cir_path],
-                capture_output=True, text=True, timeout=300,
-                cwd=os.path.dirname(os.path.abspath(sch_path)),
-            )
-            raw_ok = result.returncode == 0 and os.path.exists(raw_output)
-            return {
-                "returncode": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "raw_file": raw_output if raw_ok else None,
-                "netlist": fixed,
-                "fix_info": [],
-            }
-        finally:
+        sch_dir = os.path.dirname(os.path.abspath(sch_path))
+        sim_dir = os.path.join(sch_dir, "simulation")
+        os.makedirs(sim_dir, exist_ok=True)
+
+        basename = os.path.splitext(os.path.basename(sch_path))[0]
+        cir_path = os.path.join(sim_dir, f"{basename}.cir")
+        if raw_output is None:
+            raw_output = os.path.join(sim_dir, f"{basename}.raw")
+            # Remove stale file so ngspice creates it fresh.
             try:
-                os.unlink(cir_path)
+                os.unlink(raw_output)
             except OSError:
                 pass
+
+        with open(cir_path, "w") as f:
+            f.write(fixed)
+
+        ngspice = self._resolve_ngspice()
+        result = subprocess.run(
+            [ngspice, "-b", "-r", raw_output, cir_path],
+            capture_output=True, text=True, timeout=300,
+            cwd=sch_dir,
+        )
+        raw_ok = result.returncode == 0 and os.path.exists(raw_output)
+        return {
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "raw_file": raw_output if raw_ok else None,
+            "netlist": fixed,
+            "fix_info": [],
+        }
 
     # ---- Back-annotation methods ----
 
