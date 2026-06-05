@@ -798,7 +798,7 @@ class MainWindow(QMainWindow):
         self._kicad_connect_failed = False
         self.kicad_control_bar.setVisible(True)
         basename = os.path.basename(sch_path)
-        self.statusBar().showMessage(f"Watching {basename} — save in KiCad to auto-simulate")
+        self.statusBar().showMessage(f"Watching {basename} — click Simulate Now to run")
         self.kicad_control_bar.set_status(f"watching {basename}")
 
         # Clean up any previous poll worker/thread
@@ -823,9 +823,9 @@ class MainWindow(QMainWindow):
 
     def _on_kicad_file_changed(self, path: str):
         """File watcher callback — schematic was saved."""
-        if self.kicad_control_bar:
-            self.kicad_control_bar.set_status("change detected, simulating...")
-        self._run_kicad_pipeline(path)
+        self.chat_panel.append_output(
+            "[kicad] Schematic saved.  Click Simulate Now to re-run.\n"
+        )
 
     def _on_kicad_simulate(self):
         """Menu action: manually re-run simulation on watched file."""
@@ -1195,15 +1195,15 @@ class MainWindow(QMainWindow):
         self.lepton_control_bar.setVisible(True)
         basename = os.path.basename(sch_path)
         self.statusBar().showMessage(
-            f"Watching {basename} — save in lepton-schematic to auto-simulate"
+            f"Watching {basename} — click Simulate Now to run"
         )
         self.lepton_control_bar.set_status(f"watching {basename}")
-        self._run_lepton_pipeline(sch_path)
 
     def _on_lepton_file_changed(self, path: str):
-        if self.lepton_control_bar:
-            self.lepton_control_bar.set_status("change detected, simulating...")
-        self._run_lepton_pipeline(path)
+        """File saved — notify user but don't auto-simulate."""
+        self.chat_panel.append_output(
+            "[lepton] Schematic saved.  Click Simulate Now to re-run.\n"
+        )
 
     def _on_lepton_simulate(self):
         if self._lepton_watched_path:
@@ -1461,11 +1461,9 @@ class MainWindow(QMainWindow):
         self.xschem_control_bar.set_watching(True)
         basename = os.path.basename(sch_path)
         self.statusBar().showMessage(
-            f"Watching {basename} — save in xschem to auto-simulate"
+            f"Watching {basename} — click Simulate Now to run"
         )
         self.xschem_control_bar.set_status(f"watching {basename}")
-
-        self._run_xschem_pipeline(sch_path)
 
     def _on_xschem_simulate(self):
         """Menu action: manually re-run simulation on watched file."""
@@ -1482,9 +1480,9 @@ class MainWindow(QMainWindow):
 
     def _on_xschem_file_changed(self, path: str):
         """File watcher callback — schematic was saved."""
-        if self.xschem_control_bar:
-            self.xschem_control_bar.set_status("change detected, simulating...")
-        self._run_xschem_pipeline(path)
+        self.chat_panel.append_output(
+            "[xschem] Schematic saved.  Click Simulate Now to re-run.\n"
+        )
 
     def _on_xschem_unwatch(self):
         """Stop watching the schematic."""
