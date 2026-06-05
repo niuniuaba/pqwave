@@ -65,6 +65,8 @@ class MainWindow(QMainWindow):
     # from background threads (REPL Python mode, WaveReceiver) to the
     # main thread so Qt GUI operations are always thread-safe.
     _mutation_signal = pyqtSignal(str, object)
+    _lepton_result_signal = pyqtSignal(dict)
+    _lepton_error_signal = pyqtSignal(str)
 
     _NET_EXPR_RE = re.compile(r'^[vV]\(\s*(.+?)\s*\)$')
 
@@ -182,9 +184,7 @@ class MainWindow(QMainWindow):
         self._lepton_connect_failed: bool = False
         self._lepton_last_path = ""
         # Cross-thread signals for lepton pipeline results.
-        self._lepton_result_signal = pyqtSignal(dict)
         self._lepton_result_signal.connect(self._on_lepton_pipeline_result)
-        self._lepton_error_signal = pyqtSignal(str)
         self._lepton_error_signal.connect(self._on_lepton_pipeline_error)
 
         # Xschem bridge (same pattern as KiCad / Lepton)
