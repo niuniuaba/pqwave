@@ -110,16 +110,18 @@ class XschemCrossProbeClient(QObject):
     # ---- Cross-probe commands ----
 
     def probe_net(self, name: str) -> bool:
-        """Highlight *name* net in xschem.
+        """Highlight *name* net in xschem and select it so Alt+G works.
 
         xschem net names are case-sensitive.  Tries verbatim first,
-        then uppercase (SPICE convention).  Sends: probe_net <name> 1
+        then uppercase (SPICE convention).  After highlighting, also
+        runs ``xschem select_hilight_net`` so the net is selected
+        (Alt+G reads the selection, not highlight state).
         """
         for attempt in (name, name.upper()):
-            if attempt != name:
-                pass  # fallback
             ok, result = self.send_command(f"probe_net {attempt} 1")
             if ok and result.strip():
+                # Select the highlighted items so Alt+G can send them.
+                self.send_command("xschem select_hilight_net")
                 return True
         return False
 
