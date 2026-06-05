@@ -16,9 +16,12 @@ Back-annotation sets values directly in the ::ngspice::ngspice_data Tcl
 array, then triggers xschem to redraw — no C patch needed.
 """
 
+import logging
 import re
 import socket
 from PyQt6.QtCore import QObject, pyqtSignal
+
+_log = logging.getLogger(__name__)
 
 
 class XschemCrossProbeClient(QObject):
@@ -169,7 +172,10 @@ class XschemCrossProbeClient(QObject):
                         e.g. ``{"r1": "1.234", "r2": "5.678"}``.
         """
         label_map = self._build_label_map()
+        _log.debug("stamp_values: label_map=%s", label_map)
+        _log.debug("stamp_values: net_values=%s", net_values)
         if not label_map:
+            _log.debug("stamp_values: empty label map, returning False")
             return False
 
         # Build a single batched Tcl script for all setprop calls.
@@ -177,6 +183,7 @@ class XschemCrossProbeClient(QObject):
         stamp_count = 0
         for net_name, value in net_values.items():
             inst_name = self._find_label_instance(label_map, net_name)
+            _log.debug("stamp_values: net=%s -> inst=%s", net_name, inst_name)
             if inst_name is None:
                 continue
 
