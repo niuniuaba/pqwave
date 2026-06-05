@@ -112,10 +112,16 @@ class XschemCrossProbeClient(QObject):
     def probe_net(self, name: str) -> bool:
         """Highlight *name* net in xschem.
 
-        Sends:  probe_net <name> 1
+        xschem net names are case-sensitive.  Tries verbatim first,
+        then uppercase (SPICE convention).  Sends: probe_net <name> 1
         """
-        success, _ = self.send_command(f"probe_net {name} 1")
-        return success
+        for attempt in (name, name.upper()):
+            if attempt != name:
+                pass  # fallback
+            ok, result = self.send_command(f"probe_net {attempt} 1")
+            if ok and result.strip():
+                return True
+        return False
 
     def probe_part(self, ref: str, pin: str | None = None) -> bool:
         """Select/highlight component *ref* in xschem.
