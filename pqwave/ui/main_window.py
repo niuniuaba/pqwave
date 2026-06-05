@@ -5400,6 +5400,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event."""
+        # Stop KiCad poll worker before destroying the bridge
+        if hasattr(self, "_kicad_poll_worker") and self._kicad_poll_worker:
+            self._kicad_poll_worker.stop()
+        if hasattr(self, "_kicad_poll_thread") and self._kicad_poll_thread:
+            self._kicad_poll_thread.quit()
+            self._kicad_poll_thread.wait(2000)
         self._save_global_prefs()
         self.state.window_registry.unregister_window(self.window_id)
         super().closeEvent(event)
