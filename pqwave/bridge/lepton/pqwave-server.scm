@@ -232,6 +232,8 @@
         (for-each (lambda (n) (hash-remove! pqwave-label-map n)) to-remove)))))
 
 (define (pqwave-clear-dc-stamps)
+  ;; Strip any back-annotation suffix from netname attributes.
+  ;; Handles both old format (R1 [DC:96.7417 V]) and new (R1 96.7417V).
   (let ((page (active-page)))
     (when page
       (for-each
@@ -239,10 +241,13 @@
          (let ((na (find (lambda (a) (string=? "netname" (attrib-name a)))
                          (object-attribs obj))))
            (when na
-             (let* ((val (attrib-value na))
-                    (bracket-idx (string-index val #\[)))
-               (when bracket-idx
-                 (set-attrib-value! na (string-trim-right (substring val 0 bracket-idx))))))))
+             (let* ((cur (attrib-value na))
+                    (clean (regexp-substitute/global
+                            #f
+                            "(\\[[^]]*\\][[:space:]]*|[[:space:]]*[+-]?[0-9.]+[eE]?[+-]?[0-9]*[[:space:]]*V)$"
+                            cur 'pre)))
+               (unless (string=? clean cur)
+                 (set-attrib-value! na (string-trim-right clean)))))))
        (page-contents page)))))
 
 ;; ---- Reverse Cross-Probe (schematic → pqwave) ----

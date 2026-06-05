@@ -1173,8 +1173,13 @@ class MainWindow(QMainWindow):
             lambda msg: self.chat_panel.append_output(f"[lepton] {msg}\n")
         )
         self._lepton_cross_probe.connected.connect(
-            lambda: self.chat_panel.append_output(
-                "[lepton] TCP connected to lepton-schematic on port 9424\n"
+            lambda: (
+                self.chat_panel.append_output(
+                    "[lepton] TCP connected to lepton-schematic on port 9424\n"
+                ),
+                # Clear any back-annotation stamps left from a previous
+                # session (netnames are persisted in the .sch file).
+                self._lepton_cross_probe.send_command("$CLEAR:DC"),
             )
         )
         self._lepton_cross_probe.disconnected.connect(
