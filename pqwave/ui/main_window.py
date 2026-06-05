@@ -1102,45 +1102,26 @@ class MainWindow(QMainWindow):
         self._start_lepton_watch(path)
 
     def _start_lepton_watch(self, sch_path: str):
-        from PyQt6.QtWidgets import QMessageBox
         from pqwave.bridge.lepton.bridge import LeptonBridge
         from pqwave.bridge.lepton.file_watcher import LeptonFileWatcher
-        from pqwave.bridge.lepton.cross_probe import (
-            LeptonCrossProbeClient, check_scheme_server, install_scheme_server
-        )
+        from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
         from pqwave.bridge.lepton.control_bar import LeptonControlBar
 
-        # Check if menu additions are installed
-        status = check_scheme_server()
-        if not status["installed"] or status["needs_update"]:
-            action = "update" if status["installed"] else "install"
-            reply = QMessageBox.question(
-                self,
-                "Lepton-EDA Bridge Setup",
-                f"The Lepton-EDA bridge needs to {action} menu additions "
-                f"and TCP server for in-schematic menus and cross-probe.\n\n"
-                f"Files to {action}:\n"
-                f"  Menu:   {status['additions_path']}\n"
-                f"  Server: {status.get('server_scm_path', status['additions_path'].replace('pqwave-menus.scm', 'pqwave-server.scm'))}\n\n"
-                f"This appends (load ...) lines to lepton-eda's menu.scm at:\n"
-                f"  {status['menu_scm_path']}\n\n"
-                f"Restart lepton-schematic after {action}.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        # Check if gafrc is configured (one-time reminder, non-blocking).
+        gafrc_path = os.path.expanduser("~/.config/lepton-eda/gafrc")
+        if os.path.exists(gafrc_path):
+            with open(gafrc_path) as f:
+                gafrc_content = f.read()
+        else:
+            gafrc_content = ""
+        if "pqwave-server.scm" not in gafrc_content:
+            self.chat_panel.append_output(
+                "[lepton] gafrc not configured.  Add to "
+                "~/.config/lepton-eda/gafrc:\n"
+                "  (load \"/path/to/pqwave/bridge/lepton/pqwave-server.scm\")\n"
+                "  (load \"/path/to/pqwave/bridge/lepton/menu-additions.scm\")\n"
+                "[lepton] Then restart lepton-schematic.\n"
             )
-            if reply == QMessageBox.StandardButton.No:
-                self.chat_panel.append_output(
-                    "[lepton] Bridge setup cancelled. "
-                    "In-schematic menus and cross-probe will not be available.\n"
-                )
-            else:
-                result = install_scheme_server()
-                if result["status"] == "ok":
-                    self.chat_panel.append_output(
-                        f"[lepton] Bridge files installed:\n"
-                        f"  Menu:   {result['additions_path']}\n"
-                        f"  Server: {result['server_scm_path']}\n"
-                        f"[lepton] menu.scm patched: {result['menu_scm_path']}\n"
-                        "[lepton] Restart lepton-schematic for changes to take effect.\n"
                     )
                 else:
                     self.chat_panel.append_output(
@@ -1256,7 +1237,7 @@ class MainWindow(QMainWindow):
             self.lepton_control_bar.set_simulating(True)
         try:
             result = self._lepton_bridge.simulate(sch_path)
-            if result["returncode"] != 0:
+            if result["returncode"] is not None and result["returncode"] != 0:
                 self.chat_panel.append_output(
                     f"[lepton] Simulation failed (code {result['returncode']}):\n"
                     f"{result['stderr']}\n"
