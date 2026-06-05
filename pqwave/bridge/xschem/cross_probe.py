@@ -273,8 +273,8 @@ class XschemCrossProbeClient(QObject):
             return {}
 
         label_map: dict[str, str] = {}
-        # Parse Tcl list: {R2} {AC_p} {AC_n} — only values.
-        lab_values = re.findall(r"\{([^}]*)\}", getprop_result)
+        # Parse Tcl list: space-separated values from lappend+set.
+        lab_values = getprop_result.split()
         for inst_name, lab_val in zip(label_insts, lab_values):
             lab_val = lab_val.strip()
             if lab_val:
