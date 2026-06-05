@@ -1576,7 +1576,6 @@ class MainWindow(QMainWindow):
     def _on_xschem_clear_probe(self):
         """Cross-probe menu: Clear Highlight."""
         self._xschem_ensure_client(force_reconnect=True)
-            return
         self._xschem_cross_probe.clear()
 
     def _xschem_ensure_client(self, force_reconnect: bool = False) -> None:
@@ -1593,8 +1592,6 @@ class MainWindow(QMainWindow):
     def _xschem_probe_trace(self, trace, force_reconnect: bool = False):
         """Cross-probe a specific trace's net in xschem."""
         self._xschem_ensure_client()
-            logger.debug("xschem probe: client not available")
-            return
         net = self._extract_net_name(trace.expression)
         logger.debug(f"xschem probe: probe_net {net} 1")
         self._xschem_cross_probe.probe_net(net)
@@ -1608,7 +1605,6 @@ class MainWindow(QMainWindow):
         specific trace object directly).
         """
         self._xschem_ensure_client(force_reconnect=force_reconnect)
-            return
         panel = self.panel_grid.get_active_panel()
         if panel is None:
             return
@@ -1633,9 +1629,9 @@ class MainWindow(QMainWindow):
         if net_to_probe is not None:
             # Specific net was queued — ensure client is connected,
             # then probe it (don't fall through to active-trace).
-            if self._xschem_ensure_client():
-                logger.debug(f"xschem cp: $NET: \"{net_to_probe}\"")
-                self._xschem_cross_probe.probe_net(net_to_probe)
+            self._xschem_ensure_client()
+            logger.debug(f"xschem cp: $NET: \"{net_to_probe}\"")
+            self._xschem_cross_probe.probe_net(net_to_probe)
         else:
             self._xschem_probe_active_trace()
 
@@ -4654,8 +4650,7 @@ class MainWindow(QMainWindow):
 
         # Also trigger xschem schematic back-annotation
         self._xschem_ba_x = x_linear
-        if True:  # stateless client, always retry
-            self._xschem_ba_timer.start()
+        self._xschem_ba_timer.start()
 
         # KiCad cross-probe: highlight net corresponding to cursor position
         self._kicad_ba_x = x_linear
@@ -4665,9 +4660,8 @@ class MainWindow(QMainWindow):
         if self._lepton_cross_probe is not None:
             self._lepton_ba_timer.start()
 
-        # Xschem cross-probe — skip if last connect failed (auto-retry after 30s).
-        if True:  # stateless client, always retry
-            self._xschem_cp_timer.start()
+        # Xschem cross-probe.
+        self._xschem_cp_timer.start()
 
         self._update_cursor_status()
         self._sync_x_cursor_to_same_domain_panels('XA', value)
@@ -4684,8 +4678,7 @@ class MainWindow(QMainWindow):
 
         # Store and start debounce timer for xschem back-annotation.
         self._xschem_ba_x = x_linear
-        if True:  # stateless client, always retry
-            self._xschem_ba_timer.start()
+        self._xschem_ba_timer.start()
 
         self._sync_x_cursor_to_same_domain_panels('XB', value)
 
@@ -4770,7 +4763,6 @@ class MainWindow(QMainWindow):
     def _send_xschem_backannotation(self, x_value: float):
         """Stamp trace values onto xschem lab_generic labels."""
         self._xschem_ensure_client()
-            return
 
         panel = self.panel_grid.get_active_panel()
         if panel is None:
