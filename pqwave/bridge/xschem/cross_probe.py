@@ -12,7 +12,7 @@ replaced by direct Tcl commands that call xschem's built-in procs:
   $PART: "R1"      -->  select_inst R1 1      (Tcl proc in xschem.tcl)
   $CLEAR           -->  xschem unhilight_all; xschem redraw
 
-Back-annotation stamps trace values onto pqwave_pin.sym ``value``
+Back-annotation stamps trace values onto lab_generic.sym ``value``
 attributes via xschem setprop — no C patch needed.
 """
 
@@ -150,7 +150,7 @@ class XschemCrossProbeClient(QObject):
     def stamp_values(self, net_values: dict[str, str]) -> bool:
         """Stamp trace values onto pqwave_pin ``value`` attributes.
 
-        Finds pqwave_pin.sym instances whose ``lab`` attribute matches
+        Finds lab_generic.sym instances whose ``lab`` attribute matches
         a net name in *net_values* (case-insensitive) and sets the
         ``value`` attribute to the voltage, e.g. ``96.0117V``.
 
@@ -222,7 +222,7 @@ class XschemCrossProbeClient(QObject):
         label_insts: list[str] = []
         for i in range(0, len(tokens) - 2, 3):
             inst_name, sym_name = tokens[i], tokens[i + 1]
-            if sym_name in ("pqwave_pin.sym",):
+            if sym_name in ("lab_generic.sym",):
                 label_insts.append(inst_name)
 
         if not label_insts:

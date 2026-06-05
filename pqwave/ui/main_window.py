@@ -4791,7 +4791,7 @@ class MainWindow(QMainWindow):
             self._xschem_ba_x = None
 
     def _send_xschem_backannotation(self, x_value: float):
-        """Stamp trace values onto xschem pqwave_pin labels."""
+        """Stamp trace values onto xschem lab_generic labels."""
         if not self._xschem_ensure_client():
             return
 
