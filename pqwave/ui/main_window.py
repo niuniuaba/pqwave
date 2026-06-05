@@ -1455,6 +1455,7 @@ class MainWindow(QMainWindow):
                 upper.layout().addWidget(self.xschem_control_bar)
             self.xschem_control_bar.simulate_clicked.connect(self._on_xschem_simulate)
             self.xschem_control_bar.unwatch_clicked.connect(self._on_xschem_unwatch)
+            self.xschem_control_bar.rewatch_clicked.connect(self._on_xschem_rewatch)
 
         self._xschem_watcher.file_changed.connect(self._on_xschem_file_changed)
         self._xschem_watcher.watch(sch_path)
@@ -1466,6 +1467,7 @@ class MainWindow(QMainWindow):
         )
 
         self.xschem_control_bar.setVisible(True)
+        self.xschem_control_bar.set_watching(True)
         basename = os.path.basename(sch_path)
         self.statusBar().showMessage(
             f"Watching {basename} — save in xschem to auto-simulate"
@@ -1476,13 +1478,16 @@ class MainWindow(QMainWindow):
 
     def _on_xschem_simulate(self):
         """Menu action: manually re-run simulation on watched file."""
-        if self._xschem_watched_path:
-            self._run_xschem_pipeline(self._xschem_watched_path)
+        path = self._xschem_watched_path or self._xschem_last_path
+        if path:
+            self._run_xschem_pipeline(path)
 
     def _on_xschem_rewatch(self):
         """Re-Watch button: resume watching the last path."""
         if self._xschem_last_path:
             self._start_xschem_watch(self._xschem_last_path)
+            if self.xschem_control_bar:
+                self.xschem_control_bar.set_watching(True)
 
     def _on_xschem_file_changed(self, path: str):
         """File watcher callback — schematic was saved."""
@@ -1498,7 +1503,8 @@ class MainWindow(QMainWindow):
         if self._xschem_cross_probe:
             self._xschem_cross_probe.disconnect()
         if self.xschem_control_bar:
-            self.xschem_control_bar.set_status("not watching (click Re-Watch to resume)")
+            self.xschem_control_bar.set_status("not watching")
+            self.xschem_control_bar.set_watching(False)
         self._xschem_watched_path = None
 
     def _run_xschem_pipeline(self, sch_path: str):

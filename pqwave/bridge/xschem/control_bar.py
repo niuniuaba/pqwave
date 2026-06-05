@@ -17,6 +17,7 @@ class XschemControlBar(QWidget):
 
     simulate_clicked = pyqtSignal()
     unwatch_clicked = pyqtSignal()
+    rewatch_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,6 +36,12 @@ class XschemControlBar(QWidget):
         self._simulate_btn.setMinimumWidth(110)
         self._simulate_btn.clicked.connect(self.simulate_clicked.emit)
         layout.addWidget(self._simulate_btn)
+
+        self._rewatch_btn = QPushButton("Re-Watch")
+        self._rewatch_btn.setMinimumWidth(90)
+        self._rewatch_btn.clicked.connect(self.rewatch_clicked.emit)
+        self._rewatch_btn.setVisible(False)
+        layout.addWidget(self._rewatch_btn)
 
         self._unwatch_btn = QPushButton("Stop Watching")
         self._unwatch_btn.setMinimumWidth(110)
@@ -55,3 +62,9 @@ class XschemControlBar(QWidget):
 
     def set_simulation_complete(self):
         self.set_status("simulation complete")
+
+    def set_watching(self, active: bool):
+        """Toggle watch/unwatch button states."""
+        self._unwatch_btn.setVisible(active)
+        self._rewatch_btn.setVisible(not active)
+        self._simulate_btn.setEnabled(active)
