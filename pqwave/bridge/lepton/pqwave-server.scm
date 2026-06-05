@@ -20,6 +20,13 @@
 
 (define (pqwave-start-server port)
   (set! pqwave-port port)
+  ;; Close any previously-bound socket to avoid "Address already in use"
+  ;; when lepton-schematic is restarted quickly.
+  (when pqwave-server-socket
+    (catch #t
+      (lambda () (close-port pqwave-server-socket))
+      (lambda _ #f))
+    (set! pqwave-server-socket #f))
   (catch #t
     (lambda ()
       (let ((sock (socket PF_INET SOCK_STREAM 0)))
@@ -151,6 +158,9 @@
 (define (pqwave-annotate-dc cmd)
   ;; Format: $ANNOTATE:DC|netname|voltage  (pipe-delimited to allow
   ;; net names containing spaces).
+  ;; Strips any existing [DC:...V], [DC:... V], or trailing number+V
+  ;; annotation before writing the new value, so the netname does not
+  ;; accumulate stale annotations across cursor moves.
   (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
          (voltage (if (> (length parts) 2) (list-ref parts 2) "0.0")))
@@ -161,8 +171,15 @@
            (let ((na (find (lambda (a) (string=? "netname" (attrib-name a)))
                            (object-attribs net))))
              (when na
-               (set-attrib-value! na
-                 (string-append netname " [DC:" voltage " V]")))))
+               ;; Strip any prior annotation suffix: [DC:...], trailing
+               ;; number+V, or number V pattern left by a previous stamp.
+               (let* ((cur (attrib-value na))
+                      (clean (regexp-substitute/global
+                              #f
+                              "(\\[[^]]*\\][[:space:]]*|[[:space:]]*[+-]?[0-9.]+[eE]?[+-]?[0-9]*[[:space:]]*V)$"
+                              cur 'pre)))
+                 (set-attrib-value! na
+                   (string-append clean " " voltage "V"))))))
          (pqwave-find-nets-by-name page netname))))))
 
 (define (pqwave-annotate-label cmd)
