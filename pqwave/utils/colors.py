@@ -53,9 +53,20 @@ class ColorManager:
     def get_next_color(self) -> Tuple[int, int, int]:
         """Get the next color from the palette, ensuring no repeats.
 
+        Skips palette colors already reserved by ``mark_color_used()``
+        (e.g. custom colors from xschem Alt+G copyvar) so that the
+        auto-assigned sequence never duplicates an in-use color.
+
         Returns:
             RGB tuple with values 0-255.
         """
+        # Skip palette entries already marked as used by a prior
+        # custom-color assignment (mark_color_used advances used_colors
+        # but not color_index — we catch up here).
+        while (self.color_index < len(self.palette)
+               and self.palette[self.color_index] in self.used_colors):
+            self.color_index += 1
+
         if self.color_index < len(self.palette):
             # Use predefined color
             color = self.palette[self.color_index]
