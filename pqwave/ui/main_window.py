@@ -1037,7 +1037,7 @@ class MainWindow(QMainWindow):
 
     def _kicad_ba_debounced(self):
         """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
-        if self._kicad_ba_x is not None:
+        if self._kicad_ba_x is not None and self._kicad_bridge is not None:
             self._kicad_probe_active_trace()
             self._kicad_ba_x = None
 
@@ -1614,7 +1614,7 @@ class MainWindow(QMainWindow):
             logger.debug("xschem probe: client not available")
             return
         net = self._extract_net_name(trace.expression)
-        logger.debug(f"xschem probe: $NET: \"{net}\"")
+        logger.debug(f"xschem probe: probe_net {net} 1")
         self._xschem_cross_probe.probe_net(net)
 
     def _xschem_probe_active_trace(self, force_reconnect: bool = False):
