@@ -69,7 +69,6 @@
 ;; ---- Command Dispatch ----
 
 (define (pqwave-dispatch cmd)
-  (format (current-error-port) "pqwave DEBUG: dispatch cmd=~A\n" cmd)
   (cond
    ((string-prefix? "$NET:" cmd)
     (pqwave-probe-net (pqwave-strip-quotes (string-trim-both (string-drop cmd 5)))))
@@ -193,7 +192,6 @@
 (define (pqwave-annotate-label cmd)
   ;; Format: $ANNOTATE:LABEL|<netname>|<text>|<x>|<y>
   ;; When x=0 and y=0, auto-positions the label near the net.
-  (format (current-error-port) "pqwave DEBUG: annotate-label cmd=~A\n" cmd)
   (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
          (text (if (> (length parts) 2) (list-ref parts 2) "?"))
@@ -208,22 +206,18 @@
               ;; Update existing — preserves user position/rotation
               (begin
                 (format (current-error-port)
-                        "pqwave DEBUG: updating existing label for ~A\n" netname)
                 (set-text-string! existing text))
               ;; Create new label.  Auto-position near net if (0,0).
               (begin
                 (format (current-error-port)
-                        "pqwave DEBUG: creating new label netname=~A pos=(~A,~A)\n"
                         netname x y)
                 (let* ((pos (if (and (= x 0) (= y 0))
                               (let ((nets (pqwave-find-nets-by-name page netname)))
                                 (format (current-error-port)
-                                        "pqwave DEBUG: auto-pos found ~A nets\n"
                                         (length nets))
                                 (if (pair? nets)
                                     (let ((b (object-bounds (car nets))))
                                       (format (current-error-port)
-                                              "pqwave DEBUG: bounds=~A\n" b)
                                       (if b
                                           ;; bounds: ((left . top) right . bottom)
                                           (cons (caar b)
@@ -232,7 +226,6 @@
                                     (cons 0 0)))
                               (cons x y)))
                        (txt (make-text pos 'lower-left 0 text 8 #t 'both 0)))  ; 0 = standalone, not an attribute
-                  (format (current-error-port) "pqwave DEBUG: text created at ~A\n" pos)
                   (page-append! page txt)
                   (hash-set! pqwave-label-map netname txt)))))))))
 

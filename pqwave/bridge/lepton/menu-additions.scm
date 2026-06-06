@@ -6,8 +6,6 @@
 (use-modules (srfi srfi-1) (srfi srfi-13) (lepton page) (lepton log)
              (schematic menu))
 
-(format (current-error-port) "pqwave DEBUG: menu-additions.scm loaded (gschemrc)\n")
-
 (define (&spice-netlist)
   (let* ((page (active-page))
          (filename (if page (page-filename page) #f)))
@@ -51,7 +49,6 @@
 
 ;; Append SPICE to the built-in Netlist menu.
 (let ((menu-list (@@ (schematic menu) %main-menu-list)))
-  (format (current-error-port) "pqwave DEBUG: menu-list has ~A entries\n" (length menu-list))
   (let ((netlist-entry (assoc "_Netlist" menu-list)))
     (when netlist-entry
       (set-cdr! netlist-entry

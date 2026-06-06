@@ -1350,19 +1350,15 @@ class MainWindow(QMainWindow):
                 return
             cursor_y = panel.trace_manager.last_cursor_y
             if not cursor_y:
-                logger.debug("lepton BA: no cursor_y, skipping")
                 return
-            logger.debug(f"lepton BA: cursor_y has {len(cursor_y)} entries, {len(panel.trace_manager.state_traces)} traces")
             for trace in panel.trace_manager.state_traces:
                 y_val = cursor_y.get(trace.name)
                 if y_val is None:
-                    logger.debug(f"lepton BA: no y_val for {trace.name}")
                     continue
                 if not self._lepton_cross_probe.is_connected():
                     break
                 net = self._extract_net_name(trace.expression)
                 cmd = f"$ANNOTATE:LABEL|{net}|{y_val:.6g}V|0|0"
-                logger.debug(f"lepton BA: sending {cmd}")
                 self._lepton_cross_probe.send_command(cmd)
 
     def _on_lepton_net_selected(self, netname: str):
