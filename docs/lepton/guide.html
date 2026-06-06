@@ -146,45 +146,30 @@ TCP server (port 9424) ◄─────────────►  Loads &amp
 
 <h3>Installing the Bridge Files</h3>
 
-<p>The bridge needs two Scheme files installed into lepton-eda&rsquo;s
-configuration. Both are loaded via <code>(load&nbsp;...)</code> lines
-appended to lepton-eda&rsquo;s installed <code>menu.scm</code>. This is a
-one-time step. No source modifications, no rebuild required.</p>
+<p>The bridge needs two Scheme files loaded into lepton-eda via the
+standard user configuration system. No system files are modified.</p>
 
-<p><strong>What gets installed:</strong></p>
-<pre><code><span class="path">~/.config/lepton-eda/pqwave-menus.scm</span>    ← in-schematic menus (Netlist / Simulation / Wave)
-<span class="path">~/.config/lepton-eda/pqwave-server.scm</span>   ← TCP server for cross-probe &amp; back-annotation
-<span class="path">$LEPTON_PREFIX/share/lepton-eda/scheme/conf/schematic/menu.scm</span>
-    ↑ two (load ...) lines appended</code></pre>
+<p><strong>What gets configured:</strong></p>
+<pre><code><span class="path">~/.config/lepton-eda/gafrc</span>       ← loads pqwave-server.scm (TCP server)
+<span class="path">~/.config/lepton-eda/gschemrc</span>    ← loads menu-additions.scm (menus)</code></pre>
 
-<h4>Automated (GUI)</h4>
-<p>Open pqwave, then
-<strong>File &rarr; Lepton Bridge &rarr; Watch Schematic</strong>.
-Select any <code>.sch</code> file. A dialog will ask whether to install.
-Click <strong>Yes</strong>. Restart lepton-schematic.</p>
+<h4>Manual Setup</h4>
+<p>Add these lines to the files (create them if they don&rsquo;t exist):</p>
+<pre><code><span class="cmd"># ~/.config/lepton-eda/gafrc</span>
+(load <span class="path">"/path/to/pqwave/bridge/lepton/pqwave-server.scm"</span>)
 
-<p>When the bundled files are newer than the installed ones (after a pqwave
-upgrade), pqwave detects this automatically and offers to update.</p>
+<span class="cmd"># ~/.config/lepton-eda/gschemrc</span>
+(load <span class="path">"/path/to/pqwave/bridge/lepton/menu-additions.scm"</span>)</code></pre>
 
-<h4>Automated (Headless)</h4>
-<pre><code class="language-python">api.lepton_config(<span class="cmd">"install_server"</span>)</code></pre>
+<p>Replace <code>/path/to/pqwave</code> with the actual pqwave installation
+path.</p>
 
-<h4>Manual Install</h4>
-<p>Copy both files and append the load lines:</p>
-<pre><code><span class="cmd"># 1. Copy both Scheme files to your config directory</span>
-cp <span class="path">pqwave/bridge/lepton/menu-additions.scm</span> \
-   <span class="path">~/.config/lepton-eda/pqwave-menus.scm</span>
-cp <span class="path">pqwave/bridge/lepton/pqwave-server.scm</span> \
-   <span class="path">~/.config/lepton-eda/pqwave-server.scm</span>
-
-<span class="cmd"># 2. Append load lines to lepton-eda's installed menu.scm</span>
-<span class="cmd">echo</span> <span class="path">'(load "~/.config/lepton-eda/pqwave-menus.scm")'</span> \
-  &gt;&gt; <span class="path">$LEPTON_PREFIX/share/lepton-eda/scheme/conf/schematic/menu.scm</span>
-<span class="cmd">echo</span> <span class="path">'(load "~/.config/lepton-eda/pqwave-server.scm")'</span> \
-  &gt;&gt; <span class="path">$LEPTON_PREFIX/share/lepton-eda/scheme/conf/schematic/menu.scm</span></code></pre>
-
-<p>Replace <code>$LEPTON_PREFIX</code> with your lepton-eda install path
-(e.g. <code>/usr</code>, <code>/usr/local</code>, <code>~/Apps/lepton-eda</code>).</p>
+<div class="note">
+  <strong>Why two files?</strong> <code>gafrc</code> loads first (TCP
+  server ready for cross-probe). <code>gschemrc</code> loads after the
+  menu system initialises, so menu additions can insert themselves
+  between the built-in Netlist and Help menus.
+</div>
 
 <h3>Verifying the Installation</h3>
 <p>Restart lepton-schematic. You should see three new menus:</p>
@@ -198,11 +183,45 @@ cp <span class="path">pqwave/bridge/lepton/pqwave-server.scm</span> \
 <pre><code><span class="cmd">ss -tlnp | grep 9424</span>
 <span class="cmd"># Should show guile-3.0 listening on 127.0.0.1:9424</span></code></pre>
 
+<h3>In-Schematic Menu Feedback</h3>
+
+<p>When you use the in-schematic menus, lepton-schematic shows GTK dialogs
+with the result:</p>
+
+<table>
+  <tr><th>Menu Action</th><th>Success</th><th>Failure</th></tr>
+  <tr>
+    <td><strong>Netlist &rarr; 2 SPICE</strong></td>
+    <td>Dialog: &ldquo;SPICE netlist written: /path/file.cir&rdquo;</td>
+    <td>Dialog: &ldquo;SPICE netlist failed&rdquo; with error details</td>
+  </tr>
+  <tr>
+    <td><strong>Simulation &rarr; ngspice</strong></td>
+    <td>Dialog: &ldquo;Simulation complete: /path/file.raw&rdquo;</td>
+    <td>Dialog: &ldquo;Simulation failed&rdquo; with error details</td>
+  </tr>
+  <tr>
+    <td><strong>Wave &rarr; pqwave</strong></td>
+    <td>pqwave window opens (no dialog)</td>
+    <td>N/A — launch is non-blocking</td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>These dialogs work for GUI users.</strong> The old approach
+  wrote to the terminal and log window, invisible to desktop users.
+  The new approach uses <code>schematic-message-dialog</code> and
+  <code>schematic-error-dialog</code> from lepton&rsquo;s
+  <code>(schematic dialog)</code> module.
+</div>
+
 <!-- ============================================================ -->
 
 <h2 id="pipeline">Netlist Pipeline</h2>
 
-<p>The bridge runs a three-stage pipeline on every save:</p>
+<p>The pipeline is triggered manually by
+<strong>Simulate Now</strong> in pqwave&rsquo;s control bar. File saves
+only notify — they do not auto-simulate.</p>
 
 <table>
   <tr><th>Stage</th><th>Command</th><th>Output</th></tr>
