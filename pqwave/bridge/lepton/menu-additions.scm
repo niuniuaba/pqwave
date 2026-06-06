@@ -17,13 +17,13 @@
           (lambda ()
             (system* "lepton-netlist" "-g" "spice-sdb" "-o" cir filename)
             (schematic-message-dialog
-              (string-append "SPICE netlist written:\n" cir))))
+             (string-append "SPICE netlist written:\n" cir)))
           (lambda (key . args)
             (schematic-error-dialog
-              (string-append "SPICE netlist failed:\n"
-                             (format #f "~A ~A" key args))
-              #:secondary-text
-              "Check the lepton-schematic log for details.")))))))
+             (string-append "SPICE netlist failed:\n"
+                            (format #f "~A ~A" key args))
+             #:secondary-text
+             "Check the lepton-schematic log for details.")))))))
 
 (define (&sim-ngspice)
   (let* ((page (active-page))
@@ -38,13 +38,13 @@
           (lambda ()
             (system* "ngspice" "-b" "-r" raw cir)
             (schematic-message-dialog
-              (string-append "Simulation complete:\n" raw))))
+             (string-append "Simulation complete:\n" raw)))
           (lambda (key . args)
             (schematic-error-dialog
-              (string-append "Simulation failed:\n"
-                             (format #f "~A ~A" key args))
-              #:secondary-text
-              "Check the lepton-schematic log for details.")))))))
+             (string-append "Simulation failed:\n"
+                            (format #f "~A ~A" key args))
+             #:secondary-text
+             "Check the lepton-schematic log for details.")))))))
 
 (define (&wave-pqwave)
   (let* ((page (active-page))
