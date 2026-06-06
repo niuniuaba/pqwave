@@ -52,17 +52,21 @@
 
 ;; Append SPICE to the built-in Netlist menu.
 (let ((menu-list (@@ (schematic menu) %main-menu-list)))
+  (format (current-error-port) "pqwave DEBUG: menu-list has ~A entries\n" (length menu-list))
   (let ((netlist-entry (assoc "_Netlist" menu-list)))
+    (format (current-error-port) "pqwave DEBUG: netlist-entry=~A\n" (if netlist-entry "found" "NOT FOUND"))
     (when netlist-entry
       (set-cdr! netlist-entry
         (append (cdr netlist-entry)
-                (list (list "2 SPICE" '&spice-netlist #f)))))))
+                (list (list "2 SPICE" '&spice-netlist #f))))
+      (format (current-error-port) "pqwave DEBUG: SPICE added to Netlist menu\n"))))
 
 ;; Add Simulation and Wave menus between Netlist and Help.
 (let* ((menu-list (@@ (schematic menu) %main-menu-list))
        (names (map car menu-list))
        (netlist-pos (list-index (lambda (n) (string=? n "_Netlist")) names))
        (help-pos (list-index (lambda (n) (string=? n "_Help")) names)))
+  (format (current-error-port) "pqwave DEBUG: netlist-pos=~A help-pos=~A\n" netlist-pos help-pos)
   (when (and netlist-pos help-pos)
     (let* ((before (list-head menu-list (+ 1 netlist-pos)))
            (after (list-tail menu-list help-pos))
