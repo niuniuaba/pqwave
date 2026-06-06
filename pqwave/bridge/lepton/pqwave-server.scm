@@ -5,7 +5,7 @@
 ;; This file contains the TCP server, cross-probe logic, and back-annotation.
 ;; VERSION: 8
 
-(use-modules (srfi srfi-1) (srfi srfi-13) (ice-9 rdelim) (ice-9 threads) (ice-9 hash-table))
+(use-modules (srfi srfi-1) (srfi srfi-13) (ice-9 rdelim) (ice-9 regex) (ice-9 threads) (ice-9 hash-table))
 (use-modules (lepton attrib) (lepton object) (lepton page) (lepton log))
 (use-modules (schematic hook) (schematic selection))
 (use-modules (schematic window) (system foreign))
