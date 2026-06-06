@@ -204,30 +204,21 @@
         (let ((existing (hash-ref pqwave-label-map netname)))
           (if existing
               ;; Update existing — preserves user position/rotation
-              (begin
-                (format (current-error-port)
-                (set-text-string! existing text))
+              (set-text-string! existing text)
               ;; Create new label.  Auto-position near net if (0,0).
-              (begin
-                (format (current-error-port)
-                        netname x y)
-                (let* ((pos (if (and (= x 0) (= y 0))
-                              (let ((nets (pqwave-find-nets-by-name page netname)))
-                                (format (current-error-port)
-                                        (length nets))
-                                (if (pair? nets)
-                                    (let ((b (object-bounds (car nets))))
-                                      (format (current-error-port)
-                                      (if b
-                                          ;; bounds: ((left . top) right . bottom)
-                                          (cons (caar b)
-                                                (+ (cddr b) 50))
-                                          (cons 0 0)))
-                                    (cons 0 0)))
-                              (cons x y)))
-                       (txt (make-text pos 'lower-left 0 text 8 #t 'both 0)))  ; 0 = standalone, not an attribute
-                  (page-append! page txt)
-                  (hash-set! pqwave-label-map netname txt)))))))))
+              (let* ((pos (if (and (= x 0) (= y 0))
+                            (let ((nets (pqwave-find-nets-by-name page netname)))
+                              (if (pair? nets)
+                                  (let ((b (object-bounds (car nets))))
+                                    ;; bounds: ((left . top) right . bottom)
+                                    (if b
+                                        (cons (caar b) (+ (cddr b) 50))
+                                        (cons 0 0)))
+                                  (cons 0 0)))
+                            (cons x y)))
+                     (txt (make-text pos 'lower-left 0 text 8 #t 'both 0)))
+                (page-append! page txt)
+                (hash-set! pqwave-label-map netname txt))))))))
 
 (define (pqwave-clear-labels)
   (let ((page (active-page)))
