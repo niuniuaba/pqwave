@@ -225,8 +225,9 @@
                                       (format (current-error-port)
                                               "pqwave DEBUG: bounds=~A\n" b)
                                       (if b
-                                          (cons (car b)
-                                                (+ (list-ref b 3) 50))
+                                          ;; bounds: ((left . top) right . bottom)
+                                          (cons (caar b)
+                                                (+ (cddr b) 50))
                                           (cons 0 0)))
                                     (cons 0 0)))
                               (cons x y)))
