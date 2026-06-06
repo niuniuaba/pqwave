@@ -217,7 +217,7 @@
                                         (cons 0 0)))
                                   (cons 0 0)))
                             (cons x y)))
-                     (txt (make-text pos 'lower-left 0 text 8 #t 'both 0)))
+                     (txt (make-text pos 'lower-left 0 text 8 #t 'both 2)))
                 (page-append! page txt)
                 (hash-set! pqwave-label-map netname txt))))))))
 
