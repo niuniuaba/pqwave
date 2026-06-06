@@ -1,11 +1,12 @@
 ;; pqwave menu additions for lepton-schematic.
-;; Load via user gafrc: add (load "/path/to/menu-additions.scm") to
-;;   ~/.config/lepton-eda/gafrc
-;; VERSION: 6
+;; Load via user gschemrc: add (load "/path/to/menu-additions.scm") to
+;;   ~/.config/lepton-eda/gschemrc
+;; VERSION: 7
 
-(use-modules (srfi srfi-1) (srfi srfi-13) (lepton page) (lepton log) (schematic menu))
+(use-modules (srfi srfi-1) (srfi srfi-13) (lepton page) (lepton log)
+             (schematic menu))
 
-(format (current-error-port) "pqwave DEBUG: menu-additions.scm loaded\n")
+(format (current-error-port) "pqwave DEBUG: menu-additions.scm loaded (gschemrc)\n")
 
 (define (&spice-netlist)
   (let* ((page (active-page))
@@ -46,27 +47,22 @@
       (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
              (base (substring filename 0 idx))
              (raw (string-append base ".raw")))
-        ;; system* blocks until child exits; pqwave is a GUI app, so use
-        ;; sh -c with & to detach and return immediately.
         (system* "sh" "-c" (string-append "pqwave \"" raw "\" &"))))))
 
 ;; Append SPICE to the built-in Netlist menu.
 (let ((menu-list (@@ (schematic menu) %main-menu-list)))
   (format (current-error-port) "pqwave DEBUG: menu-list has ~A entries\n" (length menu-list))
   (let ((netlist-entry (assoc "_Netlist" menu-list)))
-    (format (current-error-port) "pqwave DEBUG: netlist-entry=~A\n" (if netlist-entry "found" "NOT FOUND"))
     (when netlist-entry
       (set-cdr! netlist-entry
         (append (cdr netlist-entry)
-                (list (list "2 SPICE" '&spice-netlist #f))))
-      (format (current-error-port) "pqwave DEBUG: SPICE added to Netlist menu\n"))))
+                (list (list "2 SPICE" '&spice-netlist #f)))))))
 
 ;; Add Simulation and Wave menus between Netlist and Help.
 (let* ((menu-list (@@ (schematic menu) %main-menu-list))
        (names (map car menu-list))
        (netlist-pos (list-index (lambda (n) (string=? n "_Netlist")) names))
        (help-pos (list-index (lambda (n) (string=? n "_Help")) names)))
-  (format (current-error-port) "pqwave DEBUG: netlist-pos=~A help-pos=~A\n" netlist-pos help-pos)
   (when (and netlist-pos help-pos)
     (let* ((before (list-head menu-list (+ 1 netlist-pos)))
            (after (list-tail menu-list help-pos))
@@ -75,5 +71,4 @@
            (wave (list (cons "_Wave"
                              (list (list "pqwave" '&wave-pqwave #f)))))
            (new-list (append before sim wave after)))
-      (set! (@@ (schematic menu) %main-menu-list) new-list)
-      (format (current-error-port) "pqwave DEBUG: menus added to %main-menu-list\n"))))
+      (set! (@@ (schematic menu) %main-menu-list) new-list))))
