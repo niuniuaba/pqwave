@@ -69,6 +69,7 @@
 ;; ---- Command Dispatch ----
 
 (define (pqwave-dispatch cmd)
+  (format (current-error-port) "pqwave: dispatch ~A\n" cmd)
   (cond
    ((string-prefix? "$NET:" cmd)
     (pqwave-probe-net (pqwave-strip-quotes (string-trim-both (string-drop cmd 5)))))
@@ -191,7 +192,7 @@
 
 (define (pqwave-annotate-label cmd)
   ;; Format: $ANNOTATE:LABEL|<netname>|<text>|<x>|<y>
-  ;; When x=0 and y=0, auto-positions the label near the net.
+  (format (current-error-port) "pqwave: annotate-label ~A\n" cmd)
   (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
          (text (if (> (length parts) 2) (list-ref parts 2) "?"))
