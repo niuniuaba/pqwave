@@ -231,7 +231,7 @@
                                           (cons 0 0)))
                                     (cons 0 0)))
                               (cons x y)))
-                       (txt (make-text pos 'lower-left 0 text 8 #t 'both 2)))
+                       (txt (make-text pos 'lower-left 0 text 8 #t 'both 0)))  ; 0 = standalone, not an attribute
                   (format (current-error-port) "pqwave DEBUG: text created at ~A\n" pos)
                   (page-append! page txt)
                   (hash-set! pqwave-label-map netname txt)))))))))
