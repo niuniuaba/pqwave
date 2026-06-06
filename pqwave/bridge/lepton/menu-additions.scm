@@ -4,7 +4,7 @@
 ;; VERSION: 7
 
 (use-modules (srfi srfi-1) (srfi srfi-13) (lepton page) (lepton log)
-             (schematic menu))
+             (schematic menu) (schematic dialog))
 
 (define (&spice-netlist)
   (let* ((page (active-page))
@@ -16,10 +16,14 @@
         (catch #t
           (lambda ()
             (system* "lepton-netlist" "-g" "spice-sdb" "-o" cir filename)
-            (log! 'message (string-append "SPICE netlist: " cir)))
+            (schematic-message-dialog
+              (string-append "SPICE netlist written:\n" cir)))
           (lambda (key . args)
-            (log! 'warning
-              (format #f "SPICE netlist failed: ~A ~A" key args))))))))
+            (schematic-error-dialog
+              (string-append "SPICE netlist failed:\n"
+                             (format #f "~A ~A" key args))
+              #:secondary-text
+              "Check the lepton-schematic log for details."))))))))
 
 (define (&sim-ngspice)
   (let* ((page (active-page))
@@ -33,10 +37,14 @@
         (catch #t
           (lambda ()
             (system* "ngspice" "-b" "-r" raw cir)
-            (log! 'message (string-append "Simulation done: " raw)))
+            (schematic-message-dialog
+              (string-append "Simulation complete:\n" raw)))
           (lambda (key . args)
-            (log! 'warning
-              (format #f "Simulation failed: ~A ~A" key args))))))))
+            (schematic-error-dialog
+              (string-append "Simulation failed:\n"
+                             (format #f "~A ~A" key args))
+              #:secondary-text
+              "Check the lepton-schematic log for details."))))))))
 
 (define (&wave-pqwave)
   (let* ((page (active-page))
