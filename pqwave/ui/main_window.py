@@ -1112,21 +1112,23 @@ class MainWindow(QMainWindow):
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
         from pqwave.bridge.lepton.control_bar import LeptonControlBar
 
-        # Check if gafrc is configured (one-time reminder, non-blocking).
+        # Check if gafrc/gschemrc are configured (one-time reminder).
         gafrc_path = os.path.expanduser("~/.config/lepton-eda/gafrc")
-        if os.path.exists(gafrc_path):
-            with open(gafrc_path) as f:
-                gafrc_content = f.read()
-        else:
-            gafrc_content = ""
-        if "pqwave-server.scm" not in gafrc_content:
-            self.chat_panel.append_output(
-                "[lepton] gafrc not configured.  Add to "
-                "~/.config/lepton-eda/gafrc:\n"
-                "  (load \"/path/to/pqwave/bridge/lepton/pqwave-server.scm\")\n"
-                "  (load \"/path/to/pqwave/bridge/lepton/menu-additions.scm\")\n"
-                "[lepton] Then restart lepton-schematic.\n"
-            )
+        gschemrc_path = os.path.expanduser("~/.config/lepton-eda/gschemrc")
+        def _file_contains(path, text):
+            return os.path.exists(path) and text in open(path).read()
+        gafrc_ok = _file_contains(gafrc_path, "pqwave-server.scm")
+        gschemrc_ok = _file_contains(gschemrc_path, "menu-additions.scm")
+        if not gafrc_ok or not gschemrc_ok:
+            msg = ["[lepton] Config missing. Add these files:"]
+            if not gafrc_ok:
+                msg.append("  ~/.config/lepton-eda/gafrc:")
+                msg.append('    (load "/path/to/pqwave/bridge/lepton/pqwave-server.scm")')
+            if not gschemrc_ok:
+                msg.append("  ~/.config/lepton-eda/gschemrc:")
+                msg.append('    (load "/path/to/pqwave/bridge/lepton/menu-additions.scm")')
+            msg.append("[lepton] Then restart lepton-schematic.")
+            self.chat_panel.append_output("\n".join(msg) + "\n")
 
         # Check for port conflicts before starting bridge
         from pqwave.models.state import ApplicationState as _AS
