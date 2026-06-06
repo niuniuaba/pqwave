@@ -211,28 +211,29 @@
                         "pqwave DEBUG: updating existing label for ~A\n" netname)
                 (set-text-string! existing text))
               ;; Create new label.  Auto-position near net if (0,0).
-              (format (current-error-port)
-                      "pqwave DEBUG: creating new label netname=~A pos=(~A,~A)\n"
-                      netname x y)
-              (let* ((pos (if (and (= x 0) (= y 0))
-                            (let ((nets (pqwave-find-nets-by-name page netname)))
-                              (format (current-error-port)
-                                      "pqwave DEBUG: auto-pos found ~A nets\n"
-                                      (length nets))
-                              (if (pair? nets)
-                                  (let ((b (object-bounds (car nets))))
-                                    (format (current-error-port)
-                                            "pqwave DEBUG: bounds=~A\n" b)
-                                    (if b
-                                        (cons (car b)           ; left
-                                              (+ (list-ref b 3) 50))  ; bottom+50
-                                        (cons 0 0)))
-                                  (cons 0 0)))
-                            (cons x y)))
-                     (txt (make-text pos 'lower-left 0 text 8 #t 'both 2)))
-                (format (current-error-port) "pqwave DEBUG: text created at ~A\n" pos)
-                (page-append! page txt)
-                (hash-set! pqwave-label-map netname txt))))))))
+              (begin
+                (format (current-error-port)
+                        "pqwave DEBUG: creating new label netname=~A pos=(~A,~A)\n"
+                        netname x y)
+                (let* ((pos (if (and (= x 0) (= y 0))
+                              (let ((nets (pqwave-find-nets-by-name page netname)))
+                                (format (current-error-port)
+                                        "pqwave DEBUG: auto-pos found ~A nets\n"
+                                        (length nets))
+                                (if (pair? nets)
+                                    (let ((b (object-bounds (car nets))))
+                                      (format (current-error-port)
+                                              "pqwave DEBUG: bounds=~A\n" b)
+                                      (if b
+                                          (cons (car b)
+                                                (+ (list-ref b 3) 50))
+                                          (cons 0 0)))
+                                    (cons 0 0)))
+                              (cons x y)))
+                       (txt (make-text pos 'lower-left 0 text 8 #t 'both 2)))
+                  (format (current-error-port) "pqwave DEBUG: text created at ~A\n" pos)
+                  (page-append! page txt)
+                  (hash-set! pqwave-label-map netname txt)))))))))
 
 (define (pqwave-clear-labels)
   (let ((page (active-page)))
