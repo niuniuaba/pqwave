@@ -5,6 +5,8 @@
 
 (use-modules (srfi srfi-1) (srfi srfi-13) (lepton page) (lepton log) (schematic menu))
 
+(format (current-error-port) "pqwave DEBUG: menu-additions.scm loaded\n")
+
 (define (&spice-netlist)
   (let* ((page (active-page))
          (filename (if page (page-filename page) #f)))
@@ -69,4 +71,5 @@
            (wave (list (cons "_Wave"
                              (list (list "pqwave" '&wave-pqwave #f)))))
            (new-list (append before sim wave after)))
-      (set! (@@ (schematic menu) %main-menu-list) new-list))))
+      (set! (@@ (schematic menu) %main-menu-list) new-list)
+      (format (current-error-port) "pqwave DEBUG: menus added to %main-menu-list\n"))))
