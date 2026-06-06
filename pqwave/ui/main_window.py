@@ -1221,6 +1221,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_lepton_ba_timer'):
             self._lepton_ba_timer.stop()
         if self._lepton_cross_probe:
+            if self._lepton_cross_probe.is_connected():
+                self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
             self._lepton_cross_probe.disconnect()
         if self.lepton_control_bar:
             self.lepton_control_bar.set_status("not watching")
@@ -1499,7 +1501,8 @@ class MainWindow(QMainWindow):
         self._xschem_last_path = self._xschem_watched_path
         if self._xschem_watcher:
             self._xschem_watcher.unwatch()
-        # cross_probe is stateless — no disconnect needed
+        if self._xschem_cross_probe:
+            self._xschem_cross_probe.clear_stamps()
         if self.xschem_control_bar:
             self.xschem_control_bar.set_status("not watching")
             self.xschem_control_bar.set_watching(False)
