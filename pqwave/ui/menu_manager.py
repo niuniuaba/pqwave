@@ -132,55 +132,20 @@ class MenuManager:
         )
         file_menu.addAction(open_mc_action)
 
-        # KiCad Bridge submenu
-        kicad_menu = QMenu("KiCad Bridge", self.parent)
-
-        watch_action = QAction("Watch Schematic...", self.parent)
-        watch_action.triggered.connect(self.callbacks.get("kicad_watch", lambda: None))
-        kicad_menu.addAction(watch_action)
-
-        rewatch_action = QAction("Re-Watch", self.parent)
-        rewatch_action.triggered.connect(self.callbacks.get("kicad_rewatch", lambda: None))
-        kicad_menu.addAction(rewatch_action)
-
-        kicad_menu.addSeparator()
-
-        unwatch_action = QAction("Stop Watching", self.parent)
-        unwatch_action.triggered.connect(self.callbacks.get("kicad_unwatch", lambda: None))
-        kicad_menu.addAction(unwatch_action)
-
-        kicad_menu.addSeparator()
-
-        cross_probe_menu = QMenu("Cross-Probe", self.parent)
-        probe_action = QAction("Probe Selected Net", self.parent)
-        probe_action.triggered.connect(
-            self.callbacks.get("kicad_probe_selected", lambda: None)
-        )
-        cross_probe_menu.addAction(probe_action)
-        clear_probe = QAction("Clear Highlight", self.parent)
-        clear_probe.triggered.connect(
-            self.callbacks.get("kicad_clear_probe", lambda: None)
-        )
-        cross_probe_menu.addAction(clear_probe)
-        kicad_menu.addMenu(cross_probe_menu)
-
-        file_menu.addMenu(kicad_menu)
-        file_menu.addSeparator()
-
-        # Lepton-EDA Bridge submenu
+        # Lepton Bridge submenu
         lepton_menu = QMenu("Lepton Bridge", self.parent)
 
-        watch_action = QAction("Watch Schematic...", self.parent)
-        watch_action.triggered.connect(self.callbacks.get("lepton_watch", lambda: None))
-        lepton_menu.addAction(watch_action)
+        connect_action = QAction("Connect", self.parent)
+        connect_action.triggered.connect(self.callbacks.get("lepton_connect", lambda: None))
+        lepton_menu.addAction(connect_action)
 
-        rewatch_action = QAction("Re-Watch", self.parent)
-        rewatch_action.triggered.connect(self.callbacks.get("lepton_rewatch", lambda: None))
-        lepton_menu.addAction(rewatch_action)
+        sim_action = QAction("Simulate Now", self.parent)
+        sim_action.triggered.connect(self.callbacks.get("lepton_simulate", lambda: None))
+        lepton_menu.addAction(sim_action)
 
-        simulate_action = QAction("Simulate Now", self.parent)
-        simulate_action.triggered.connect(self.callbacks.get("lepton_simulate", lambda: None))
-        lepton_menu.addAction(simulate_action)
+        disconn_action = QAction("Disconnect", self.parent)
+        disconn_action.triggered.connect(self.callbacks.get("lepton_disconnect", lambda: None))
+        lepton_menu.addAction(disconn_action)
 
         lepton_menu.addSeparator()
 
@@ -211,29 +176,36 @@ class MenuManager:
         cross_probe_menu.addAction(clear_probe)
         lepton_menu.addMenu(cross_probe_menu)
 
-        lepton_menu.addSeparator()
-        unwatch_action = QAction("Stop Watching", self.parent)
-        unwatch_action.triggered.connect(
-            self.callbacks.get("lepton_unwatch", lambda: None)
-        )
-        lepton_menu.addAction(unwatch_action)
-
         file_menu.addMenu(lepton_menu)
 
         # Xschem Bridge submenu
         xschem_menu = QMenu("Xschem Bridge", self.parent)
 
-        watch_action = QAction("Watch Schematic...", self.parent)
-        watch_action.triggered.connect(self.callbacks.get("xschem_watch", lambda: None))
-        xschem_menu.addAction(watch_action)
+        connect_action = QAction("Connect", self.parent)
+        connect_action.triggered.connect(self.callbacks.get("xschem_connect", lambda: None))
+        xschem_menu.addAction(connect_action)
 
-        rewatch_action = QAction("Re-Watch", self.parent)
-        rewatch_action.triggered.connect(self.callbacks.get("xschem_rewatch", lambda: None))
-        xschem_menu.addAction(rewatch_action)
+        sim_action = QAction("Simulate Now", self.parent)
+        sim_action.triggered.connect(self.callbacks.get("xschem_simulate", lambda: None))
+        xschem_menu.addAction(sim_action)
 
-        simulate_action = QAction("Simulate Now", self.parent)
-        simulate_action.triggered.connect(self.callbacks.get("xschem_simulate", lambda: None))
-        xschem_menu.addAction(simulate_action)
+        disconn_action = QAction("Disconnect", self.parent)
+        disconn_action.triggered.connect(self.callbacks.get("xschem_disconnect", lambda: None))
+        xschem_menu.addAction(disconn_action)
+
+        xschem_menu.addSeparator()
+
+        annotate_action = QAction("Annotate DC", self.parent)
+        annotate_action.triggered.connect(
+            self.callbacks.get("xschem_annotate_dc", lambda: None)
+        )
+        xschem_menu.addAction(annotate_action)
+
+        clear_action = QAction("Clear Annotations", self.parent)
+        clear_action.triggered.connect(
+            self.callbacks.get("xschem_clear_annotations", lambda: None)
+        )
+        xschem_menu.addAction(clear_action)
 
         xschem_menu.addSeparator()
 
@@ -250,21 +222,7 @@ class MenuManager:
         cross_probe_menu.addAction(clear_probe)
         xschem_menu.addMenu(cross_probe_menu)
 
-        xschem_menu.addSeparator()
-        unwatch_action = QAction("Stop Watching", self.parent)
-        unwatch_action.triggered.connect(
-            self.callbacks.get("xschem_unwatch", lambda: None)
-        )
-        xschem_menu.addAction(unwatch_action)
-
         file_menu.addMenu(xschem_menu)
-
-        # Store refs for dynamic enable/disable by MainWindow
-        self._xschem_watch_action = watch_action
-        self._xschem_rewatch_action = rewatch_action
-        self._xschem_simulate_action = simulate_action
-        self._xschem_unwatch_action = unwatch_action
-        self._xschem_probe_menu = cross_probe_menu
         file_menu.addSeparator()
 
         open_file_action = QAction("Open File...", self.parent)
@@ -626,12 +584,6 @@ class MenuManager:
         )
         help_menu.addAction(mc_guide_action)
 
-        kicad_guide_action = QAction("KiCad User Guide", self.parent)
-        kicad_guide_action.triggered.connect(
-            self.callbacks.get("show_kicad_guide", lambda: None)
-        )
-        help_menu.addAction(kicad_guide_action)
-
         lepton_guide_action = QAction("Lepton-EDA User Guide", self.parent)
         lepton_guide_action.triggered.connect(
             self.callbacks.get("show_lepton_guide", lambda: None)
@@ -906,16 +858,11 @@ class MenuManager:
         self.toggle_y_cursor_B_action.setChecked(checked)
         self.toggle_y_cursor_B_toolbar.setChecked(checked)
 
-    def set_xschem_bridge_enabled(self, watching: bool) -> None:
-        """Enable or disable xschem bridge menu actions based on watch state."""
-        if not hasattr(self, "_xschem_simulate_action"):
-            return  # menu not yet created
-        self._xschem_simulate_action.setEnabled(watching)
-        self._xschem_unwatch_action.setEnabled(watching)
-        if hasattr(self, "_xschem_rewatch_action"):
-            self._xschem_rewatch_action.setEnabled(watching)
-        if hasattr(self, "_xschem_probe_menu"):
-            self._xschem_probe_menu.setEnabled(watching)
+    def set_xschem_bridge_connected(self, connected: bool) -> None:
+        """Enable or disable xschem bridge menu actions based on connected state.
+        All items are always enabled after menu creation.
+        """
+        pass  # No dynamic enable/disable needed — items always available
 
     def update_cursor_status(self, positions: dict, deltas: dict) -> None:
         """Update cursor delta display in status bar.

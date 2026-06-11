@@ -450,7 +450,6 @@ def main():
         metavar="COMMAND",
         help="Send command to existing xschem server and exit"
     )
-    # KiCad integration arguments
     parser.add_argument(
         "files",
         nargs="*",  # Zero or more positional arguments
@@ -512,6 +511,20 @@ def main():
         "--log-file",
         metavar="FILE",
         help="Write logs to specified file"
+    )
+
+    # Bridge auto-connect arguments (used by editor Wave menus)
+    parser.add_argument(
+        "--connect",
+        choices=["xschem", "lepton"],
+        default=None,
+        help="Auto-connect to bridge on startup (used by editor Wave menu)"
+    )
+    parser.add_argument(
+        "--sch-path",
+        metavar="PATH",
+        default=None,
+        help="Schematic file path for auto-connect (used with --connect)"
     )
 
     args = parser.parse_args()
@@ -684,9 +697,18 @@ def main():
     initial_files = json_files + other_files  # .json first, then raws/vcds
     if initial_files:
         logger.info(f"Opening files from command line: {initial_files}")
-        window = MainWindow(initial_files=initial_files, xschem_ba_port=args.xschem_ba_port)
+        window = MainWindow(
+            initial_files=initial_files,
+            xschem_ba_port=args.xschem_ba_port,
+            auto_connect=getattr(args, 'connect', None),
+            auto_connect_sch_path=getattr(args, 'sch_path', None),
+        )
     else:
-        window = MainWindow(xschem_ba_port=args.xschem_ba_port)
+        window = MainWindow(
+            xschem_ba_port=args.xschem_ba_port,
+            auto_connect=getattr(args, 'connect', None),
+            auto_connect_sch_path=getattr(args, 'sch_path', None),
+        )
 
     # Start wave receiver after window is created (so signals are connected)
     if wave_receiver is not None:

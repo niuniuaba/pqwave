@@ -35,6 +35,33 @@ def _get_gafrc_path() -> str:
     return os.path.join(_get_user_config_dir(), "gafrc")
 
 
+def _check_guile_cache_stale(scm_path: str) -> bool:
+    """Return True if *scm_path* has no compiled ``.go`` cache or the
+    ``.go`` is older than the ``.scm`` source.
+
+    Guile auto-compiles ``.scm`` files to ``~/.cache/guile/ccache/...``
+    on first load.  If the source is edited but lepton-schematic is not
+    restarted, it keeps running the stale ``.go`` bytecode.
+    """
+    try:
+        scm_mtime = os.path.getmtime(scm_path)
+    except OSError:
+        return False  # source doesn't exist — nothing to check
+
+    cache_root = os.path.expanduser(
+        "~/.cache/guile/ccache/3.0-LE-8-4.7")
+    scm_abs = os.path.abspath(scm_path)
+    go_path = os.path.join(cache_root, scm_abs.lstrip("/") + ".go")
+
+    try:
+        go_mtime = os.path.getmtime(go_path)
+        return scm_mtime > go_mtime
+    except OSError:
+        # No .go file at all — source was never compiled, or cache was
+        # cleared.  Not stale (will be compiled on next load).
+        return False
+
+
 def _extract_scm_version(path: str) -> int:
     """Extract VERSION number from a .scm file. Returns 0 if not found."""
     try:
@@ -77,11 +104,17 @@ def check_scheme_server() -> dict:
             "menu_scm_path": menu_scm_path,
             "needs_update": True,
         }
-    # Check if menu.scm has both load lines
+    # Check menu.scm for menu additions, gafrc for TCP server.
+    # The server must only be loaded from ONE place (gafrc) to avoid
+    # double-loading and spawning duplicate TCP server threads.
+    gafrc_path = os.path.join(config_dir, "gafrc")
     with open(menu_scm_path, "r") as f:
         content = f.read()
         has_menus = "pqwave-menus.scm" in content
-        has_server = "pqwave-server.scm" in content
+    has_server = False
+    if os.path.exists(gafrc_path):
+        with open(gafrc_path) as f:
+            has_server = "pqwave-server.scm" in f.read()
     if not has_menus or not has_server:
         return {
             "installed": False,
@@ -99,12 +132,17 @@ def check_scheme_server() -> dict:
     installed_server_v = _extract_scm_version(server_scm_path)
     needs_update = (installed_menu_v < src_menu_v or
                     installed_server_v < src_server_v)
+    guile_cache_stale = (
+        _check_guile_cache_stale(server_scm_path)
+        or _check_guile_cache_stale(additions_path)
+    )
     return {
         "installed": True,
         "additions_path": additions_path,
         "server_scm_path": server_scm_path,
         "menu_scm_path": menu_scm_path,
         "needs_update": needs_update,
+        "guile_cache_stale": guile_cache_stale,
     }
 
 
@@ -144,15 +182,29 @@ def install_scheme_server() -> dict:
         with open(menu_scm_path, "r") as f:
             existing = f.read()
 
+        # Only add menu additions to menu.scm.  The TCP server is loaded
+        # exclusively from gafrc — loading it from menu.scm as well would
+        # spawn duplicate server threads.
         lines_to_add = []
         if "pqwave-menus.scm" not in existing:
             lines_to_add.append(f'(load "{additions_dst}")')
-        if "pqwave-server.scm" not in existing:
-            lines_to_add.append(f'(load "{server_dst}")')
 
         if lines_to_add:
             with open(menu_scm_path, "a") as f:
                 f.write("\n" + "\n".join(lines_to_add) + "\n")
+
+        # Write/update gafrc to load the TCP server on startup.
+        # Menu additions are already loaded via menu.scm (above) —
+        # loading them from gschemrc as well would insert duplicate menus.
+        gafrc_path = os.path.join(config_dir, "gafrc")
+        server_line = f'(load "{server_dst}")\n'
+        _already_configured = False
+        if os.path.exists(gafrc_path):
+            with open(gafrc_path) as f:
+                _already_configured = "pqwave-server.scm" in f.read()
+        if not _already_configured:
+            with open(gafrc_path, "a") as f:
+                f.write("\n;; pqwave bridge\n" + server_line)
 
         return {"status": "ok", "menu_scm_path": menu_scm_path,
                 "additions_path": additions_dst, "server_scm_path": server_dst}
@@ -230,6 +282,7 @@ class LeptonCrossProbeClient(QObject):
     error_occurred = pyqtSignal(str)
     net_selected = pyqtSignal(str)
     part_selected = pyqtSignal(str)
+    schematic_path = pyqtSignal(str)
 
     def __init__(self, port: int = 9424, timeout: float = 2.0):
         super().__init__()
@@ -333,5 +386,7 @@ class LeptonCrossProbeClient(QObject):
             self.net_selected.emit(msg[14:].strip())
         elif msg.startswith("$SELECTED:part "):
             self.part_selected.emit(msg[15:].strip())
+        elif msg.startswith("$SCHEMATIC:"):
+            self.schematic_path.emit(msg[11:].strip())
         else:
             self.error_occurred.emit(f"Unknown message from server: {msg[:80]}")

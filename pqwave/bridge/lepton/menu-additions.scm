@@ -1,18 +1,30 @@
 ;; pqwave menu additions for lepton-schematic.
 ;; Load via user gschemrc: add (load "/path/to/menu-additions.scm") to
 ;;   ~/.config/lepton-eda/gschemrc
-;; VERSION: 7
+;; VERSION: 8
 
 (use-modules (srfi srfi-1) (srfi srfi-13) (lepton page) (lepton log)
              (schematic menu) (schematic dialog))
+
+;; Helper: given a full .sch path, return (dir . basename-without-ext).
+(define (pqwave-path-parts filename)
+  (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
+         (base (substring filename 0 idx))
+         (slash (string-rindex base #\/))
+         (dir (if slash (substring base 0 slash) "."))
+         (name (if slash (substring base (+ 1 slash)) base)))
+    (cons dir name)))
 
 (define (&spice-netlist)
   (let* ((page (active-page))
          (filename (if page (page-filename page) #f)))
     (when filename
-      (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
-             (base (substring filename 0 idx))
-             (cir (string-append base ".cir")))
+      (let* ((parts (pqwave-path-parts filename))
+             (dir (car parts))
+             (name (cdr parts))
+             (sim-dir (string-append dir "/simulation"))
+             (cir (string-append sim-dir "/" name ".cir")))
+        (system* "mkdir" "-p" sim-dir)
         (catch #t
           (lambda ()
             (system* "lepton-netlist" "-g" "spice-sdb" "-o" cir filename)
@@ -29,10 +41,13 @@
   (let* ((page (active-page))
          (filename (if page (page-filename page) #f)))
     (when filename
-      (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
-             (base (substring filename 0 idx))
-             (cir (string-append base ".cir"))
-             (raw (string-append base ".raw")))
+      (let* ((parts (pqwave-path-parts filename))
+             (dir (car parts))
+             (name (cdr parts))
+             (sim-dir (string-append dir "/simulation"))
+             (cir (string-append sim-dir "/" name ".cir"))
+             (raw (string-append sim-dir "/" name ".raw")))
+        (system* "mkdir" "-p" sim-dir)
         (system* "lepton-netlist" "-g" "spice-sdb" "-o" cir filename)
         (catch #t
           (lambda ()
@@ -50,10 +65,14 @@
   (let* ((page (active-page))
          (filename (if page (page-filename page) #f)))
     (when filename
-      (let* ((idx (or (string-rindex filename #\.) (string-length filename)))
-             (base (substring filename 0 idx))
-             (raw (string-append base ".raw")))
-        (system* "sh" "-c" (string-append "pqwave \"" raw "\" &"))))))
+      (let* ((parts (pqwave-path-parts filename))
+             (dir (car parts))
+             (name (cdr parts))
+             (sim-dir (string-append dir "/simulation"))
+             (raw (string-append sim-dir "/" name ".raw")))
+        (system* "sh" "-c"
+          (string-append "pqwave \"" raw "\" --connect lepton --sch-path \""
+                         filename "\" &"))))))
 
 ;; Append SPICE to the built-in Netlist menu.
 (let ((menu-list (@@ (schematic menu) %main-menu-list)))

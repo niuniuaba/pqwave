@@ -372,19 +372,6 @@ class SettingsWidget(QWidget):
         ghwdump_reset.clicked.connect(lambda: self._reset_tool_path("ghwdump"))
         tool_paths_layout.addWidget(ghwdump_reset, 1, 2)
 
-        # kicad-cli
-        tool_paths_layout.addWidget(QLabel("kicad-cli:"), 2, 0)
-        self._kicad_cli_edit = QLineEdit()
-        self._kicad_cli_edit.setPlaceholderText("Use $PATH (e.g. /usr/bin/kicad-cli)")
-        self._kicad_cli_edit.setMinimumWidth(200)
-        self._kicad_cli_edit.textChanged.connect(
-            lambda text: self._on_tool_path_changed("kicad_cli"))
-        tool_paths_layout.addWidget(self._kicad_cli_edit, 2, 1)
-
-        kicad_cli_reset = QPushButton("Reset")
-        kicad_cli_reset.clicked.connect(lambda: self._reset_tool_path("kicad_cli"))
-        tool_paths_layout.addWidget(kicad_cli_reset, 2, 2)
-
         # lepton-netlist
         tool_paths_layout.addWidget(QLabel("lepton-netlist:"), 3, 0)
         self._lepton_netlist_edit = QLineEdit()
@@ -589,9 +576,6 @@ class SettingsWidget(QWidget):
         self._ghwdump_edit.blockSignals(True)
         self._ghwdump_edit.setText(self.state.tool_paths.get("ghwdump", ""))
         self._ghwdump_edit.blockSignals(False)
-        self._kicad_cli_edit.blockSignals(True)
-        self._kicad_cli_edit.setText(self.state.tool_paths.get("kicad_cli", ""))
-        self._kicad_cli_edit.blockSignals(False)
         self._lepton_netlist_edit.blockSignals(True)
         self._lepton_netlist_edit.setText(self.state.tool_paths.get("lepton_netlist", ""))
         self._lepton_netlist_edit.blockSignals(False)
@@ -919,7 +903,6 @@ class SettingsWidget(QWidget):
         edit_map = {
             "fst2vcd": self._fst2vcd_edit,
             "ghwdump": self._ghwdump_edit,
-            "kicad_cli": self._kicad_cli_edit,
             "lepton_netlist": self._lepton_netlist_edit,
             "ngspice": self._ngspice_edit,
         }
@@ -932,7 +915,6 @@ class SettingsWidget(QWidget):
         edit_map = {
             "fst2vcd": self._fst2vcd_edit,
             "ghwdump": self._ghwdump_edit,
-            "kicad_cli": self._kicad_cli_edit,
             "lepton_netlist": self._lepton_netlist_edit,
             "ngspice": self._ngspice_edit,
         }

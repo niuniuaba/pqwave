@@ -3,18 +3,26 @@
 ;;   ~/.config/lepton-eda/gafrc
 ;; Menu additions are in menu-additions.scm (loaded separately).
 ;; This file contains the TCP server, cross-probe logic, and back-annotation.
-;; VERSION: 8
+;; VERSION: 13
 
 (use-modules (srfi srfi-1) (srfi srfi-13) (ice-9 rdelim) (ice-9 regex) (ice-9 threads) (ice-9 hash-table))
-(use-modules (lepton attrib) (lepton object) (lepton page) (lepton log))
+(use-modules (lepton attrib) (lepton object) (lepton object foreign) (lepton page) (lepton log))
 (use-modules (schematic hook) (schematic selection))
 (use-modules (schematic window) (system foreign))
 
 (define pqwave-port 9424)
 (define pqwave-server-socket #f)
 (define pqwave-client #f)
-;; Label tracking: netname → text-object for in-place updates
+;; Label tracking for Xa cursor back-annotation: netname → text-object
 (define pqwave-label-map (make-hash-table))
+;; Label tracking for DC operating-point annotation: netname → text-object
+(define pqwave-dc-label-map (make-hash-table))
+
+(define (pqwave-log-status! text)
+  "Log connection status to stderr (visible in the terminal that
+  launched lepton-schematic).  lepton's GTK status bar is transient
+  and gets reset on every user action — terminal logging is reliable."
+  (format (current-error-port) "pqwave: ~A\n" text))
 
 ;; ---- TCP Server ----
 
@@ -42,8 +50,22 @@
                 (let ((client-conn (accept sock)))
                   ;; Guile 3.0: accept returns (client-sock . addr-vector)
                   (set! pqwave-client (car client-conn))
+                  ;; Handshake: send the current schematic path so pqwave
+                  ;; knows which .sch is open on the editor side.
+                  (let ((page (active-page)))
+                    (when page
+                      (let ((filename (page-filename page)))
+                        (when filename
+                          (catch #t
+                            (lambda ()
+                              (write-line (string-append "$SCHEMATIC:" filename)
+                                          (car client-conn))
+                              (force-output (car client-conn)))
+                            (lambda _ #f))))))
+                  (pqwave-log-status! "connected")
                   (pqwave-handle-client (car client-conn))
                   (set! pqwave-client #f)
+                  (pqwave-log-status! "disconnected")
                   (loop)))))))
       (lambda (key . args)
         (if (> attempts 1)
@@ -69,7 +91,6 @@
 ;; ---- Command Dispatch ----
 
 (define (pqwave-dispatch cmd)
-  (format (current-error-port) "pqwave: dispatch ~A\n" cmd)
   (cond
    ((string-prefix? "$NET:" cmd)
     (pqwave-probe-net (pqwave-strip-quotes (string-trim-both (string-drop cmd 5)))))
@@ -84,7 +105,11 @@
    ((string=? "$CLEAR:ANNOTATIONS" cmd)
     (pqwave-clear-labels))
    ((string=? "$CLEAR:DC" cmd)
-    (pqwave-clear-dc-stamps))))
+    (pqwave-clear-dc-stamps))
+   ((string-prefix? "$CLEAR:STALE" cmd)
+    (pqwave-remove-stale-labels-from-cmd cmd))
+   ((string-prefix? "$REMOVE:LABEL" cmd)
+    (pqwave-remove-label-from-cmd cmd))))
 
 (define (pqwave-strip-quotes s)
   (string-trim-both s #\"))
@@ -123,10 +148,13 @@
 (define (pqwave-probe-net name)
   (let* ((page (active-page))
          (nets (if page (pqwave-find-nets-by-name page name) '())))
-    ;; Briefly select each net for visual highlighting, then zoom.
+    ;; Clear any previous cross-probe selection before highlighting the new net.
+    (pqwave-clear-selection)
+    ;; Select the net and leave it selected so the user can see it.
     (for-each (lambda (net)
                 (catch #t (lambda () (select-object! net)) (lambda _ #f)))
               nets)
+    ;; Zoom to the first matched net.
     (when (and page (pair? nets))
       (catch #t
         (lambda ()
@@ -134,12 +162,7 @@
                            (window->pointer (current-window)))))
             (unless (null-pointer? *canvas)
               (schematic_canvas_zoom_object *canvas (object->pointer (car nets))))))
-        (lambda _ #f))
-      ;; Immediately deselect so the cross-probed net cannot be
-      ;; accidentally deleted, moved, or copied by the user.
-      (for-each (lambda (net)
-                  (catch #t (lambda () (deselect-object! net)) (lambda _ #f)))
-                nets))))
+        (lambda _ #f)))))
 
 (define (pqwave-probe-part ref)
   (let* ((page (active-page))
@@ -164,35 +187,36 @@
 ;; ---- Back-Annotation Handlers ----
 
 (define (pqwave-annotate-dc cmd)
-  ;; Format: $ANNOTATE:DC|netname|voltage  (pipe-delimited to allow
-  ;; net names containing spaces).
-  ;; Strips any existing [DC:...V], [DC:... V], or trailing number+V
-  ;; annotation before writing the new value, so the netname does not
-  ;; accumulate stale annotations across cursor moves.
+  ;; Format: $ANNOTATE:DC|<netname>|<voltage>
+  ;; Creates floating text near the net (free text, no netname prefix).
+  ;; Uses a separate pqwave-dc-label-map so DC labels are distinct from
+  ;; Xa cursor back-annotation labels.
+  ;; Text format matches Xa cursor: "96.19V" (just value + unit).
   (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
-         (voltage (if (> (length parts) 2) (list-ref parts 2) "0.0")))
+         (voltage (if (> (length parts) 2) (list-ref parts 2) "0.0"))
+         (text (string-append voltage "V")))
     (let ((page (active-page)))
       (when page
-        (for-each
-         (lambda (net)
-           (let ((na (find (lambda (a) (string=? "netname" (attrib-name a)))
-                           (object-attribs net))))
-             (when na
-               ;; Strip any prior annotation suffix: [DC:...], trailing
-               ;; number+V, or number V pattern left by a previous stamp.
-               (let* ((cur (attrib-value na))
-                      (clean (regexp-substitute/global
-                              #f
-                              "(\\[[^]]*\\][[:space:]]*|[[:space:]]*[+-]?[0-9.]+[eE]?[+-]?[0-9]*[[:space:]]*V)$"
-                              cur 'pre)))
-                 (set-attrib-value! na
-                   (string-append clean " " voltage "V"))))))
-         (pqwave-find-nets-by-name page netname))))))
+        (let ((existing (hash-ref pqwave-dc-label-map netname)))
+          (if existing
+              ;; Update existing DC label text in-place.
+              (set-text-string! existing text)
+              ;; Create new DC label. Auto-position near net.
+              (let* ((nets (pqwave-find-nets-by-name page netname))
+                     (pos (if (pair? nets)
+                              (let ((b (object-bounds (car nets))))
+                                ;; bounds: ((left . top) right . bottom)
+                                (if b
+                                    (cons (caar b) (+ (cddr b) 50))
+                                    (cons 0 0)))
+                              (cons 0 0)))
+                     (txt (make-text pos 'lower-left 0 text 8 #t 'both 2)))
+                (page-append! page txt)
+                (hash-set! pqwave-dc-label-map netname txt))))))))
 
 (define (pqwave-annotate-label cmd)
   ;; Format: $ANNOTATE:LABEL|<netname>|<text>|<x>|<y>
-  (format (current-error-port) "pqwave: annotate-label ~A\n" cmd)
   (let* ((parts (string-split cmd #\|))
          (netname (if (> (length parts) 1) (list-ref parts 1) ""))
          (text (if (> (length parts) 2) (list-ref parts 2) "?"))
@@ -243,29 +267,38 @@
          pqwave-label-map)
         (for-each (lambda (n) (hash-remove! pqwave-label-map n)) to-remove)))))
 
+(define (pqwave-remove-stale-labels-from-cmd cmd)
+  "Parse $CLEAR:STALE|net1|net2|... and remove labels for nets not in the list."
+  (let* ((parts (string-split cmd #\|))
+         (active-nets (if (> (length parts) 1) (cdr parts) '())))
+    (pqwave-remove-stale-labels active-nets)))
+
+(define (pqwave-remove-label-from-cmd cmd)
+  "Parse $REMOVE:LABEL|netname and remove the label for that net."
+  (let* ((parts (string-split cmd #\|))
+         (netname (if (> (length parts) 1) (list-ref parts 1) "")))
+    (let ((page (active-page)))
+      (when (and page (not (string-null? netname)))
+        (let ((txt (hash-ref pqwave-label-map netname)))
+          (when txt
+            (catch #t (lambda () (page-remove! page txt)) (lambda _ #f))
+            (hash-remove! pqwave-label-map netname)))))))
+
 (define (pqwave-clear-dc-stamps)
-  ;; Strip any back-annotation suffix from netname attributes.
-  ;; Handles both old format (R1 [DC:96.7417 V]) and new (R1 96.7417V).
+  ;; Remove DC floating-text labels and clear the DC label map.
   (let ((page (active-page)))
     (when page
-      (for-each
-       (lambda (obj)
-         (let ((na (find (lambda (a) (string=? "netname" (attrib-name a)))
-                         (object-attribs obj))))
-           (when na
-             (let* ((cur (attrib-value na))
-                    (clean (regexp-substitute/global
-                            #f
-                            "(\\[[^]]*\\][[:space:]]*|[[:space:]]*[+-]?[0-9.]+[eE]?[+-]?[0-9]*[[:space:]]*V)$"
-                            cur 'pre)))
-               (unless (string=? clean cur)
-                 (set-attrib-value! na (string-trim-right clean)))))))
-       (page-contents page)))))
+      (hash-for-each
+       (lambda (netname txt)
+         (catch #t (lambda () (page-remove! page txt)) (lambda _ #f)))
+       pqwave-dc-label-map)
+      (set! pqwave-dc-label-map (make-hash-table)))))
 
 ;; ---- Reverse Cross-Probe (schematic → pqwave) ----
 
 (add-hook! select-objects-hook
   (lambda (obj-or-list)
+    ;; Reverse cross-probe: send net name to pqwave.
     (when pqwave-client
       (let ((objs (if (list? obj-or-list) obj-or-list (list obj-or-list))))
         (for-each
@@ -273,7 +306,6 @@
            (let ((netname (find (lambda (a) (string=? "netname" (attrib-name a)))
                                 (object-attribs obj))))
              (when netname
-               ;; Strip any [DC:...] suffix left by back-annotation.
                (let* ((raw-val (attrib-value netname))
                       (bracket-idx (string-index raw-val #\[))
                       (clean-name (if bracket-idx
@@ -288,5 +320,6 @@
                    (lambda _ #f))))))
          objs)))))
 
-;; Start the server
+;; Start the server.
 (pqwave-start-server pqwave-port)
+(pqwave-log-status! "listening")

@@ -327,7 +327,6 @@ class ApplicationState:
         self.tool_paths: Dict[str, str] = {
             "fst2vcd": "",
             "ghwdump": "",
-            "kicad_cli": "",
             "lepton_netlist": "",
             "ngspice": "",
             "xschem": "",

@@ -125,16 +125,18 @@ class LeptonBridge(SchematicBridge):
     def annotate_dc(self, voltages: dict[str, float]) -> None:
         cp = self._ensure_cross_probe()
         for netname, voltage in voltages.items():
-            cp.send_command(f"$ANNOTATE:DC {netname} {voltage}")
+            cp.send_command(f"$ANNOTATE:DC|{netname}|{voltage:.6g}")
 
     def annotate_label(self, netname: str, text: str, x: int, y: int) -> None:
         cp = self._ensure_cross_probe()
         cp.send_command(f"$ANNOTATE:LABEL|{netname}|{text}|{x}|{y}")
 
     def clear_annotations(self) -> None:
+        """Clear Xa cursor back-annotation labels."""
         self._ensure_cross_probe().send_command("$CLEAR:ANNOTATIONS")
 
     def clear_dc_stamps(self) -> None:
+        """Clear DC operating-point floating-text labels."""
         self._ensure_cross_probe().send_command("$CLEAR:DC")
 
     # ---- Tool resolution ----

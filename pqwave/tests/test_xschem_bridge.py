@@ -177,8 +177,8 @@ class TestXschemControlBar:
         bar._simulate_btn.click()
         assert len(spy) == 1
 
-    def test_unwatch_clicked_emits_signal(self):
+    def test_disconnect_clicked_emits_signal(self):
         bar = XschemControlBar()
-        spy = QSignalSpy(bar.unwatch_clicked)
-        bar._unwatch_btn.click()
+        spy = QSignalSpy(bar.disconnect_clicked)
+        bar._disconnect_btn.click()
         assert len(spy) == 1

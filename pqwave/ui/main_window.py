@@ -77,7 +77,7 @@ class MainWindow(QMainWindow):
         return m.group(1) if m else expression
 
     def __init__(self, initial_file=None, xschem_ba_port=2021,
-                 initial_files=None):
+                 initial_files=None, auto_connect=None, auto_connect_sch_path=None):
         """
         Initialize MainWindow.
 
@@ -85,6 +85,8 @@ class MainWindow(QMainWindow):
             initial_file: Deprecated; single file path (for backward compat).
             initial_files: Optional list of file paths to open.
             xschem_ba_port: TCP port for xschem back-annotation (xschem_listen_port)
+            auto_connect: Bridge type to auto-connect on startup (xschem/lepton)
+            auto_connect_sch_path: Schematic path for auto-connect
         """
         super().__init__()
         self.setWindowTitle("pqwave - SPICE Waveform Viewer")
@@ -93,6 +95,8 @@ class MainWindow(QMainWindow):
         self.state = ApplicationState()
         self.window_id = str(uuid.uuid4())
         self._xschem_ba_port = xschem_ba_port
+        self._auto_connect_bridge = auto_connect
+        self._auto_connect_sch_path = auto_connect_sch_path
 
         if initial_files is None:
             initial_files = []
@@ -152,6 +156,9 @@ class MainWindow(QMainWindow):
         if self.initial_files:
             QTimer.singleShot(100, self._load_initial_files)
 
+        if self._auto_connect_bridge:
+            QTimer.singleShot(200, self._auto_connect)
+
     def _setup_ui(self):
         """Create and arrange UI components."""
         central_widget = QWidget()
@@ -165,36 +172,24 @@ class MainWindow(QMainWindow):
         self.panel_grid = PanelGrid(self.state, self.color_manager)
         self.control_panel = ControlPanel()
         self.mc_control_bar = None  # Created when MC data is loaded
-        self.kicad_control_bar = None  # Created when KiCad watch starts
-        self._kicad_watcher = None
-        self._kicad_bridge = None
-        self._kicad_watched_path = None
-        self._kicad_simulating = False
-        self._kicad_dataset_indices: list[int] = []
-        self._kicad_last_path: str = ""
-        self._kicad_connect_failed: bool = False
-
-        # Lepton-EDA bridge (lazy, same pattern as KiCad)
+        # Lepton-EDA bridge
         self.lepton_control_bar = None
-        self._lepton_watcher = None
         self._lepton_bridge = None
         self._lepton_cross_probe = None
-        self._lepton_watched_path = None
+        self._lepton_connected: bool = False
+        self._lepton_connected_path: str | None = None
         self._lepton_simulating = False
-        self._lepton_connect_failed: bool = False
-        self._lepton_last_path = ""
         # Cross-thread signals for lepton pipeline results.
         self._lepton_result_signal.connect(self._on_lepton_pipeline_result)
         self._lepton_error_signal.connect(self._on_lepton_pipeline_error)
 
-        # Xschem bridge (same pattern as KiCad / Lepton)
+        # Xschem bridge
         self.xschem_control_bar = None
-        self._xschem_watcher = None
         self._xschem_bridge = None
         self._xschem_cross_probe = None
-        self._xschem_watched_path = None
+        self._xschem_connected: bool = False
+        self._xschem_connected_path: str | None = None
         self._xschem_simulating = False
-        self._xschem_last_path = ""
 
         # Xschem cursor cross-probe timer (debounce net highlight in schematic).
         # Interval is read from xschem_config; defaults to 250 ms.
@@ -700,27 +695,12 @@ class MainWindow(QMainWindow):
                 kwargs.get("sigmas"),
             )
 
-        elif action == "kicad_watch":
-            self._start_kicad_watch(kwargs["path"])
-        elif action == "kicad_simulate":
-            self._on_kicad_simulate()
-        elif action == "kicad_unwatch":
-            self._on_kicad_unwatch()
-        elif action == "kicad_probe_net":
-            if self._kicad_bridge:
-                self._kicad_bridge.probe_net(kwargs["name"])
-        elif action == "kicad_probe_part":
-            if self._kicad_bridge:
-                self._kicad_bridge.probe_part(kwargs["ref"], kwargs.get("pin"))
-        elif action == "kicad_clear":
-            if self._kicad_bridge:
-                self._kicad_bridge.clear_probe()
-        elif action == "lepton_watch":
-            self._start_lepton_watch(kwargs["path"])
+        elif action == "lepton_connect":
+            self._start_lepton_connect(kwargs.get("path"))
         elif action == "lepton_simulate":
             self._on_lepton_simulate()
-        elif action == "lepton_unwatch":
-            self._on_lepton_unwatch()
+        elif action == "lepton_disconnect":
+            self._on_lepton_disconnect()
         elif action == "lepton_probe_net":
             if self._lepton_cross_probe:
                 self._lepton_cross_probe.probe_net(kwargs["name"])
@@ -734,12 +714,12 @@ class MainWindow(QMainWindow):
             self._on_lepton_annotate_dc(kwargs.get("voltages", {}))
         elif action == "lepton_clear_annotations":
             self._on_lepton_clear_annotations()
-        elif action == "xschem_watch":
-            self._start_xschem_watch(kwargs.get("path"))
+        elif action == "xschem_connect":
+            self._start_xschem_connect(kwargs.get("path"))
         elif action == "xschem_simulate":
             self._on_xschem_simulate()
-        elif action == "xschem_unwatch":
-            self._on_xschem_unwatch()
+        elif action == "xschem_disconnect":
+            self._on_xschem_disconnect()
         elif action == "xschem_probe_net":
             if self._xschem_cross_probe:
                 self._xschem_cross_probe.probe_net(kwargs["name"])
@@ -754,361 +734,35 @@ class MainWindow(QMainWindow):
         elif action == "_xschem_sim_error":
             self._on_xschem_sim_error(kwargs)
 
-    # ---- KiCad Bridge handlers ----
+    # ---- Auto-Connect ----
 
-    def _on_kicad_watch(self):
-        """File > KiCad Bridge > Watch Schematic."""
-        from PyQt6.QtWidgets import QFileDialog
-
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select KiCad Schematic",
-            os.path.expanduser("~"),
-            "KiCad Schematic (*.kicad_sch);;All Files (*)"
-        )
-        if not path:
-            return
-        self._start_kicad_watch(path)
-
-    def _start_kicad_watch(self, sch_path: str):
-        """Initialize the KiCad bridge and start watching the schematic."""
-        from pqwave.bridge.kicad.bridge import KiCadBridge
-        from pqwave.bridge.kicad.file_watcher import KiCadFileWatcher
-        from pqwave.bridge.kicad.control_bar import KiCadControlBar
-
-        if self._kicad_watcher:
-            self._kicad_watcher.unwatch()
-
-        self._kicad_bridge = KiCadBridge()
-        self._kicad_bridge.set_probe_error_handler(
-            lambda msg: self.chat_panel.append_output(f"[kicad] ERROR: {msg}\n"))
-        self._kicad_watcher = KiCadFileWatcher()
-
-        if self.kicad_control_bar is None:
-            self.kicad_control_bar = KiCadControlBar()
-            upper = self._main_splitter.widget(0)
-            if upper and upper.layout():
-                upper.layout().addWidget(self.kicad_control_bar)
-            self.kicad_control_bar.rewatch_clicked.connect(self._on_kicad_rewatch)
-            self.kicad_control_bar.unwatch_clicked.connect(self._on_kicad_unwatch)
-
-        self._kicad_watcher.file_changed.connect(self._on_kicad_file_changed)
-        self._kicad_watcher.watch(sch_path)
-        self._kicad_watched_path = sch_path
-        self._kicad_last_path = sch_path
-        self._kicad_connect_failed = False
-        self.kicad_control_bar.setVisible(True)
-        basename = os.path.basename(sch_path)
-        self.statusBar().showMessage(f"Watching {basename} — click Simulate Now to run")
-        self.kicad_control_bar.set_status(f"watching {basename}")
-
-        # Clean up any previous poll worker/thread
-        if self._kicad_poll_worker:
-            self._kicad_poll_worker.stop()
-        if self._kicad_poll_thread:
-            self._kicad_poll_thread.quit()
-            self._kicad_poll_thread.wait()
-
-        # Start background poll worker on a dedicated thread
-        from pqwave.bridge.kicad.bridge import KiCadPollWorker
-        self._kicad_poll_thread = QThread()
-        self._kicad_poll_worker = KiCadPollWorker(self._kicad_bridge)
-        self._kicad_poll_worker.moveToThread(self._kicad_poll_thread)
-        self._kicad_poll_worker.nets_found.connect(self._poll_kicad_selection)
-        self._kicad_poll_worker.error_occurred.connect(
-            lambda msg: self.chat_panel.append_output(f"[kicad] poll error: {msg}\n"))
-        self._kicad_poll_thread.started.connect(self._kicad_poll_worker.start)
-        self._kicad_poll_thread.start()
-
-        self._run_kicad_pipeline(sch_path)
-
-    def _on_kicad_file_changed(self, path: str):
-        """File watcher callback — schematic was saved."""
-        self.chat_panel.append_output(
-            "[kicad] Schematic saved.  Click Simulate Now to re-run.\n"
-        )
-
-    def _on_kicad_simulate(self):
-        """Menu action: manually re-run simulation on watched file."""
-        if self._kicad_watched_path:
-            self._run_kicad_pipeline(self._kicad_watched_path)
-
-    def _on_kicad_rewatch(self):
-        """Re-Watch button: resume watching, or re-simulate if already watching."""
-        if self._kicad_watched_path:
-            self._run_kicad_pipeline(self._kicad_watched_path)
-        elif self._kicad_last_path:
-            self._start_kicad_watch(self._kicad_last_path)
-
-    def _on_kicad_unwatch(self):
-        """Stop watching the schematic."""
-        self._kicad_last_path = self._kicad_watched_path
-        if self._kicad_watcher:
-            self._kicad_watcher.unwatch()
-        if self._kicad_poll_worker:
-            self._kicad_poll_worker.stop()
-        if self._kicad_poll_thread:
-            self._kicad_poll_thread.quit()
-            self._kicad_poll_thread.wait()
-        if self.kicad_control_bar:
-            self.kicad_control_bar.set_status("not watching (click Re-Watch to resume)")
-        self._kicad_watched_path = None
-
-    def _run_kicad_pipeline(self, sch_path: str):
-        """Export → post-process → ngspice → load .raw."""
-        import os as _os
-        if self._kicad_simulating:
-            self.chat_panel.append_output("[kicad] pipeline skipped (already simulating)\n")
-            return
-        if self._kicad_bridge is None:
-            self.chat_panel.append_output("[kicad] pipeline skipped (no bridge)\n")
-            return
-        self._kicad_simulating = True
-        if self.kicad_control_bar:
-            self.kicad_control_bar.set_simulating(True)
-
-        try:
-            result = self._kicad_bridge.simulate(sch_path)
-
-            for detail in result.get("fix_info", []):
-                self.chat_panel.append_output(f"[kicad] {detail}\n")
-
-            if result["returncode"] != 0:
-                self.chat_panel.append_output(
-                    f"[kicad] ngspice error: {result['stderr'][:500]}\n"
-                )
-                if self.kicad_control_bar:
-                    self.kicad_control_bar.set_status("simulation failed")
-                return
-
-            if result.get("raw_file"):
-                # Save current trace expressions and axes
-                saved: list[tuple[str, str, str]] = []
-                for panel in self.panel_grid.panels.values():
-                    for t in panel.trace_manager.state_traces:
-                        saved.append((t.expression, t.y_axis.value, panel.panel_id))
-
-                # Remove previous kicad datasets and clear traces
-                for idx in sorted(self._kicad_dataset_indices, reverse=True):
-                    self.state.remove_dataset(idx)
-                self._kicad_dataset_indices.clear()
-
-                for panel in self.panel_grid.panels.values():
-                    panel.trace_manager.clear_traces()
-
-                # Load new data
-                old_count = len(self.state.datasets)
-                try:
-                    self._load_raw_file(result["raw_file"])
-                except Exception:
-                    self._kicad_dataset_indices.clear()
-                    raise
-                new_count = len(self.state.datasets)
-                if new_count > old_count:
-                    self._kicad_dataset_indices = list(range(old_count, new_count))
-                else:
-                    self._kicad_dataset_indices.clear()
-
-                # Restore traces
-                x_var = self.state.current_x_var
-                for expr, axis, pid in saved:
-                    panel = self.panel_grid.panels.get(pid)
-                    if panel and x_var:
-                        y_axis = AxisAssignment.Y1 if axis == "Y1" else AxisAssignment.Y2
-                        panel.trace_manager.add_trace(expr, x_var, y_axis)
-                ds = self.state.current_dataset
-                n_vars = ds.n_variables if ds else 0
-                n_pts = ds.n_points if ds else 0
-                self.chat_panel.append_output(
-                    f"[kicad] Simulation complete: {n_vars} signals, "
-                    f"{n_pts} points\n"
-                )
-                if self.kicad_control_bar:
-                    basename = _os.path.basename(sch_path)
-                    self.kicad_control_bar.set_status(
-                        f"watching {basename} — {n_vars} signals"
-                    )
+    def _auto_connect(self):
+        """Auto-connect to a bridge on startup (called from --connect CLI flag)."""
+        bridge_type = self._auto_connect_bridge
+        sch_path = self._auto_connect_sch_path
+        if bridge_type == "lepton":
+            if sch_path:
+                self._on_lepton_connect_with_path(sch_path)
             else:
-                stderr_tail = result.get("stderr", "")[-300:]
-                self.chat_panel.append_output(
-                    f"[kicad] No .raw was produced in the simulation — "
-                    f"no analysis commands in the netlist, or .control block "
-                    f"writes the file to a different path, or ngspice ran into failure.\n"
-                    f"[kicad] stderr: {stderr_tail}\n"
-                )
-                if self.kicad_control_bar:
-                    self.kicad_control_bar.set_status("simulation failed (no output)")
-        finally:
-            self._kicad_simulating = False
-            if self.kicad_control_bar:
-                self.kicad_control_bar.set_simulating(False)
+                self._on_lepton_connect()
+        elif bridge_type == "xschem":
+            if sch_path:
+                self._on_xschem_connect_with_path(sch_path)
+            else:
+                self._on_xschem_connect()
 
-    def _kicad_check_ipc_ready(self) -> bool:
-        """Check IPC readiness; emit messages on failure.  Returns True if ready."""
-        if not self._kicad_bridge:
-            self.chat_panel.append_output(
-                "[kicad] No KiCad bridge active. "
-                "Use File → KiCad Bridge → Watch Schematic first.\n")
-            return False
-        if self._kicad_connect_failed:
-            self.chat_panel.append_output(
-                "[kicad] Cross-probe unavailable — KiCad IPC API not reachable. "
-                "Ensure KiCad is running with IPC API enabled.\n")
-            return False
-        if not self._kicad_bridge.ensure_ipc():
-            self._kicad_connect_failed = True
-            self.chat_panel.append_output(
-                "[kicad] Cross-probe unavailable — KiCad IPC API not reachable.\n")
-            return False
-        self._kicad_connect_failed = False
-        return True
-
-    @staticmethod
-    def _kicad_collect_probe_traces(state, cursor_x, panel):
-        """Return list of (panel_id, Trace) to probe.
-
-        Cursor path: all visible traces from all panels.
-        Menu path: currently selected trace only.
-        """
-        if cursor_x is not None:
-            result = []
-            for pid, pstate in (state.panels.items() if state else []):
-                for t in pstate.traces:
-                    if t.visible:
-                        result.append((pid, t))
-            return result
-        selected = panel.trace_manager.get_selected_traces()
-        return [(panel.panel_id, t) for _, t in selected] if selected else []
-
-    @staticmethod
-    def _kicad_format_values(probe_traces, data_points):
-        """Build (lines, net_values) from probe traces and data points."""
-        lines = []
-        net_values = {}
-        for _pid, trace in probe_traces:
-            net = MainWindow._extract_net_name(trace.expression)
-            value_str = ""
-            for dp in data_points:
-                if dp.get("name") == trace.expression:
-                    mag = dp.get("magnitude")
-                    if mag is not None:
-                        value_str = f"{mag:.6g}"
-                        net_values[net] = value_str
-                    else:
-                        yv = dp.get("y_value")
-                        if yv is not None:
-                            value_str = f"{yv:.6g}"
-                            net_values[net] = value_str
-                    break
-            lines.append(f"{net}={value_str}" if value_str else net)
-        return lines, net_values
-
-    def _kicad_probe_active_trace(self):
-        """Cross-probe + back-annotation: highlight net in Eeschema, show values."""
-        if not self._kicad_check_ipc_ready():
-            return
-        panel = self.panel_grid.get_active_panel()
-        if panel is None:
-            return
-
-        cursor_x = self._kicad_ba_x if self._kicad_ba_x is not None else self._pending_x_value
-        probe_traces = self._kicad_collect_probe_traces(self.state, cursor_x, panel)
-        if not probe_traces:
-            return
-
-        data_points = self._query_data_point(cursor_x) if cursor_x is not None else []
-        self._kicad_bridge.probe_net(
-            self._extract_net_name(probe_traces[0][1].expression))
-
-        lines, net_values = self._kicad_format_values(probe_traces, data_points)
-        output = ", ".join(lines) if lines else "(no values)"
-        self.chat_panel.append_output(f"[kicad] {output}\n")
-
-        if cursor_x is not None:
-            self.statusBar().showMessage(f"KiCad: {output}", 5000)
-            if net_values:
-                self._kicad_bridge.annotate_values(net_values)
-
-    def _on_kicad_probe_selected(self):
-        """Menu action: cross-probe the currently active trace's net in KiCad."""
-        self._kicad_connect_failed = False
-        self._kicad_probe_active_trace()
-
-    def _on_kicad_clear_probe(self):
-        """Clear cross-probe highlights in KiCad."""
-        if self._kicad_bridge:
-            self._kicad_bridge.clear_probe()
-
-    def _kicad_ba_debounced(self):
-        """Debounced cursor movement: cross-probe the active trace's net in KiCad."""
-        if self._kicad_ba_x is not None and self._kicad_bridge is not None:
-            self._kicad_probe_active_trace()
-            self._kicad_ba_x = None
-
-    def _poll_kicad_selection(self, net_names: list):
-        """Handle nets detected by the background poll worker.
-
-        Called via signal from KiCadPollWorker when Eeschema selection
-        changes.  Matches net names against existing traces and
-        auto-plots new ones for unmatched nets.
-        """
-        if self.state is None:
-            return
-
-        # Collect all traces from all panels (may be empty if none plotted yet)
-        all_traces = []
-        for pid, pstate in self.state.panels.items():
-            for t in pstate.traces:
-                all_traces.append((pid, t))
-
-        for net_name in net_names:
-            net_upper = net_name.upper()
-            found = False
-            for pid, trace in all_traces:
-                expr = trace.expression.upper()
-                if (f"V({net_upper})" in expr
-                        or f"I({net_upper})" in expr
-                        or expr == net_upper):
-                    # Find the trace index within its panel
-                    panel = self.panel_grid.get_panel(pid)
-                    if panel:
-                        for i, t in enumerate(panel.trace_manager.state_traces):
-                            if t.expression == trace.expression:
-                                panel.trace_manager.select_trace(i)
-                                panel.trace_manager.refresh_legend()
-                                found = True
-                                break
-                    if found:
-                        break
-            if not found:
-                # Auto-plot: add a new trace for this net
-                panel = self.panel_grid.get_active_panel()
-                if panel and panel.trace_manager.raw_file is not None:
-                    x_var = (self.state.current_x_var
-                             if self.state and self.state.current_x_var
-                             else "time")
-                    from pqwave.models.state import AxisAssignment
-                    # Try lower-case first (ngspice convention), then original case
-                    for expr in (f"v({net_name.lower()})", f"v({net_name})"):
-                        if panel.trace_manager.add_trace(
-                                expr, x_var, AxisAssignment.Y1) is not None:
-                            break
     # ---- Lepton-EDA Bridge handlers ----
 
-    def _on_lepton_watch(self):
-        """File > Lepton Bridge > Watch Schematic."""
-        from PyQt6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Lepton-EDA Schematic",
-            os.path.expanduser("~"),
-            "Schematic (*.sch);;All Files (*)"
-        )
-        if not path:
-            return
-        self._start_lepton_watch(path)
+    def _on_lepton_connect(self):
+        """File > Lepton Bridge > Connect."""
+        self._start_lepton_connect()
 
-    def _start_lepton_watch(self, sch_path: str):
+    def _on_lepton_connect_with_path(self, sch_path: str):
+        """Connect to lepton with known schematic path."""
+        self._start_lepton_connect(sch_path)
+
+    def _start_lepton_connect(self, sch_path: str | None = None):
         from pqwave.bridge.lepton.bridge import LeptonBridge
-        from pqwave.bridge.lepton.file_watcher import LeptonFileWatcher
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
         from pqwave.bridge.lepton.control_bar import LeptonControlBar
 
@@ -1118,7 +772,7 @@ class MainWindow(QMainWindow):
         def _file_contains(path, text):
             return os.path.exists(path) and text in open(path).read()
         gafrc_ok = _file_contains(gafrc_path, "pqwave-server.scm")
-        gschemrc_ok = _file_contains(gschemrc_path, "menu-additions.scm")
+        gschemrc_ok = _file_contains(gschemrc_path, "pqwave-menus.scm")
         if not gafrc_ok or not gschemrc_ok:
             msg = ["[lepton] Config missing. Add these files:"]
             if not gafrc_ok:
@@ -1141,13 +795,29 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Check for stale Guile bytecode cache (FHI: Guile auto-compiles
+        # .scm → .go and won't recompile on source change until restart).
+        from pqwave.bridge.lepton.cross_probe import check_scheme_server as _css
+        _info = _css()
+        if _info.get("guile_cache_stale"):
+            self.chat_panel.append_output(
+                "[lepton] WARNING: Guile bytecode cache is stale.\n"
+                "  The .scm source was updated but lepton-schematic may\n"
+                "  still be running the old compiled version.\n"
+                "  Restart lepton-schematic to pick up the changes.\n"
+            )
+
         if self._lepton_cross_probe:
-            self._lepton_cross_probe.disconnect()
-        if self._lepton_watcher:
-            self._lepton_watcher.unwatch()
+            old = self._lepton_cross_probe
+            try:
+                old.net_selected.disconnect(self._on_lepton_net_selected)
+                old.schematic_path.disconnect(self._on_lepton_schematic_path)
+                old.disconnected.disconnect(self._on_lepton_disconnected)
+            except (TypeError, RuntimeError):
+                pass
+            old.disconnect()
 
         self._lepton_bridge = LeptonBridge()
-        self._lepton_watcher = LeptonFileWatcher()
         self._lepton_cross_probe = LeptonCrossProbeClient()
 
         if self.lepton_control_bar is None:
@@ -1155,85 +825,83 @@ class MainWindow(QMainWindow):
             upper = self._main_splitter.widget(0)
             if upper and upper.layout():
                 upper.layout().addWidget(self.lepton_control_bar)
+            self.lepton_control_bar.connect_clicked.connect(self._on_lepton_connect)
             self.lepton_control_bar.simulate_clicked.connect(self._on_lepton_simulate)
+            self.lepton_control_bar.disconnect_clicked.connect(self._on_lepton_disconnect)
             self.lepton_control_bar.annotate_dc_clicked.connect(
-                lambda: self._on_lepton_annotate_dc()
-            )
+                lambda: self._on_lepton_annotate_dc())
             self.lepton_control_bar.clear_annotations_clicked.connect(
-                self._on_lepton_clear_annotations
-            )
-            self.lepton_control_bar.unwatch_clicked.connect(self._on_lepton_unwatch)
-            self.lepton_control_bar.rewatch_clicked.connect(self._on_lepton_rewatch)
-
-        self._lepton_watcher.file_changed.connect(self._on_lepton_file_changed)
-        self._lepton_watcher.watch(sch_path)
-        self._lepton_watched_path = sch_path
-        self._lepton_last_path = sch_path
+                self._on_lepton_clear_annotations)
 
         self._lepton_cross_probe.net_selected.connect(self._on_lepton_net_selected)
+        self._lepton_cross_probe.schematic_path.connect(self._on_lepton_schematic_path)
         self._lepton_cross_probe.error_occurred.connect(
-            lambda msg: self.chat_panel.append_output(f"[lepton] {msg}\n")
-        )
+            lambda msg: self.chat_panel.append_output(f"[lepton] {msg}\n"))
         self._lepton_cross_probe.connected.connect(
             lambda: (
                 self.chat_panel.append_output(
-                    "[lepton] TCP connected to lepton-schematic on port 9424\n"
-                ),
-                # Clear any back-annotation stamps left from a previous
-                # session (netnames are persisted in the .sch file).
+                    "[lepton] TCP connected to lepton-schematic on port 9424\n"),
                 self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS"),
-            )
-        )
+                self._lepton_cross_probe.send_command("$CLEAR:DC"),
+            ))
         self._lepton_cross_probe.disconnected.connect(
-            self._on_lepton_disconnected
-        )
+            self._on_lepton_disconnected)
 
-        # Connect TCP client to lepton-schematic's cross-probe server
-        self._lepton_connect_failed = False
+        # Always show control bar so the user can retry.
+        self.lepton_control_bar.setVisible(True)
+
+        # Connect TCP client to lepton-schematic's cross-probe server.
         if not self._lepton_cross_probe.is_connected():
-            self.chat_panel.append_output("[lepton] Connecting to lepton-schematic:9424...\n")
+            self.chat_panel.append_output(
+                "[lepton] Connecting to lepton-schematic:9424...\n")
             if not self._lepton_cross_probe.connect_to_server():
-                self._lepton_connect_failed = True
                 self.chat_panel.append_output(
                     "[lepton] lepton-schematic not running — cross-probe unavailable.\n"
-                    "Start lepton-schematic and press Re-Watch to connect.\n"
-                )
+                    "Start lepton-schematic and click Connect to try again.\n")
+                return  # Don't mark as connected — user must click Connect again.
 
-        self.lepton_control_bar.setVisible(True)
-        basename = os.path.basename(sch_path)
-        self.statusBar().showMessage(
-            f"Watching {basename} — click Simulate Now to run"
-        )
-        self.lepton_control_bar.set_status(f"watching {basename}")
+        self._lepton_connected = True
+        self._lepton_connected_path = sch_path
+        self.lepton_control_bar.set_connected(True)
+        if sch_path:
+            basename = os.path.basename(sch_path)
+            self.lepton_control_bar.set_status(f"connected: {basename}")
+        else:
+            self.lepton_control_bar.set_status("connected")
 
-    def _on_lepton_file_changed(self, path: str):
-        """File saved — notify user but don't auto-simulate."""
-        self.chat_panel.append_output(
-            "[lepton] Schematic saved.  Click Simulate Now to re-run.\n"
-        )
+    def _on_lepton_schematic_path(self, path: str):
+        """Receive schematic path from lepton handshake."""
+        if not self._lepton_connected_path:
+            self._lepton_connected_path = path
+            basename = os.path.basename(path)
+            self.lepton_control_bar.set_status(f"connected: {basename}")
 
     def _on_lepton_simulate(self):
-        if self._lepton_watched_path:
-            self._run_lepton_pipeline(self._lepton_watched_path)
+        path = self._lepton_connected_path
+        if path:
+            self._run_lepton_pipeline(path)
+        else:
+            from PyQt6.QtWidgets import QFileDialog
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Select Lepton-EDA Schematic",
+                os.path.expanduser("~"),
+                "Schematic (*.sch);;All Files (*)"
+            )
+            if path:
+                self._lepton_connected_path = path
+                self._run_lepton_pipeline(path)
 
-    def _on_lepton_unwatch(self):
-        self._lepton_last_path = self._lepton_watched_path
-        if self._lepton_watcher:
-            self._lepton_watcher.unwatch()
-        if hasattr(self, '_lepton_ba_timer'):
-            self._lepton_ba_timer.stop()
+    def _on_lepton_disconnect(self):
         if self._lepton_cross_probe:
             if self._lepton_cross_probe.is_connected():
                 self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
+                self._lepton_cross_probe.send_command("$CLEAR:DC")
             self._lepton_cross_probe.disconnect()
         if self.lepton_control_bar:
-            self.lepton_control_bar.set_status("not watching")
-        self._lepton_watched_path = None
-
-    def _on_lepton_rewatch(self):
-        """Re-Watch button / menu: resume watching the last path."""
-        if self._lepton_last_path:
-            self._start_lepton_watch(self._lepton_last_path)
+            self.lepton_control_bar.set_status("disconnected")
+            self.lepton_control_bar.set_connected(False)
+        self._lepton_connected = False
+        self._lepton_connected_path = None
 
     def _run_lepton_pipeline(self, sch_path: str):
         if self._lepton_simulating:
@@ -1268,8 +936,6 @@ class MainWindow(QMainWindow):
                 f"[lepton] Simulation complete: "
                 f"{len(self.state.datasets[-1].variables)} signals loaded\n"
             )
-            if self.lepton_control_bar:
-                self.lepton_control_bar.set_simulation_complete()
         self._lepton_simulating = False
         if self.lepton_control_bar:
             self.lepton_control_bar.set_simulating(False)
@@ -1290,57 +956,94 @@ class MainWindow(QMainWindow):
                 voltages = self._extract_dc_voltages()
             for netname, voltage in voltages.items():
                 self._lepton_cross_probe.send_command(
-                    f"$ANNOTATE:DC|{netname}|{voltage}"
+                    f"$ANNOTATE:DC|{netname}|{voltage:.6g}"
                 )
             self.chat_panel.append_output(
                 f"[lepton] DC annotations stamped: {len(voltages)} nets\n"
             )
 
     def _on_lepton_clear_annotations(self):
+        """Clear DC operating-point annotations (free text labels)."""
         if self._lepton_cross_probe is None:
             return
         if not self._lepton_cross_probe.is_connected():
             self._lepton_cross_probe.connect_to_server()
         if self._lepton_cross_probe.is_connected():
-            self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
-            self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
-            self.chat_panel.append_output("[lepton] Annotations cleared\n")
+            self._lepton_cross_probe.send_command("$CLEAR:DC")
+            self.chat_panel.append_output("[lepton] DC annotations cleared\n")
 
     def _on_lepton_disconnected(self):
         """Handle unexpected TCP disconnect from lepton-schematic."""
-        self._lepton_connect_failed = True
         self.chat_panel.append_output(
             "[lepton] TCP disconnected from lepton-schematic\n"
         )
+        self._lepton_connected = False
+        self._lepton_connected_path = None
+        if self.lepton_control_bar:
+            self.lepton_control_bar.set_status("disconnected")
+            self.lepton_control_bar.set_connected(False)
+
+    def _on_lepton_menu_probe(self, checked: bool = False):
+        """File > Lepton Bridge > Cross-Probe > Probe Selected Net."""
+        self._lepton_probe_active_trace(force_reconnect=True)
+
+    def _on_lepton_menu_clear(self, checked: bool = False):
+        """File > Lepton Bridge > Cross-Probe > Clear Highlight."""
+        if self._lepton_cross_probe is None:
+            from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+            self._lepton_cross_probe = LeptonCrossProbeClient()
+        if not self._lepton_cross_probe.is_connected():
+            self._lepton_cross_probe.connect_to_server()
+        if self._lepton_cross_probe.is_connected():
+            self._lepton_cross_probe.clear()
+
+    def _on_trace_removed_for_lepton(self, expression: str):
+        """Immediately clear back-annotation label when a trace is deleted."""
+        if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
+            net = self._extract_net_name(expression)
+            self._lepton_cross_probe.send_command(f"$REMOVE:LABEL|{net}")
+
+    def _on_trace_removed_for_xschem(self, expression: str):
+        """Immediately clear back-annotation stamp and xschem highlight when
+        a trace is deleted.
+
+        xschem's GAW protocol tracks which nets have been sent to the viewer
+        and won't re-send them via Alt+G until the highlight is cleared.
+        Sending ``unhilight_all`` resets this state so the user can
+        re-highlight and Alt+G again.
+        """
+        if self._xschem_cross_probe:
+            net = self._extract_net_name(expression)
+            self._xschem_cross_probe.remove_stamp(net)
+            self._xschem_cross_probe.clear()
 
     def _lepton_probe_active_trace(self, force_reconnect: bool = False):
         """Cross-probe the selected trace's net in lepton-schematic.
 
         When *force_reconnect* is True (explicit user action from context
-        menu), the connect-failed flag is ignored and a reconnect is
-        attempted.  Cursor-driven calls pass False to avoid spamming
-        connection attempts.
+        menu), the connection is retried even if not currently connected.
+        Cursor-driven calls pass False to avoid spamming connection attempts.
         """
         if not self._lepton_cross_probe:
-            return
-        if self._lepton_connect_failed and not force_reconnect:
+            from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+            self._lepton_cross_probe = LeptonCrossProbeClient()
+        if not self._lepton_connected and not force_reconnect:
             return
         if not self._lepton_cross_probe.is_connected():
             if not self._lepton_cross_probe.connect_to_server():
-                self._lepton_connect_failed = True
                 return
-        self._lepton_connect_failed = False
-        panel = self.panel_grid.get_active_panel()
-        if panel is None:
+
+        # Search all panels for selected traces (not just the active panel,
+        # since the right-clicked trace might be on a different panel).
+        trace_to_probe = None
+        for panel in self.panel_grid.panels.values():
+            selected = panel.trace_manager.get_selected_traces()
+            if selected:
+                _, trace_to_probe = selected[0]
+                break
+        if trace_to_probe is None:
             return
-        selected = panel.trace_manager.get_selected_traces()
-        if not selected:
-            return
-        # Probe only the first selected trace — probing all would send
-        # redundant TCP round-trips (each probe selects then deselects,
-        # so only the last one would visually stick).
-        _, trace = selected[0]
-        net = self._extract_net_name(trace.expression)
+        net = self._extract_net_name(trace_to_probe.expression)
         self._lepton_cross_probe.probe_net(net)
 
     def _lepton_ba_debounced(self):
@@ -1353,6 +1056,7 @@ class MainWindow(QMainWindow):
             cursor_y = panel.trace_manager.last_cursor_y
             if not cursor_y:
                 return
+            active_nets: list[str] = []
             for trace in panel.trace_manager.state_traces:
                 y_val = cursor_y.get(trace.name)
                 if y_val is None:
@@ -1360,8 +1064,13 @@ class MainWindow(QMainWindow):
                 if not self._lepton_cross_probe.is_connected():
                     break
                 net = self._extract_net_name(trace.expression)
+                active_nets.append(net)
                 cmd = f"$ANNOTATE:LABEL|{net}|{y_val:.6g}V|0|0"
                 self._lepton_cross_probe.send_command(cmd)
+            # Remove stale labels for traces that were deleted.
+            if active_nets:
+                stale_cmd = "$CLEAR:STALE|" + "|".join(active_nets)
+                self._lepton_cross_probe.send_command(stale_cmd)
 
     def _on_lepton_net_selected(self, netname: str):
         """Reverse cross-probe: user clicked a net in lepton-schematic."""
@@ -1417,36 +1126,28 @@ class MainWindow(QMainWindow):
 
     # ---- Xschem Bridge handlers ----
 
-    def _on_xschem_watch(self):
-        """File > Xschem Bridge > Watch Schematic."""
-        from PyQt6.QtWidgets import QFileDialog
+    def _on_xschem_connect(self):
+        """File > Xschem Bridge > Connect."""
+        self._start_xschem_connect()
 
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Xschem Schematic",
-            self._xschem_watched_path or os.path.expanduser("~"),
-            "Xschem Schematics (*.sch);;All Files (*)"
-        )
-        if not path:
-            return
-        self._start_xschem_watch(path)
+    def _on_xschem_connect_with_path(self, sch_path: str):
+        """Connect to xschem with known schematic path."""
+        self._start_xschem_connect(sch_path)
 
-    def _start_xschem_watch(self, sch_path: str):
-        """Initialize the xschem bridge and start watching the schematic.
+    def _start_xschem_connect(self, sch_path: str | None = None):
+        """Initialize the xschem bridge in connected state.
 
         xschem must be configured with ``set xschem_listen_port 2021`` in
         xschemrc (user responsibility -- no Tcl files are deployed).
         """
         from pqwave.bridge.xschem.bridge import XschemBridge
-        from pqwave.bridge.xschem.file_watcher import XschemFileWatcher
         from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
         from pqwave.bridge.xschem.control_bar import XschemControlBar
 
-        # cross_probe is stateless — no disconnect needed
-        if self._xschem_watcher:
-            self._xschem_watcher.unwatch()
+        if self._xschem_connected:
+            self._on_xschem_disconnect()
 
         self._xschem_bridge = XschemBridge()
-        self._xschem_watcher = XschemFileWatcher()
         self._xschem_cross_probe = XschemCrossProbeClient()
 
         if self.xschem_control_bar is None:
@@ -1454,57 +1155,80 @@ class MainWindow(QMainWindow):
             upper = self._main_splitter.widget(0)
             if upper and upper.layout():
                 upper.layout().addWidget(self.xschem_control_bar)
+            self.xschem_control_bar.connect_clicked.connect(self._on_xschem_connect)
             self.xschem_control_bar.simulate_clicked.connect(self._on_xschem_simulate)
-            self.xschem_control_bar.unwatch_clicked.connect(self._on_xschem_unwatch)
-            self.xschem_control_bar.rewatch_clicked.connect(self._on_xschem_rewatch)
-
-        self._xschem_watcher.file_changed.connect(self._on_xschem_file_changed)
-        self._xschem_watcher.watch(sch_path)
-        self._xschem_watched_path = sch_path
-        self._xschem_last_path = sch_path
+            self.xschem_control_bar.disconnect_clicked.connect(self._on_xschem_disconnect)
+            self.xschem_control_bar.annotate_dc_clicked.connect(
+                self._on_xschem_annotate_dc)
+            self.xschem_control_bar.clear_annotations_clicked.connect(
+                self._on_xschem_clear_annotations)
 
         self._xschem_cross_probe.error_occurred.connect(
-            lambda msg: self.chat_panel.append_output(f"[xschem] {msg}\n")
-        )
+            lambda msg: self.chat_panel.append_output(f"[xschem] {msg}\n"))
 
+        # Discover the .sch path from xschem if not already known.
+        if not sch_path:
+            ok, result = self._xschem_cross_probe.send_command(
+                "xschem get schname")
+            if ok and result.strip():
+                sch_path = result.strip()
+
+        self._xschem_connected = True
+        self._xschem_connected_path = sch_path
         self.xschem_control_bar.setVisible(True)
-        self.xschem_control_bar.set_watching(True)
-        basename = os.path.basename(sch_path)
-        self.statusBar().showMessage(
-            f"Watching {basename} — click Simulate Now to run"
-        )
-        self.xschem_control_bar.set_status(f"watching {basename}")
+        self.xschem_control_bar.set_connected(True)
+        if sch_path:
+            basename = os.path.basename(sch_path)
+            self.xschem_control_bar.set_status(f"connected: {basename}")
+        else:
+            self.xschem_control_bar.set_status("connected")
 
     def _on_xschem_simulate(self):
-        """Menu action: manually re-run simulation on watched file."""
-        path = self._xschem_watched_path or self._xschem_last_path
+        """Simulate Now: re-run simulation on connected schematic."""
+        path = self._xschem_connected_path
         if path:
             self._run_xschem_pipeline(path)
+        else:
+            from PyQt6.QtWidgets import QFileDialog
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Select Xschem Schematic",
+                os.path.expanduser("~"),
+                "Xschem Schematics (*.sch);;All Files (*)"
+            )
+            if path:
+                self._xschem_connected_path = path
+                self._run_xschem_pipeline(path)
 
-    def _on_xschem_rewatch(self):
-        """Re-Watch button: resume watching the last path."""
-        if self._xschem_last_path:
-            self._start_xschem_watch(self._xschem_last_path)
-            if self.xschem_control_bar:
-                self.xschem_control_bar.set_watching(True)
-
-    def _on_xschem_file_changed(self, path: str):
-        """File watcher callback — schematic was saved."""
-        self.chat_panel.append_output(
-            "[xschem] Schematic saved.  Click Simulate Now to re-run.\n"
-        )
-
-    def _on_xschem_unwatch(self):
-        """Stop watching the schematic."""
-        self._xschem_last_path = self._xschem_watched_path
-        if self._xschem_watcher:
-            self._xschem_watcher.unwatch()
+    def _on_xschem_disconnect(self):
         if self._xschem_cross_probe:
-            self._xschem_cross_probe.clear_stamps()
+            self._xschem_cross_probe.clear_all_stamps()
         if self.xschem_control_bar:
-            self.xschem_control_bar.set_status("not watching")
-            self.xschem_control_bar.set_watching(False)
-        self._xschem_watched_path = None
+            self.xschem_control_bar.set_status("disconnected")
+            self.xschem_control_bar.set_connected(False)
+        self._xschem_connected = False
+        self._xschem_connected_path = None
+
+    def _on_xschem_annotate_dc(self):
+        """Stamp DC operating-point voltages as floating text in xschem."""
+        if not self._xschem_cross_probe:
+            return
+        voltages = self._extract_dc_voltages()
+        if not voltages:
+            self.chat_panel.append_output(
+                "[xschem] Annotate DC: no v(node) variables found in dataset\n")
+            return
+        values: dict[str, str] = {
+            net: f"{v:.6g}" for net, v in voltages.items()
+        }
+        self._xschem_cross_probe.stamp_dc_values(values)
+        self.chat_panel.append_output(
+            f"[xschem] DC annotations stamped: {len(values)} nets\n")
+
+    def _on_xschem_clear_annotations(self):
+        """Clear DC annotations only (cursor has its own clear mechanism)."""
+        if self._xschem_cross_probe:
+            self._xschem_cross_probe.clear_dc_stamps()
+            self.chat_panel.append_output("[xschem] DC annotations cleared\n")
 
     def _run_xschem_pipeline(self, sch_path: str):
         """Export -> post-process -> ngspice -> load .raw."""
@@ -1544,10 +1268,7 @@ class MainWindow(QMainWindow):
                 self._load_raw_file(result["raw_file"])
                 self.chat_panel.append_output(
                     f"[xschem] Simulation complete: "
-                    f"{len(self.state.datasets[-1].variables)} signals loaded\n"
-                )
-                if self.xschem_control_bar:
-                    self.xschem_control_bar.set_simulation_complete()
+                    f"{len(self.state.datasets[-1].variables)} signals loaded\n")
         except (FileNotFoundError, RuntimeError) as e:
             self.chat_panel.append_output(f"[xschem] {e}\n")
         finally:
@@ -1992,7 +1713,6 @@ class MainWindow(QMainWindow):
             'show_repl_help': self._show_repl_help,
             'show_api_help': self._show_api_help,
             'show_mc_guide': self._show_mc_guide,
-            'show_kicad_guide': self._show_kicad_guide,
             'show_lepton_guide': self._show_lepton_guide,
             'show_xschem_guide': self._show_xschem_guide,
             'split_horizontal': self._split_panel_horizontal,
@@ -2019,20 +1739,18 @@ class MainWindow(QMainWindow):
             'manage_templates': self._on_manage_templates,
             'close_dataset': self._on_close_dataset,
             'open_monte_carlo': self._on_open_monte_carlo,
-            'kicad_watch': self._on_kicad_watch,
-            'kicad_simulate': self._on_kicad_simulate,
-            'kicad_rewatch': self._on_kicad_rewatch,
-            'kicad_unwatch': self._on_kicad_unwatch,
-            'kicad_probe_selected': self._on_kicad_probe_selected,
-            'kicad_clear_probe': self._on_kicad_clear_probe,
-            'lepton_watch': self._on_lepton_watch,
+            'lepton_connect': self._on_lepton_connect,
             'lepton_simulate': self._on_lepton_simulate,
-            'lepton_unwatch': self._on_lepton_unwatch,
-            'lepton_rewatch': self._on_lepton_rewatch,
-            'xschem_watch': self._on_xschem_watch,
+            'lepton_disconnect': self._on_lepton_disconnect,
+            'lepton_annotate_dc': lambda: self._on_lepton_annotate_dc(),
+            'lepton_clear_annotations': self._on_lepton_clear_annotations,
+            'lepton_probe_net': self._on_lepton_menu_probe,
+            'lepton_clear': self._on_lepton_menu_clear,
+            'xschem_connect': self._on_xschem_connect,
             'xschem_simulate': self._on_xschem_simulate,
-            'xschem_unwatch': self._on_xschem_unwatch,
-            'xschem_rewatch': self._on_xschem_rewatch,
+            'xschem_disconnect': self._on_xschem_disconnect,
+            'xschem_annotate_dc': self._on_xschem_annotate_dc,
+            'xschem_clear_annotations': self._on_xschem_clear_annotations,
             'xschem_probe_net': self._on_xschem_probe_net_selected,
             'xschem_clear': self._on_xschem_clear_probe,
         }
@@ -2096,17 +1814,6 @@ class MainWindow(QMainWindow):
         self._xschem_ba_timer.timeout.connect(self._xschem_ba_debounced)
         self._xschem_ba_x = None  # XB cursor value to send when timer fires
 
-        # KiCad cursor back-annotation timer (same debounce pattern)
-        self._kicad_ba_timer = QTimer()
-        self._kicad_ba_timer.setSingleShot(True)
-        self._kicad_ba_timer.setInterval(250)
-        self._kicad_ba_timer.timeout.connect(self._kicad_ba_debounced)
-        self._kicad_ba_x = None  # XA cursor value for KiCad back-annotation
-
-        # KiCad selection poll (runs on background thread, created in _start_kicad_watch)
-        self._kicad_poll_worker = None
-        self._kicad_poll_thread = None
-
         # Lepton-EDA cursor cross-probe timer (same debounce pattern)
         self._lepton_ba_timer = QTimer()
         self._lepton_ba_timer.setSingleShot(True)
@@ -2163,6 +1870,14 @@ class MainWindow(QMainWindow):
             pass
         panel.trace_manager.trace_context_menu_requested.connect(
             self._on_trace_context_menu)
+
+        # Connect trace removed signal for immediate bridge label cleanup
+        try:
+            panel.trace_manager.trace_removed.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        panel.trace_manager.trace_removed.connect(self._on_trace_removed_for_lepton)
+        panel.trace_manager.trace_removed.connect(self._on_trace_removed_for_xschem)
 
         # Connect new axis manager signals
         panel.axis_manager.axis_log_mode_changed.connect(
@@ -2466,7 +2181,7 @@ class MainWindow(QMainWindow):
 
         # Search in order matching xschem's netlist_dir precedence.
         search_dirs = []
-        sch_path = getattr(self, "_xschem_last_path", None)
+        sch_path = getattr(self, "_xschem_connected_path", None)
         if sch_path:
             from pqwave.bridge.xschem.bridge import XschemBridge
             netlist_dir = XschemBridge._resolve_netlist_dir(
@@ -3999,9 +3714,10 @@ class MainWindow(QMainWindow):
         if self.menu_manager:
             self.menu_manager.set_x_cursor_a_checked(checked)
         self._update_cursor_status()
-        # Clear back-annotation stamps when cursor is hidden.
+        # Clear back-annotation cursor labels when XA cursor is hidden.
         if not checked:
-            self._on_lepton_clear_annotations()
+            if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
+                self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
             if self._xschem_cross_probe:
                 self._xschem_cross_probe.clear_stamps()
 
@@ -4122,11 +3838,6 @@ class MainWindow(QMainWindow):
             a = menu.addAction("Ungroup Bus")
             a.triggered.connect(
                 lambda _, _tm=tm: _tm.ungroup_bus(trace_name))
-
-        # KiCad cross-probe (lazy-creates bridge on first use)
-        menu.addSeparator()
-        a = menu.addAction("Probe in KiCad")
-        a.triggered.connect(lambda _: self._kicad_probe_active_trace())
 
         # Lepton-EDA cross-probe (lazy-creates client on first use)
         menu.addSeparator()
@@ -4660,12 +4371,8 @@ class MainWindow(QMainWindow):
         self._xschem_ba_x = x_linear
         self._xschem_ba_timer.start()
 
-        # KiCad cross-probe: highlight net corresponding to cursor position
-        self._kicad_ba_x = x_linear
-        self._kicad_ba_timer.start()
-
-        # Lepton-EDA cross-probe (only when bridge is active)
-        if self._lepton_cross_probe is not None:
+        # Lepton-EDA cross-probe (only when connected)
+        if self._lepton_connected:
             self._lepton_ba_timer.start()
 
         # Xschem cross-probe.
@@ -4769,7 +4476,7 @@ class MainWindow(QMainWindow):
             self._xschem_ba_x = None
 
     def _send_xschem_backannotation(self, x_value: float):
-        """Stamp trace values onto xschem lab_generic labels."""
+        """Stamp trace values as floating text near lab symbols in xschem."""
         self._xschem_ensure_client()
 
         panel = self.panel_grid.get_active_panel()
@@ -5076,7 +4783,7 @@ class MainWindow(QMainWindow):
         self.state.repl_bg = data.get('repl_bg', '')
         saved_paths = data.get('tool_paths', {})
         if isinstance(saved_paths, dict):
-            for key in ('fst2vcd', 'ghwdump', 'kicad_cli', 'ngspice'):
+            for key in ('fst2vcd', 'ghwdump', 'ngspice'):
                 val = saved_paths.get(key, '')
                 if isinstance(val, str) and val.strip():
                     self.state.tool_paths[key] = val.strip()
@@ -5368,12 +5075,16 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event."""
-        # Stop KiCad poll worker before destroying the bridge
-        if hasattr(self, "_kicad_poll_worker") and self._kicad_poll_worker:
-            self._kicad_poll_worker.stop()
-        if hasattr(self, "_kicad_poll_thread") and self._kicad_poll_thread:
-            self._kicad_poll_thread.quit()
-            self._kicad_poll_thread.wait(2000)
+        # Clear cursor back-annotation stamps in xschem
+        if (hasattr(self, "_xschem_cross_probe")
+                and self._xschem_cross_probe is not None):
+            self._xschem_cross_probe.clear_stamps()
+        # Clear cursor back-annotation labels in lepton
+        if (hasattr(self, "_lepton_cross_probe")
+                and self._lepton_cross_probe is not None
+                and self._lepton_cross_probe.is_connected()):
+            self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
+            self._lepton_cross_probe.disconnect()
         self._save_global_prefs()
         self.state.window_registry.unregister_window(self.window_id)
         super().closeEvent(event)
@@ -5625,54 +5336,6 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Monte Carlo Guide")
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.setModal(False)
-        dialog.resize(780, 620)
-
-        layout = QVBoxLayout(dialog)
-        browser = QTextBrowser()
-        browser.setHtml(html)
-        layout.addWidget(browser)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-
-        dialog.show()
-
-    def _show_kicad_guide(self) -> None:
-        """Show the KiCad integration user guide (non-modal)."""
-        from PyQt6.QtWidgets import (
-            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
-        )
-        from PyQt6.QtCore import Qt
-
-        from pathlib import Path
-        guide_path = Path(__file__).parent.parent.parent / "docs" / "kicad" / "guide.html"
-        if not guide_path.exists():
-            QMessageBox.warning(
-                self, "Not Found",
-                f"KiCad guide not found at:\n{guide_path}",
-            )
-            return
-
-        try:
-            html = guide_path.read_text(encoding="utf-8")
-        except OSError as e:
-            QMessageBox.warning(
-                self, "Error",
-                f"Failed to read KiCad guide:\n{e}",
-            )
-            return
-
-        # Inject palette-adaptive colors into the HTML template
-        p = self.palette()
-        html = html.replace("__TEXT__", p.color(p.ColorRole.Text).name())
-        html = html.replace("__BASE__", p.color(p.ColorRole.Base).name())
-        html = html.replace("__LINK__", p.color(p.ColorRole.Link).name())
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("KiCad User Guide")
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setModal(False)
         dialog.resize(780, 620)

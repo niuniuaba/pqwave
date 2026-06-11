@@ -482,105 +482,21 @@ class SessionAPI:
             data[i, :len(y)] = y
         return data
 
-    # ---- KiCad bridge methods ----
-
-    def kicad_watch(self, path: str) -> dict:
-        path = os.path.abspath(path)
-        if self._on_mutation:
-            self._on_mutation("kicad_watch", path=path)
-            return {"status": "ok", "path": path}
-        self._kicad_watched_path = path
-        return {"status": "ok", "path": path}
-
-    def kicad_simulate(self, sch_path: str | None = None) -> dict:
-        path = sch_path or getattr(self, "_kicad_watched_path", None)
-        if not path:
-            raise ValueError("No .kicad_sch file specified or watched")
-        if self._on_mutation:
-            self._on_mutation("kicad_simulate", path=path)
-            return {"status": "ok", "triggered": True}
-        from pqwave.bridge.kicad.bridge import KiCadBridge
-        bridge = KiCadBridge()
-        result = bridge.simulate(path)
-        if result["raw_file"]:
-            self.load(result["raw_file"])
-        return {"status": "ok", "raw_file": result.get("raw_file", "")}
-
-    def kicad_unwatch(self) -> dict:
-        if self._on_mutation:
-            self._on_mutation("kicad_unwatch")
-            return {"status": "ok"}
-        self._kicad_watched_path = None
-        return {"status": "ok"}
-
-    def kicad_probe_net(self, name: str) -> dict:
-        if self._on_mutation:
-            self._on_mutation("kicad_probe_net", name=name)
-            return {"status": "ok"}
-        bridge = self._get_kicad_bridge()
-        if bridge and bridge.ensure_ipc():
-            bridge.probe_net(name)
-            return {"status": "ok", "net": name}
-        return {"status": "error", "message": "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"}
-
-    def kicad_probe_part(self, ref: str, pin: str | None = None) -> dict:
-        if self._on_mutation:
-            self._on_mutation("kicad_probe_part", ref=ref, pin=pin)
-            return {"status": "ok"}
-        bridge = self._get_kicad_bridge()
-        if bridge and bridge.ensure_ipc():
-            bridge.probe_part(ref, pin)
-            return {"status": "ok", "ref": ref}
-        return {"status": "error", "message": "Cross-probe unavailable — requires KiCad 10+ with IPC API enabled"}
-
-    def kicad_clear(self) -> dict:
-        if self._on_mutation:
-            self._on_mutation("kicad_clear")
-            return {"status": "ok"}
-        bridge = self._get_kicad_bridge()
-        # Use has_ipc() to check availability without blocking.
-        if bridge and bridge.has_ipc():
-            bridge.clear_probe()
-            return {"status": "ok"}
-        return {"status": "error", "message": "No active IPC connection"}
-
-    def _get_kicad_bridge(self):
-        """Get a cached KiCadBridge instance for headless IPC operations."""
-        if not hasattr(self, "_kicad_bridge"):
-            from pqwave.bridge.kicad.bridge import KiCadBridge
-            self._kicad_bridge = KiCadBridge()
-        return self._kicad_bridge
-
-    def kicad_config(self, key: str, value=None) -> dict:
-        from pqwave.models.state import ApplicationState
-        state = ApplicationState()
-        if not hasattr(state, "_kicad_config"):
-            state._kicad_config = {
-                "auto_simulate": True,
-                "fix_slashes": True,
-                "fix_diode_pins": True,
-                "fix_bjt_pins": True,
-            }
-        if value is None:
-            return {"status": "ok", key: state._kicad_config.get(key)}
-        state._kicad_config[key] = value
-        return {"status": "ok", key: value}
-
     # ---- Lepton-EDA bridge methods ----
 
-    def lepton_watch(self, path: str) -> dict:
-        """Start watching a .sch file for changes."""
+    def lepton_connect(self, path: str | None = None) -> dict:
+        """Connect to lepton-schematic bridge."""
         if self._on_mutation:
-            self._on_mutation("lepton_watch", path=path)
+            self._on_mutation("lepton_connect", path=path)
             return {"status": "ok"}
-        self._lepton_watched_path = path
+        self._lepton_connected_path = path
         return {"status": "ok"}
 
     def lepton_simulate(self, sch_path: str | None = None) -> dict:
         """Run export -> post-process -> ngspice pipeline."""
-        path = sch_path or getattr(self, "_lepton_watched_path", None)
+        path = sch_path or getattr(self, "_lepton_connected_path", None)
         if not path:
-            raise ValueError("No .sch file specified or watched")
+            raise ValueError("No .sch file specified or connected")
         if self._on_mutation:
             self._on_mutation("lepton_simulate", path=path)
             return {"status": "ok"}
@@ -588,12 +504,12 @@ class SessionAPI:
         bridge = LeptonBridge()
         return bridge.simulate(path)
 
-    def lepton_unwatch(self) -> dict:
-        """Stop watching the schematic."""
+    def lepton_disconnect(self) -> dict:
+        """Disconnect from lepton-schematic."""
         if self._on_mutation:
-            self._on_mutation("lepton_unwatch")
+            self._on_mutation("lepton_disconnect")
             return {"status": "ok"}
-        self._lepton_watched_path = None
+        self._lepton_connected_path = None
         return {"status": "ok"}
 
     def lepton_probe_net(self, name: str) -> dict:
@@ -692,20 +608,21 @@ class SessionAPI:
 
     # ---- Xschem bridge methods ----
 
-    def xschem_watch(self, path: str) -> dict:
-        """Start watching a .sch file for changes."""
-        path = os.path.abspath(path)
+    def xschem_connect(self, path: str | None = None) -> dict:
+        """Connect to xschem bridge."""
+        if path:
+            path = os.path.abspath(path)
         if self._on_mutation:
-            self._on_mutation("xschem_watch", path=path)
+            self._on_mutation("xschem_connect", path=path)
             return {"status": "ok", "path": path}
-        self._xschem_watched_path = path
+        self._xschem_connected_path = path
         return {"status": "ok", "path": path}
 
     def xschem_simulate(self, sch_path: str | None = None) -> dict:
         """Run export -> post-process -> ngspice pipeline."""
-        path = sch_path or getattr(self, "_xschem_watched_path", None)
+        path = sch_path or getattr(self, "_xschem_connected_path", None)
         if not path:
-            raise ValueError("No .sch file specified or watched")
+            raise ValueError("No .sch file specified or connected")
         if self._on_mutation:
             self._on_mutation("xschem_simulate", path=path)
             return {"status": "ok", "triggered": True}
@@ -716,12 +633,12 @@ class SessionAPI:
             self.load(result["raw_file"])
         return {"status": "ok", "raw_file": result.get("raw_file", "")}
 
-    def xschem_unwatch(self) -> dict:
-        """Stop watching the current .sch file."""
+    def xschem_disconnect(self) -> dict:
+        """Disconnect from xschem bridge."""
         if self._on_mutation:
-            self._on_mutation("xschem_unwatch")
+            self._on_mutation("xschem_disconnect")
             return {"status": "ok"}
-        self._xschem_watched_path = None
+        self._xschem_connected_path = None
         return {"status": "ok"}
 
     def xschem_probe_net(self, name: str) -> dict:
@@ -2367,58 +2284,16 @@ def _cmd_mc_generate(session: SessionAPI, path: str, output_format: str = "csv",
                                nominals=nominals, sigmas=sigmas)
 
 
-@api_command("kicad_watch", "kicad_watch(path)",
-             "Watch a .kicad_sch file for changes and auto-simulate on save")
-def _cmd_kicad_watch(session: SessionAPI, path: str):
-    return session.kicad_watch(path)
+@api_command("xschem_connect", "xschem_connect(path=None)",
+             "Connect to xschem bridge (cross-probe and back-annotation)")
+def _cmd_xschem_connect(session: SessionAPI, path: str = None):
+    return session.xschem_connect(path)
 
 
-@api_command("kicad_unwatch", "kicad_unwatch()",
-             "Stop watching the KiCad schematic file")
-def _cmd_kicad_unwatch(session: SessionAPI):
-    return session.kicad_unwatch()
-
-
-@api_command("kicad_simulate", "kicad_simulate(sch_path=None)",
-             "Manually trigger KiCad simulation pipeline")
-def _cmd_kicad_simulate(session: SessionAPI, sch_path: str = None):
-    return session.kicad_simulate(sch_path)
-
-
-@api_command("kicad_probe_net", "kicad_probe_net(name)",
-             "Cross-probe: highlight a net in KiCad schematic")
-def _cmd_kicad_probe_net(session: SessionAPI, name: str):
-    return session.kicad_probe_net(name)
-
-
-@api_command("kicad_probe_part", "kicad_probe_part(ref, pin=None)",
-             "Cross-probe: highlight a component or pin in KiCad schematic")
-def _cmd_kicad_probe_part(session: SessionAPI, ref: str, pin: str = None):
-    return session.kicad_probe_part(ref, pin)
-
-
-@api_command("kicad_clear", "kicad_clear()",
-             "Clear all cross-probe highlights in KiCad")
-def _cmd_kicad_clear(session: SessionAPI):
-    return session.kicad_clear()
-
-
-@api_command("kicad_config", "kicad_config(key, value=None)",
-             "Get or set KiCad bridge configuration")
-def _cmd_kicad_config(session: SessionAPI, key: str, value=None):
-    return session.kicad_config(key, value)
-
-
-@api_command("xschem_watch", "xschem_watch(path)",
-             "Watch a .sch file for changes and auto-simulate on save")
-def _cmd_xschem_watch(session: SessionAPI, path: str):
-    return session.xschem_watch(path)
-
-
-@api_command("xschem_unwatch", "xschem_unwatch()",
-             "Stop watching the xschem schematic file")
-def _cmd_xschem_unwatch(session: SessionAPI):
-    return session.xschem_unwatch()
+@api_command("xschem_disconnect", "xschem_disconnect()",
+             "Disconnect from xschem bridge")
+def _cmd_xschem_disconnect(session: SessionAPI):
+    return session.xschem_disconnect()
 
 
 @api_command("xschem_simulate", "xschem_simulate(sch_path=None)",
