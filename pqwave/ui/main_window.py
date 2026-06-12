@@ -191,6 +191,10 @@ class MainWindow(QMainWindow):
         self._xschem_connected_path: str | None = None
         self._xschem_simulating = False
 
+        # Qucs-S bridge
+        self.qucs_control_bar = None
+        self._qucs_bridge = None
+
         # Xschem cursor cross-probe timer (debounce net highlight in schematic).
         # Interval is read from xschem_config; defaults to 250 ms.
         from pqwave.models.state import ApplicationState
@@ -733,6 +737,10 @@ class MainWindow(QMainWindow):
             self._on_xschem_sim_done(kwargs.get("result", {}))
         elif action == "_xschem_sim_error":
             self._on_xschem_sim_error(kwargs)
+        elif action == "qucs_connect":
+            self._on_qucs_connect()
+        elif action == "qucs_disconnect":
+            self._on_qucs_disconnect()
 
     # ---- Auto-Connect ----
 
@@ -750,6 +758,8 @@ class MainWindow(QMainWindow):
                 self._on_xschem_connect_with_path(sch_path)
             else:
                 self._on_xschem_connect()
+        elif bridge_type == "qucs":
+            self._on_qucs_connect()
 
     # ---- Lepton-EDA Bridge handlers ----
 
@@ -1364,6 +1374,191 @@ class MainWindow(QMainWindow):
         self._xschem_cp_net = net_name
         self._xschem_cp_timer.start()
 
+    # ---- Qucs-S Bridge handlers ----
+
+    def _on_qucs_connect(self):
+        """File > Qucs-S Bridge > Connect — configure Qucs-S to use pqwave."""
+        from pqwave.bridge.qucs_s.bridge import QucsSBridge
+        from pqwave.bridge.qucs_s.control_bar import QucsSControlBar
+
+        if self._qucs_bridge is None:
+            self._qucs_bridge = QucsSBridge()
+
+        if self.qucs_control_bar is None:
+            self.qucs_control_bar = QucsSControlBar(self._qucs_bridge)
+            upper = self._main_splitter.widget(0)
+            if upper and upper.layout():
+                upper.layout().addWidget(self.qucs_control_bar)
+        self.qucs_control_bar.setVisible(True)
+
+        # Always read current config from disk
+        if not self._qucs_bridge.detect_tool():
+            self.chat_panel.append_output("[qucs] Qucs-S config not found. Is Qucs-S installed?\n")
+            QMessageBox.information(self, "Qucs-S Not Found",
+                "Qucs-S configuration file not found.\n\n"
+                "Install Qucs-S first, then use Connect to configure the integration.")
+            return
+
+        status = self._qucs_bridge.get_status()
+        self.chat_panel.append_output(
+            "[qucs] Current config:\n"
+            f"       NgspiceExecutable = {status['exe'] or '(not set)'}\n"
+            f"       NgspiceParams     = {status['params'] or '(empty)'}\n"
+        )
+
+        if status["configured"]:
+            self.chat_panel.append_output(
+                "[qucs] Already configured correctly.\n"
+                "[qucs] Restart Qucs-S, then simulate — results open here.\n"
+            )
+            self.qucs_control_bar.refresh()
+            return
+
+        # Show dialog with current vs proposed
+        import shutil as _shutil
+        pqwave_exe = _shutil.which("pqwave") or "pqwave"
+        reply = QMessageBox.question(self, "Configure Qucs-S Integration",
+            "Set pqwave as the waveform viewer for Qucs-S?\n\n"
+            "⚠  CLOSE Qucs-S BEFORE clicking OK.\n\n"
+            f"Current:\n"
+            f"  NgspiceExecutable = {status['exe'] or '(not set)'}\n"
+            f"  NgspiceParams     = {status['params'] or '(empty)'}\n\n"
+            f"Proposed:\n"
+            f"  NgspiceExecutable = {pqwave_exe}\n"
+            f"  NgspiceParams     = --qucs-bridge\n\n"
+            "You can undo at any time via File > Qucs-S Bridge > Disconnect.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Ok)
+        if reply != QMessageBox.StandardButton.Ok:
+            self.chat_panel.append_output("[qucs] Cancelled.\n")
+            return
+
+        if self._qucs_bridge.connect():
+            status = self._qucs_bridge.get_status()
+            self.chat_panel.append_output(
+                "[qucs] Configured.\n"
+                f"       NgspiceExecutable = {status['exe']}\n"
+                f"       NgspiceParams     = {status['params']}\n"
+                "[qucs] ⚠  Restart Qucs-S for the change to take effect.\n"
+            )
+            QMessageBox.information(self, "Integration Configured",
+                f"Qucs-S will use pqwave as its waveform viewer.\n\n"
+                f"⚠  Restart Qucs-S for the change to take effect.")
+            self.qucs_control_bar.refresh()
+        else:
+            self.chat_panel.append_output("[qucs] Configuration failed. See manual setup.\n")
+            QMessageBox.warning(self, "Configuration Failed",
+                "Failed to update Qucs-S configuration.\n\n"
+                "Configure manually:\n"
+                "  Qucs-S → Simulation → Simulator settings\n"
+                "  Ngspice executable = pqwave\n"
+                "  Ngspice CLI parameters = --qucs-bridge")
+
+    def _on_qucs_disconnect(self):
+        """File > Qucs-S Bridge > Disconnect — restore original config."""
+        from pqwave.bridge.qucs_s.bridge import QucsSBridge
+
+        if self._qucs_bridge is None:
+            self._qucs_bridge = QucsSBridge()
+
+        status = self._qucs_bridge.get_status()
+        self.chat_panel.append_output(
+            "[qucs] Current config:\n"
+            f"       NgspiceExecutable = {status['exe'] or '(not set)'}\n"
+            f"       NgspiceParams     = {status['params'] or '(empty)'}\n"
+        )
+
+        if not status["configured"]:
+            self.chat_panel.append_output("[qucs] Not configured — nothing to disconnect.\n")
+            QMessageBox.information(self, "Not Configured",
+                "Qucs-S integration is not active.\n\n"
+                "Use File > Qucs-S Bridge > Connect to set it up.")
+            return
+
+        # Detect what we'll restore to
+        from pqwave.bridge.qucs_s.config import detect_ngspice as _detect_ngspice
+        ngspice = _detect_ngspice() or "/usr/bin/ngspice"
+        reply = QMessageBox.warning(self, "Disconnect Qucs-S Integration",
+            "Restore the original Qucs-S simulator configuration?\n\n"
+            "⚠  CLOSE Qucs-S BEFORE clicking OK.\n\n"
+            f"Current:\n"
+            f"  NgspiceExecutable = {status['exe']}\n"
+            f"  NgspiceParams     = {status['params']}\n\n"
+            f"Will restore to:\n"
+            f"  NgspiceExecutable = {ngspice}\n"
+            f"  NgspiceParams     = (empty)\n\n"
+            "You can reconnect at any time via File > Qucs-S Bridge > Connect.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Ok)
+        if reply != QMessageBox.StandardButton.Ok:
+            self.chat_panel.append_output("[qucs] Cancelled.\n")
+            return
+
+        if self._qucs_bridge.disconnect():
+            status = self._qucs_bridge.get_status()
+            self.chat_panel.append_output(
+                "[qucs] Disconnected — config restored.\n"
+                f"       NgspiceExecutable = {status['exe']}\n"
+                "[qucs] Qucs-S will use its original simulator directly.\n"
+            )
+            QMessageBox.information(self, "Disconnected",
+                f"Qucs-S integration has been disabled.\n\n"
+                f"Simulator restored to: {status['exe']}")
+            if self.qucs_control_bar:
+                self.qucs_control_bar.refresh()
+        else:
+            self.chat_panel.append_output("[qucs] Disconnect failed. Restore manually.\n")
+            QMessageBox.warning(self, "Disconnect Failed",
+                "Failed to restore original configuration.\n"
+                "Restore manually from backup: ~/.config/qucs/qucs_s.conf.pqwave_backup")
+
+    def _show_qucs_guide(self):
+        """Help > Qucs-S User Guide (non-modal)."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+        )
+        from PyQt6.QtCore import Qt
+        from pathlib import Path
+
+        guide_path = Path(__file__).parent.parent.parent / "docs" / "qucs" / "guide.html"
+        if not guide_path.exists():
+            QMessageBox.warning(
+                self, "Not Found",
+                f"Qucs-S guide not found at:\n{guide_path}",
+            )
+            return
+
+        try:
+            html = guide_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(
+                self, "Error",
+                f"Failed to read Qucs-S guide:\n{e}",
+            )
+            return
+
+        p = self.palette()
+        html = html.replace("__TEXT__", p.color(p.ColorRole.Text).name())
+        html = html.replace("__BASE__", p.color(p.ColorRole.Base).name())
+        html = html.replace("__LINK__", p.color(p.ColorRole.Link).name())
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Qucs-S User Guide")
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.resize(780, 620)
+
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setHtml(html)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.show()
+
     def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""
         mc = self.state.mc_collection
@@ -1753,6 +1948,9 @@ class MainWindow(QMainWindow):
             'xschem_clear_annotations': self._on_xschem_clear_annotations,
             'xschem_probe_net': self._on_xschem_probe_net_selected,
             'xschem_clear': self._on_xschem_clear_probe,
+            'qucs_connect': self._on_qucs_connect,
+            'qucs_disconnect': self._on_qucs_disconnect,
+            'show_qucs_guide': self._show_qucs_guide,
         }
 
     # --- Delegate properties (route to active panel) ---

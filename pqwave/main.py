@@ -395,8 +395,121 @@ def _run_setup_llm() -> int:
     return 0
 
 
+def _run_qucs_bridge() -> int:
+    """Handle --qucs-bridge: post-simulation hook for Qucs-S.
+
+    Qucs-S invokes this as: pqwave <NgspiceParams> <netlist_file>
+    where NgspiceParams = "--qucs-bridge" and CWD = S4Qworkdir.
+
+    The netlist file is identified by its .cir extension (Qucs-S may
+    insert extra flags like -b between --qucs-bridge and the netlist).
+    """
+    from pqwave.bridge.qucs_s.wrapper import QucsBridgeRunner
+
+    args = sys.argv[sys.argv.index('--qucs-bridge') + 1:]
+    # The netlist is always a .cir file — find it among the remaining args.
+    netlist_candidates = [a for a in args if a.endswith('.cir')]
+    if not netlist_candidates:
+        print("Usage: pqwave --qucs-bridge <netlist_file>", file=sys.stderr)
+        return 1
+
+    netlist_name = netlist_candidates[-1]
+    workdir = os.getcwd()
+
+    runner = QucsBridgeRunner()
+    return runner.run(workdir, netlist_name)
+
+
+def _run_setup_qucs_integration() -> int:
+    """Handle --setup-qucs-integration: configure Qucs-S to use pqwave."""
+    import shutil as _shutil
+    from pqwave.bridge.qucs_s.config import (
+        get_config_path, is_configured_for_pqwave,
+        apply_bridge_config, detect_ngspice, read_config,
+    )
+
+    print("=== pqwave Qucs-S Integration Setup ===\n")
+
+    # Check for Qucs-S config
+    config_path = get_config_path()
+    try:
+        cfg = read_config()
+        print(f"Qucs-S config found: {config_path}")
+    except Exception:
+        print(f"Qucs-S config not found at {config_path}")
+        print("Is Qucs-S installed?")
+        return 1
+
+    # Check if already configured
+    if is_configured_for_pqwave():
+        print("Qucs-S is already configured to use pqwave.")
+        current_exe = cfg.get("General", "NgspiceExecutable", fallback="unknown")
+        current_params = cfg.get("General", "NgspiceParams", fallback="")
+        print(f"  NgspiceExecutable = {current_exe}")
+        print(f"  NgspiceParams      = {current_params}")
+        return 0
+
+    # Find ngspice
+    ngspice = detect_ngspice()
+    if ngspice:
+        print(f"Ngspice found: {ngspice}")
+    else:
+        print("WARNING: ngspice not found. The bridge will resolve it at runtime.")
+
+    # Resolve pqwave path (executable only — subcommand goes in NgspiceParams)
+    pqwave_exe = _shutil.which("pqwave")
+    pqwave_params = "--qucs-bridge"
+    if not pqwave_exe:
+        # Fallback: python -m pqwave.main --qucs-bridge
+        pqwave_exe = sys.executable
+        pqwave_params = "-m pqwave.main --qucs-bridge"
+    print(f"pqwave executable: {pqwave_exe}")
+    print(f"pqwave params:     {pqwave_params}")
+
+    # Show current vs proposed
+    print("\nCurrent config:")
+    print(f"  NgspiceExecutable = {cfg.get('General', 'NgspiceExecutable', fallback='(not set)')}")
+    print(f"  NgspiceParams      = {cfg.get('General', 'NgspiceParams', fallback='(not set)')}")
+    print("\nProposed config:")
+    print(f"  NgspiceExecutable = {pqwave_exe}")
+    print(f"  NgspiceParams      = {pqwave_params}")
+    print("\nQucs-S will run: \"{0}\" {1} <netlist>".format(pqwave_exe, pqwave_params))
+
+    # Confirm
+    try:
+        answer = input("\nApply these changes? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\nAborted.")
+        return 1
+    if answer not in ('y', 'yes'):
+        print("Aborted.")
+        return 1
+
+    # Apply
+    try:
+        backup = apply_bridge_config(
+            pqwave_exe=pqwave_exe,
+            pqwave_params=pqwave_params,
+        )
+        print(f"\n✓ Configuration applied.")
+        print(f"  Backup saved to: {backup}")
+        print(f"\nOpen Qucs-S and simulate any schematic — results will open in pqwave automatically.")
+        return 0
+    except Exception as e:
+        print(f"\n✗ Failed to apply configuration: {e}")
+        return 1
+
+
 def main():
     """Main entry point for pqwave."""
+    # Handle --qucs-bridge before argparse (post-simulation hook for Qucs-S)
+    if '--qucs-bridge' in sys.argv:
+        return _run_qucs_bridge()
+
+    # Handle --setup-qucs-integration before argparse
+    if '--setup-qucs-integration' in sys.argv:
+        return _run_setup_qucs_integration()
+
     # Handle --extract before argparse (uses non-standard flags like -ltspice)
     if '--extract' in sys.argv:
         return _run_extract()
@@ -516,7 +629,7 @@ def main():
     # Bridge auto-connect arguments (used by editor Wave menus)
     parser.add_argument(
         "--connect",
-        choices=["xschem", "lepton"],
+        choices=["xschem", "lepton", "qucs"],
         default=None,
         help="Auto-connect to bridge on startup (used by editor Wave menu)"
     )

@@ -223,6 +223,23 @@ class MenuManager:
         xschem_menu.addMenu(cross_probe_menu)
 
         file_menu.addMenu(xschem_menu)
+
+        # Qucs-S Bridge submenu
+        qucs_menu = QMenu("Qucs-S Bridge", self.parent)
+
+        qucs_connect_action = QAction("Connect", self.parent)
+        qucs_connect_action.triggered.connect(
+            self.callbacks.get("qucs_connect", lambda: None)
+        )
+        qucs_menu.addAction(qucs_connect_action)
+
+        qucs_disconn_action = QAction("Disconnect", self.parent)
+        qucs_disconn_action.triggered.connect(
+            self.callbacks.get("qucs_disconnect", lambda: None)
+        )
+        qucs_menu.addAction(qucs_disconn_action)
+
+        file_menu.addMenu(qucs_menu)
         file_menu.addSeparator()
 
         open_file_action = QAction("Open File...", self.parent)
@@ -595,6 +612,12 @@ class MenuManager:
             self.callbacks.get("show_xschem_guide", lambda: None)
         )
         help_menu.addAction(xschem_guide_action)
+
+        qucs_guide_action = QAction("Qucs-S User Guide", self.parent)
+        qucs_guide_action.triggered.connect(
+            self.callbacks.get("show_qucs_guide", lambda: None)
+        )
+        help_menu.addAction(qucs_guide_action)
 
         self.menubar.addMenu(help_menu)
 

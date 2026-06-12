@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qucs-S Bridge — pqwave User Guide</title>
+<style>
+  :root {
+    --text: #1a1a2e;
+    --muted: #555;
+    --bg: #fcfcfd;
+    --surface: #fff;
+    --border: #d8d8e0;
+    --code-bg: #f3f3f7;
+    --pre-bg: #f6f6fa;
+    --link: #2563eb;
+    --th-bg: #eaeaef;
+    --note-bg: #eef2ff;
+    --note-border: #b8c4f0;
+    --warn-bg: #fff8e6;
+    --warn-border: #f0d070;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    color: __TEXT__;
+    background: __BASE__;
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1.7;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5em 1.5em 5em;
+  }
+  h1 { font-size: 1.8em; margin-bottom: 0.3em; }
+  h2 { font-size: 1.3em; margin: 2em 0 0.6em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  h3 { font-size: 1.05em; margin: 1.3em 0 0.4em; }
+  p { margin: 0.6em 0; }
+  a { color: __LINK__; }
+  ul, ol { padding-left: 1.6em; margin: 0.5em 0; }
+  li { margin: 0.2em 0; }
+  code {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 0.15em 0.35em;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--pre-bg);
+    padding: 0.8em 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.5;
+    margin: 0.8em 0;
+  }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 0.8em 0; }
+  th, td { border: 1px solid var(--border); padding: 0.5em 0.7em; text-align: left; }
+  th { background: var(--th-bg); font-weight: 600; }
+  .note {
+    background: var(--note-bg);
+    border-left: 4px solid var(--note-border);
+    padding: 0.6em 1em;
+    margin: 0.8em 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .warn {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+    padding: 0.6em 1em;
+    margin: 0.8em 0;
+    border-radius: 0 4px 4px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Qucs-S Bridge</h1>
+
+<p>
+  pqwave can act as a waveform viewer for <a href="https://github.com/ra3xdh/qucs_s">Qucs-S</a>
+  simulations. Once configured, every simulation you run in Qucs-S automatically opens
+  its results in pqwave — with traceable output files in a <code>simulation/</code>
+  subdirectory next to your schematic.
+</p>
+
+<div class="note">
+  <strong>How it works:</strong> pqwave replaces ngspice as the simulator executable
+  in Qucs-S's settings. When Qucs-S clicks "Simulate," pqwave runs the real ngspice,
+  copies the output files, and opens them for viewing.
+</div>
+
+<h2>Setup</h2>
+
+<ol>
+  <li><strong>Close Qucs-S</strong> if it is running.</li>
+  <li>In pqwave: <strong>File → Qucs-S Bridge → Connect</strong></li>
+  <li>Click <strong>OK</strong> in the confirmation dialog.</li>
+  <li><strong>Start Qucs-S</strong>.</li>
+</ol>
+
+<p>
+  That's it. Now simulate any schematic in Qucs-S — pqwave opens the results automatically.
+</p>
+
+<div class="warn">
+  <strong>⚠ Important:</strong> Qucs-S loads simulator settings only at startup.
+  You must <strong>close Qucs-S before</strong> Connect or Disconnect,
+  and <strong>start it after</strong> the change.
+</div>
+
+<h2>After Setup</h2>
+
+<p>When you click <strong>Simulate</strong> in Qucs-S:</p>
+
+<ol>
+  <li>Qucs-S generates the SPICE netlist as usual</li>
+  <li>pqwave runs ngspice in batch mode</li>
+  <li>Output files are copied to a <code>simulation/</code> directory next to your schematic:</li>
+</ol>
+
+<pre><code>~/projects/bridge/
+├── bridge.sch
+└── simulation/
+    ├── bridge.cir          ← netlist
+    ├── bridge.tr1.plot     ← transient simulation
+    └── bridge.ac1.raw      ← AC simulation</code></pre>
+
+<p>
+  Qucs-S's own diagram system continues to work — the integration is additive.
+</p>
+
+<h2>Disconnecting</h2>
+
+<ol>
+  <li><strong>Close Qucs-S</strong> if it is running.</li>
+  <li>In pqwave: <strong>File → Qucs-S Bridge → Disconnect</strong></li>
+  <li>Click <strong>OK</strong> to restore the original configuration.</li>
+</ol>
+
+<p>Qucs-S will return to using ngspice directly.</p>
+
+<h2>Manual Setup</h2>
+
+<p>If the one-click setup doesn't work, configure manually:</p>
+
+<ol>
+  <li>In Qucs-S: <strong>Simulation → Simulator settings</strong></li>
+  <li>Set <strong>Ngspice executable location</strong> to the path of <code>pqwave</code>:</li>
+</ol>
+
+<pre><code>/home/&lt;user&gt;/.local/bin/pqwave</code></pre>
+
+<ol start="3">
+  <li>Set <strong>Ngspice CLI parameters</strong> to:</li>
+</ol>
+
+<pre><code>--qucs-bridge</code></pre>
+
+<ol start="4">
+  <li>Click <strong>Apply changes</strong></li>
+  <li><strong>Restart Qucs-S</strong></li>
+</ol>
+
+<h2>Troubleshooting</h2>
+
+<h3>pqwave doesn't open after simulation</h3>
+<ul>
+  <li><strong>Did you restart Qucs-S after Connect?</strong> Qucs-S loads settings only at startup.</li>
+  <li>Check that pqwave is on your PATH: <code>which pqwave</code></li>
+  <li>Test the bridge manually: <code>pqwave --qucs-bridge spice4qucs.cir</code></li>
+  <li>Verify ngspice is installed: <code>which ngspice</code></li>
+</ul>
+
+<h3>pqwave opens but shows "Error opening file"</h3>
+<ul>
+  <li>The config may be in a broken half-state. Run Connect again to repair it.</li>
+  <li>Check that <code>NgspiceParams</code> is set to <code>--qucs-bridge</code>
+      (not empty and not inside <code>NgspiceExecutable</code>).</li>
+</ul>
+
+<h3>Changes don't take effect</h3>
+<ul>
+  <li>Qucs-S caches <code>NgspiceExecutable</code> at startup.
+      <strong>Close Qucs-S before</strong> Connect or Disconnect.</li>
+  <li>Qucs-S overwrites the config on exit with its cached values.
+      If you changed settings while Qucs-S was running, they may be lost.</li>
+</ul>
+
+<h3>Undoing the integration</h3>
+<ul>
+  <li>Use <strong>File → Qucs-S Bridge → Disconnect</strong> in pqwave</li>
+  <li>Or restore from backup:
+      <code>cp ~/.config/qucs/qucs_s.conf.pqwave_backup ~/.config/qucs/qucs_s.conf</code></li>
+  <li>Or in Qucs-S, manually set Ngspice executable back to <code>/usr/bin/ngspice</code></li>
+</ul>
+
+<h2>Environment Variables</h2>
+
+<table>
+  <tr><th>Variable</th><th>Effect</th></tr>
+  <tr>
+    <td><code>PQWAVE_NGSPICE</code></td>
+    <td>Override path to ngspice binary (e.g. <code>/opt/local/bin/ngspice</code>)</td>
+  </tr>
+  <tr>
+    <td><code>PQWAVE_QUCS_AUTO_OPEN=0</code></td>
+    <td>Disable automatic pqwave launch after simulation (outputs still copied)</td>
+  </tr>
+</table>
+
+<h2>CLI Reference</h2>
+
+<pre><code># Configure integration from command line
+pqwave --setup-qucs-integration
+
+# Start pqwave and auto-connect to Qucs-S bridge
+pqwave --connect qucs
+
+# Manual post-simulation hook (normally called by Qucs-S)
+pqwave --qucs-bridge spice4qucs.cir</code></pre>
+
+</body>
+</html>

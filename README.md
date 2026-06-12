@@ -1,6 +1,6 @@
 # pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 
-![Version](https://img.shields.io/badge/version-0.3.2-blue)
+![Version](https://img.shields.io/badge/version-0.3.3-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -114,6 +114,23 @@ Test results are displayed with pass/fail status for each test file, followed by
 4. **Set X-Axis**: Click X button to set X-axis variable
 5. **Add Traces**: Click Y1 or Y2 to add traces
 6. **Adjust View**: Use logarithmic scale or manual ranges as needed
+
+## 🧪 Qucs-S Integration
+
+pqwave integrates with [Qucs-S](https://github.com/ra3xdh/qucs_s) as an automatic waveform viewer. After one-click setup, every simulation you run in Qucs-S opens its results in pqwave — with traceable output files in a `simulation/` directory next to your schematic.
+
+**Key features:**
+- **Zero-config simulation hook**: No C++ changes to Qucs-S — uses the existing "Ngspice executable" setting
+- **Schematic-traceable outputs**: `bridge.sch` → `simulation/bridge.cir` → `simulation/bridge.tran1.raw`
+- **Non-invasive**: Qucs-S's built-in diagrams continue to work normally
+
+**Quick setup:**
+1. In pqwave: **File → Qucs-S Bridge → Connect** → OK
+2. In Qucs-S: simulate any schematic — pqwave opens automatically
+
+Or via CLI: `pqwave --setup-qucs-integration`
+
+For details, troubleshooting, and manual setup, see [Qucs-S Integration Guide](docs/qucs/user-guide.md).
 
 ## 📡 Xschem Integration
 
