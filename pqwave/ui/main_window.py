@@ -195,6 +195,10 @@ class MainWindow(QMainWindow):
         self.qucs_control_bar = None
         self._qucs_bridge = None
 
+        # KiCad bridge
+        self.kicad_control_bar = None
+        self._kicad_bridge = None
+
         # Xschem cursor cross-probe timer (debounce net highlight in schematic).
         # Interval is read from xschem_config; defaults to 250 ms.
         from pqwave.models.state import ApplicationState
@@ -741,6 +745,16 @@ class MainWindow(QMainWindow):
             self._on_qucs_connect()
         elif action == "qucs_disconnect":
             self._on_qucs_disconnect()
+        elif action == "kicad_connect":
+            self._on_kicad_connect()
+        elif action == "kicad_disconnect":
+            self._on_kicad_disconnect()
+        elif action == "kicad_simulate":
+            self._on_kicad_simulate()
+        elif action == "kicad_annotate_dc":
+            self._on_kicad_annotate_dc(kwargs.get("voltages", {}))
+        elif action == "kicad_clear_annotations":
+            self._on_kicad_clear_annotations()
 
     # ---- Auto-Connect ----
 
@@ -760,6 +774,8 @@ class MainWindow(QMainWindow):
                 self._on_xschem_connect()
         elif bridge_type == "qucs":
             self._on_qucs_connect()
+        elif bridge_type == "kicad":
+            self._on_kicad_connect(sch_path or "")
 
     # ---- Lepton-EDA Bridge handlers ----
 
@@ -1118,20 +1134,29 @@ class MainWindow(QMainWindow):
         operating point or DC sweep data. For AC or TRAN data, the mean
         may not represent a meaningful operating point.
         """
-        import re
+        import re, numpy as np
         voltages = {}
         state = self.state
         if not state.datasets:
+            logger.warning("_extract_dc_voltages: no datasets loaded")
             return voltages
         ds = state.datasets[-1]
+        logger.debug("_extract_dc_voltages: dataset has %d variables", len(ds.variables))
         for var in ds.variables:
             m = re.match(r'^v\((.+)\)$', var.name, re.IGNORECASE)
-            if m and var.data is not None and len(var.data) > 0:
-                try:
-                    import numpy as np
-                    voltages[m.group(1)] = float(np.mean(var.data))
-                except (TypeError, ValueError):
-                    pass
+            if m:
+                if var.data is not None and len(var.data) > 0:
+                    try:
+                        voltages[m.group(1)] = float(np.mean(var.data))
+                    except (TypeError, ValueError):
+                        logger.debug("_extract_dc_voltages: skip %s (complex/non-float)", var.name)
+                else:
+                    logger.debug("_extract_dc_voltages: skip %s (no data)", var.name)
+            else:
+                logger.debug("_extract_dc_voltages: skip %s (not v(...))", var.name)
+        if not voltages:
+            logger.warning("_extract_dc_voltages: no voltage variables found in %d variables",
+                         len(ds.variables))
         return voltages
 
     # ---- Xschem Bridge handlers ----
@@ -1559,6 +1584,217 @@ class MainWindow(QMainWindow):
 
         dialog.show()
 
+    def _show_kicad_guide(self):
+        """Help > KiCad User Guide (non-modal)."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+        )
+        from PyQt6.QtCore import Qt
+        from pathlib import Path
+
+        guide_path = (
+            Path(__file__).parent.parent.parent / "docs" / "kicad" / "guide.html"
+        )
+        if not guide_path.exists():
+            QMessageBox.warning(
+                self, "Not Found",
+                f"KiCad guide not found at:\n{guide_path}",
+            )
+            return
+
+        try:
+            html = guide_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(self, "Error", f"Failed to read KiCad guide:\n{e}")
+            return
+
+        p = self.palette()
+        html = html.replace("__TEXT__", p.color(p.ColorRole.Text).name())
+        html = html.replace("__BASE__", p.color(p.ColorRole.Base).name())
+        html = html.replace("__LINK__", p.color(p.ColorRole.Link).name())
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("KiCad User Guide")
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setModal(False)
+        dialog.resize(800, 640)
+
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setHtml(html)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.show()
+
+    # ---- KiCad Bridge handlers ----
+
+    def _setup_kicad_control_bar(self):
+        """Create and wire the KiCad control bar (idempotent)."""
+        from pqwave.bridge.kicad.control_bar import KiCadControlBar
+        if self.kicad_control_bar is not None:
+            return
+        self.kicad_control_bar = KiCadControlBar(self._kicad_bridge)
+        upper = self._main_splitter.widget(0)
+        if upper and upper.layout():
+            upper.layout().addWidget(self.kicad_control_bar)
+        self.kicad_control_bar.simulate_clicked.connect(self._on_kicad_simulate)
+        self.kicad_control_bar.connect_clicked.connect(self._on_kicad_connect)
+        self.kicad_control_bar.disconnect_clicked.connect(self._on_kicad_disconnect)
+        self.kicad_control_bar.annotate_dc_clicked.connect(self._on_kicad_annotate_dc)
+        self.kicad_control_bar.clear_annotations_clicked.connect(
+            self._on_kicad_clear_annotations)
+
+    def _on_kicad_connect(self, sch_path: str = ""):
+        """File > KiCad Bridge > Connect.
+
+        If *sch_path* is given, connects to that file directly.
+        Otherwise auto-detects the open schematic from Eeschema via IPC.
+        """
+        from pqwave.bridge.kicad.bridge import KiCadBridge
+
+        if self._kicad_bridge is None:
+            self._kicad_bridge = KiCadBridge()
+        self._setup_kicad_control_bar()
+        # Update the control bar's bridge reference (may be new after disconnect)
+        if self.kicad_control_bar is not None:
+            self.kicad_control_bar._bridge = self._kicad_bridge
+        self.kicad_control_bar.setVisible(True)
+
+        if sch_path and not os.path.isfile(sch_path):
+            self.chat_panel.append_output(f"[kicad] File not found: {sch_path}\n")
+            return
+
+        kicad_cli = self._kicad_bridge.detect_tool()
+        if not kicad_cli:
+            self.chat_panel.append_output(
+                "[kicad] kicad-cli not found. Install KiCad 8.0+ and ensure\n"
+                "        kicad-cli is in your PATH.\n"
+            )
+            QMessageBox.warning(self, "kicad-cli Not Found",
+                "kicad-cli was not found.\n\n"
+                "Install KiCad 8.0+ or set the path in\n"
+                "Settings > External Converter Paths.")
+            return
+
+        if self._kicad_bridge.connect(sch_path):
+            self.chat_panel.append_output(
+                f"[kicad] Connected to {self._kicad_bridge.connected_path}\n"
+                f"[kicad] kicad-cli: {kicad_cli}\n"
+                f"[kicad] IPC API: "
+                f"{'available' if self._kicad_bridge._has_ipc() else 'not available'}\n"
+            )
+            self.kicad_control_bar.refresh()
+        else:
+            self.chat_panel.append_output(
+                "[kicad] Failed to connect. "
+                "Is Eeschema running with a schematic open?\n"
+            )
+
+    def _on_kicad_disconnect(self):
+        """File > KiCad Bridge > Disconnect."""
+        if self._kicad_bridge is None:
+            return
+
+        if hasattr(self, '_kicad_ba_timer'):
+            self._kicad_ba_timer.stop()
+        self._kicad_ba_x = None
+        self._kicad_bridge.disconnect()
+        self._kicad_bridge = None
+        self.chat_panel.append_output("[kicad] Disconnected.\n")
+        if self.kicad_control_bar:
+            self.kicad_control_bar.refresh()
+
+    def _on_kicad_simulate(self):
+        """Run the kiCad simulation pipeline: export → fix → ngspice → load."""
+        if self._kicad_bridge is None or not self._kicad_bridge.connected_path:
+            self.chat_panel.append_output("[kicad] Not connected. Use File > KiCad Bridge > Connect first.\n")
+            return
+
+        sch_path = self._kicad_bridge.connected_path
+        self.chat_panel.append_output(f"[kicad] Simulating {os.path.basename(sch_path)}...\n")
+
+        try:
+            result = self._kicad_bridge.simulate(sch_path)
+        except Exception as e:
+            self.chat_panel.append_output(f"[kicad] Simulation failed: {e}\n")
+            QMessageBox.critical(self, "Simulation Failed", str(e))
+            return
+
+        # Report fixes
+        for info in result.get("fix_info", []):
+            self.chat_panel.append_output(f"[kicad] {info}\n")
+
+        if result.get("raw_file"):
+            self.chat_panel.append_output(
+                f"[kicad] Simulation complete: {result['raw_file']}\n"
+            )
+            self._load_raw_file(result["raw_file"])
+        else:
+            self.chat_panel.append_output(
+                f"[kicad] Simulation failed (code {result['returncode']})\n"
+                f"[kicad] stderr: {result.get('stderr', '')[:500]}\n"
+            )
+
+    def _on_kicad_annotate_dc(self, voltages: dict[str, float] | None = None):
+        """Stamp DC operating-point values onto the schematic."""
+        if self._kicad_bridge is None or not self._kicad_bridge.connected_path:
+            self.chat_panel.append_output("[kicad] Not connected.\n")
+            return
+
+        # Re-connect to refresh the IPC document (user may have switched
+        # files in KiCad since the initial connect).
+        if not self._kicad_bridge.connect(self._kicad_bridge.connected_path):
+            self.chat_panel.append_output(
+                "[kicad] Schematic not accessible — was the file moved or closed?\n")
+            return
+
+        # Auto-collect from the last dataset if no voltages provided
+        if not voltages:
+            voltages = self._extract_dc_voltages()
+
+        if not voltages:
+            n_datasets = len(self.state.datasets) if self.state else 0
+            n_vars = len(self.state.datasets[-1].variables) if (
+                self.state and self.state.datasets) else 0
+            self.chat_panel.append_output(
+                f"[kicad] No DC voltage values found.\n"
+                f"[kicad] Datasets loaded: {n_datasets}, "
+                f"variables in last: {n_vars}\n"
+                f"[kicad] Run a simulation (DC op or TRAN) first, then annotate.\n"
+            )
+            return
+
+        self.chat_panel.append_output(
+            f"[kicad] Annotating {len(voltages)} DC values...\n"
+        )
+        ok = self._kicad_bridge.annotate_dc(voltages)
+        if ok:
+            self.chat_panel.append_output("[kicad] Annotation complete.\n")
+        else:
+            reason = getattr(self._kicad_bridge, '_last_ipc_error', None)
+            self.chat_panel.append_output(
+                f"[kicad] Annotation failed: {reason or 'IPC API not available'}\n"
+                f"[kicad] Check: KiCad running? IPC API enabled (Preferences > Plugins)?\n"
+                f"[kicad] kicad-python installed and matching KiCad version?\n"
+            )
+
+    def _on_kicad_clear_annotations(self):
+        """Remove all back-annotation text from the schematic."""
+        if self._kicad_bridge is None:
+            return
+
+        ok = self._kicad_bridge.clear_dc_annotations()
+        if ok:
+            self.chat_panel.append_output("[kicad] Annotations cleared.\n")
+        else:
+            self.chat_panel.append_output(
+                "[kicad] Clear annotations skipped — IPC API not available.\n"
+            )
+
     def _update_mc_control_display(self):
         """Refresh MC control bar from current collection state."""
         mc = self.state.mc_collection
@@ -1951,6 +2187,12 @@ class MainWindow(QMainWindow):
             'qucs_connect': self._on_qucs_connect,
             'qucs_disconnect': self._on_qucs_disconnect,
             'show_qucs_guide': self._show_qucs_guide,
+            'kicad_connect': self._on_kicad_connect,
+            'kicad_disconnect': self._on_kicad_disconnect,
+            'kicad_simulate': self._on_kicad_simulate,
+            'kicad_annotate_dc': self._on_kicad_annotate_dc,
+            'kicad_clear_annotations': self._on_kicad_clear_annotations,
+            'show_kicad_guide': self._show_kicad_guide,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -2011,6 +2253,13 @@ class MainWindow(QMainWindow):
         self._xschem_ba_timer.setInterval(250)  # 250ms debounce
         self._xschem_ba_timer.timeout.connect(self._xschem_ba_debounced)
         self._xschem_ba_x = None  # XB cursor value to send when timer fires
+
+        # KiCad cursor back-annotation timer (stamp trace value at cursor X via IPC)
+        self._kicad_ba_timer = QTimer()
+        self._kicad_ba_timer.setSingleShot(True)
+        self._kicad_ba_timer.setInterval(250)  # 250ms debounce
+        self._kicad_ba_timer.timeout.connect(self._kicad_ba_debounced)
+        self._kicad_ba_x = None  # cursor X value to send when timer fires
 
         # Lepton-EDA cursor cross-probe timer (same debounce pattern)
         self._lepton_ba_timer = QTimer()
@@ -3912,7 +4161,20 @@ class MainWindow(QMainWindow):
         if self.menu_manager:
             self.menu_manager.set_x_cursor_a_checked(checked)
         self._update_cursor_status()
-        # Clear back-annotation cursor labels when XA cursor is hidden.
+        # KiCad cursor back-annotation: clear texts on OFF, re-create on ON
+        if not checked:
+            if self._kicad_bridge:
+                self._kicad_bridge.clear_cursor_annotations(forget_positions=False)
+        else:
+            if self._kicad_bridge and self._kicad_bridge.connected_path:
+                x_range = self.plot_widget.plotItem.vb.viewRange()[0]
+                x_linear = sum(x_range) / 2
+                if self.plot_widget.get_axis_log_mode('X'):
+                    x_linear = self.plot_widget._log_to_linear(x_linear)
+                self._kicad_ba_x = x_linear
+                self._kicad_ba_timer.start()
+
+        # Clear back-annotation cursor labels for xschem/lepton
         if not checked:
             if self._lepton_cross_probe and self._lepton_cross_probe.is_connected():
                 self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
@@ -4576,6 +4838,11 @@ class MainWindow(QMainWindow):
         # Xschem cross-probe.
         self._xschem_cp_timer.start()
 
+        # KiCad cursor back-annotation (if connected and IPC available)
+        if self._kicad_bridge and self._kicad_bridge.connected_path:
+            self._kicad_ba_x = x_linear
+            self._kicad_ba_timer.start()
+
         self._update_cursor_status()
         self._sync_x_cursor_to_same_domain_panels('XA', value)
 
@@ -4592,6 +4859,11 @@ class MainWindow(QMainWindow):
         # Store and start debounce timer for xschem back-annotation.
         self._xschem_ba_x = x_linear
         self._xschem_ba_timer.start()
+
+        # KiCad cursor back-annotation (if connected and IPC available)
+        if self._kicad_bridge and self._kicad_bridge.connected_path:
+            self._kicad_ba_x = x_linear
+            self._kicad_ba_timer.start()
 
         self._sync_x_cursor_to_same_domain_panels('XB', value)
 
@@ -4672,6 +4944,55 @@ class MainWindow(QMainWindow):
         if self._xschem_ba_x is not None:
             self._send_xschem_backannotation(self._xschem_ba_x)
             self._xschem_ba_x = None
+
+    def _kicad_ba_debounced(self):
+        """Send KiCad cursor back-annotation after debounce timer fires.
+
+        Collects Y values for all visible traces at the cursor X position
+        and stamps them near their net labels (same positioning as DC annotate).
+        """
+        if self._kicad_ba_x is None:
+            return
+        if self._kicad_bridge is None or not self._kicad_bridge.connected_path:
+            self._kicad_ba_x = None
+            return
+        if not self._kicad_bridge._has_ipc():
+            self._kicad_ba_x = None
+            return
+
+        self._kicad_ba_x = None
+
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+
+        cursor_y = panel.trace_manager.last_cursor_y
+        if not cursor_y:
+            logger.debug("kicad_ba: last_cursor_y is empty")
+            return
+
+        # Collect values for all visible voltage traces (same pattern as xschem)
+        voltages: dict[str, float] = {}
+        for trace in panel.trace_manager.state_traces:
+            if not trace.visible:
+                continue
+            # Skip non-voltage expressions (e.g. i(R1), db(v(out)), v(out)-v(in))
+            m = MainWindow._NET_EXPR_RE.match(trace.expression)
+            if not m:
+                continue
+            y_val = cursor_y.get(trace.name)
+            if y_val is None:
+                continue
+            net = m.group(1)
+            voltages[net] = float(y_val)
+
+        if voltages:
+            try:
+                self._kicad_bridge.annotate_cursor_values(voltages)
+            except Exception:
+                logger.warning("kicad_ba: annotate_cursor_values failed", exc_info=True)
+        else:
+            logger.debug("kicad_ba: no trace values at cursor")
 
     def _send_xschem_backannotation(self, x_value: float):
         """Stamp trace values as floating text near lab symbols in xschem."""
@@ -5283,6 +5604,11 @@ class MainWindow(QMainWindow):
                 and self._lepton_cross_probe.is_connected()):
             self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
             self._lepton_cross_probe.disconnect()
+        # Clear KiCad cursor back-annotation texts
+        if (hasattr(self, "_kicad_bridge")
+                and self._kicad_bridge is not None):
+            self._kicad_ba_timer.stop()
+            self._kicad_bridge.clear_cursor_annotations(forget_positions=True)
         self._save_global_prefs()
         self.state.window_registry.unregister_window(self.window_id)
         super().closeEvent(event)

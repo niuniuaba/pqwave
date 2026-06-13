@@ -1,8 +1,8 @@
 # KiCad Integration User Guide
 
-pqwave integrates with KiCad Eeschema through a netlist-based file-watching pipeline. This guide covers the integration features and walks through real analysis workflows.
+pqwave integrates with KiCad Eeschema through a connect-and-simulate workflow. This guide covers the integration features and walks through real analysis workflows.
 
-> **No KiCad source modifications required.** Everything works with pre-built KiCad binaries (version 8.0+).
+> **No KiCad source modifications required.** Everything works with pre-built KiCad binaries (version 8.0+). KiCad 10+ with IPC API and kicad-python enables back-annotation (stamping simulation values onto the schematic).
 
 ## Table of Contents
 
@@ -30,22 +30,26 @@ pqwave integrates with KiCad Eeschema through a netlist-based file-watching pipe
 ```
 KiCad (stock binary)                    pqwave
 ───────────────                        ──────
-User edits .kicad_sch                  File watcher detects save
-Saves (Ctrl+S) ───────────────────►    kicad-cli exports netlist
-                                       Post-processor fixes:
-                                         ✓ strip / from nodes
-                                         ✓ fix diode pin order
-                                         ✓ fix BJT/MOSFET pin order
-                                         ✓ move .control block
-                                       ngspice -b -r result.raw
-                                       Loads, displays ALL signals
+                                       File > KiCad Bridge > Connect
+User edits .kicad_sch                  (selects .kicad_sch file)
+                                       Simulate Now:
+                                         kicad-cli exports netlist
+                                         Post-processor fixes:
+                                           ✓ strip / from nodes
+                                           ✓ fix diode pin order
+                                           ✓ fix BJT/MOSFET pin order
+                                           ✓ move .control block
+                                         ngspice -b -r result.raw
+Saves (Ctrl+S) ──► manual re-sim ──►   Loads, displays ALL signals
+
+KiCad 10+ with IPC API:
+  DC Annotate  ◄────────────────────   Stamps DC op values as text
+  Cursor XA/B  ◄────────────────────   Live value at cursor position
 ```
 
-pqwave runs the simulation externally via ngspice and loads the results for analysis. The file watcher detects schematic saves and triggers automatic re-simulation.
+pqwave runs the simulation externally via ngspice and loads the results for analysis. Use **Simulate Now** to re-run after schematic changes.
 
-> **Design note — why probing starts from pqwave, not KiCad:** Probing starts from pqwave — the user selects signals in the signal browser rather than clicking nets in the schematic. pqwave shows every signal from the simulation at once, and the user explores freely. The schematic is the design canvas; pqwave is the analysis cockpit.
->
-> Net/node highlight back-annotation from pqwave to KiCad is supported via the KiCad IPC API (KiCad 10+). See [IPC API Setup](#ipc-api-setup-kicad-10) and [Cross-Probe / Back-Annotation](#cross-probe--back-annotation).
+> **Integration levels:** This guide describes the Level 1 integration — simulation pipeline + back-annotation. Cross-probe (highlighting nets/components in KiCad from pqwave) requires upstream KiCad API additions and is not yet available without C++ changes. See the [lessons-learned](lessons-learned.md) for details.
 
 The netlist post-processor fixes four known KiCad export issues automatically:
 
@@ -64,18 +68,17 @@ The KiCad Bridge processes schematics through a three-stage pipeline:
 | Post-process | Fix node names, pin ordering, `.control` placement | See [Netlist Post-Processor](#netlist-post-processor) |
 | Simulate | `ngspice -b -r output.raw circuit.cir` | Runs batch simulation, produces standard `.raw` file |
 
-**Configuration** — set via **Settings > KiCad Bridge** or API:
+**Configuration** — set via **Settings > External Converter Paths** or API:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Watch paths | `[]` | List of directories or `.kicad_sch` files to monitor |
-| Auto-simulate | `true` | Run simulation automatically when schematic is saved |
-| Simulator | `ngspice` | SPICE simulator binary (must be in PATH) |
-| Raw output dir | `$PROJECT_DIR` | Where `.raw` files are written |
-| IPC API | auto-detected | Automatically uses IPC API when KiCad 10+ is running with API enabled; falls back to kicad-cli |
+| `kicad_cli` | auto-detected | Path to kicad-cli binary |
+| `ngspice` | auto-detected | Path to ngspice binary |
 | Netlist fix: strip slashes | `true` | Remove leading `/` from node names |
 | Netlist fix: diode pins | `true` | Swap diode pin order to SPICE convention |
 | Netlist fix: BJT/MOSFET pins | `true` | Reorder transistor pins to SPICE convention |
+
+**IPC back-annotation** requires KiCad 10+ with IPC API enabled and kicad-python installed. See [IPC API Setup](#ipc-api-setup-kicad-10).
 
 ### Netlist Post-Processor
 
@@ -123,18 +126,24 @@ KiCad writes schematic text directives in visual order (left-to-right on the she
 
 **Disable individual fixes** via settings if you have manually corrected your schematic or symbol libraries.
 
-### Cross-Probe / Back-Annotation
+### Back-Annotation
 
-**What it is:** Cross-probe (also called back-annotation) is the ability to click a signal in pqwave and have KiCad Eeschema highlight the corresponding net or component in the schematic. This is a standard feature in integrated EDA+waveform tools — it lets you quickly navigate between simulation results and the circuit design.
+**What it is:** Back-annotation stamps simulation results onto the KiCad schematic as text. Two modes are available:
 
-**How it works:** pqwave communicates with KiCad Eeschema via the IPC API (KiCad 10+). When you select a trace in pqwave and choose "Probe in KiCad," pqwave sends a `HighlightNet` action to Eeschema through the `kipy` client library. Moving cursor A along the trace highlights the corresponding net in Eeschema in real time (250ms debounce). You can also clear all highlights from the Cross-Probe menu.
+1. **DC Annotate** (button) — stamps the mean voltage of every `v(node)` variable onto the schematic. Best used with DC operating-point or DC-sweep simulations.
+
+2. **Cursor back-annotation** (automatic) — when you move cursor A or B on a trace in pqwave, the trace value at that cursor position is stamped onto the schematic as a single text item. Debounced at 250ms.
+
+Both modes require KiCad 10+ with IPC API enabled and kicad-python installed.
+
+**How it works:** pqwave communicates with KiCad Eeschema via the IPC API (KiCad 10+). Schematic text items are created via `CreateItems` and updated in-place via `UpdateItems`, preserving any user-applied repositioning.
 
 **Requirements:**
 - KiCad 10 or newer with IPC API enabled (Preferences → Plugins → Enable IPC API Server)
 - `kicad-python` (`kipy`) installed in your pqwave Python environment
 - See [IPC API Setup](#ipc-api-setup-kicad-10) for detailed setup instructions
 
-**Fallback behavior:** If the IPC API is unavailable, pqwave falls back to `kicad-cli` for netlist export, but cross-probe highlighting is only available via the IPC API. Without the IPC API, the Schematic → pqwave direction still works: saving the schematic in KiCad triggers a full re-export, post-process, and re-simulation in pqwave. New results appear in the signal browser automatically.
+**Fallback behavior:** If the IPC API is unavailable, pqwave falls back to `kicad-cli` for netlist export, but back-annotation is skipped with a status message. The simulation pipeline works without IPC.
 
 ### Session API Commands
 
@@ -144,32 +153,22 @@ All KiCad Bridge operations are available through the Session API.
 
 | Command | Signature | Description |
 |---------|-----------|-------------|
-| `kicad_watch` | `kicad_watch(paths)` | Add schematic files or directories to the watch list. Returns watch status. |
-| `kicad_unwatch` | `kicad_unwatch(path)` | Remove a path from the watch list. |
-| `kicad_watched` | `kicad_watched()` | List all watched paths and their status. |
-| `kicad_simulate` | `kicad_simulate(sch_path)` | Manually trigger export → post-process → simulate for a schematic. |
-| `kicad_export` | `kicad_export(sch_path, output=None)` | Export netlist only (no simulation). Returns the netlist text. |
+| `kicad_connect` | `kicad_connect(path)` | Connect to a .kicad_sch file. |
+| `kicad_simulate` | `kicad_simulate(sch_path=None)` | Run export → post-process → ngspice → load. Uses connected path if none given. |
+| `kicad_disconnect` | `kicad_disconnect()` | Disconnect from the schematic. |
 
-**Post-Processor Control:**
+**Back-Annotation (requires IPC API):**
 
 | Command | Signature | Description |
 |---------|-----------|-------------|
-| `kicad_fix_netlist` | `kicad_fix_netlist(netlist_text)` | Apply all post-processing fixes to a netlist string. Returns fixed netlist. |
-| `kicad_fix_info` | `kicad_fix_info(netlist_text)` | Dry-run: report what fixes would be applied without changing anything. |
-
-**Cross-Probe (requires IPC API — see [above](#cross-probe--back-annotation)):**
-
-| Command | Signature | Description |
-|---------|-----------|-------------|
-| `kicad_probe_net` | `kicad_probe_net(net_name)` | Highlight a net in KiCad Eeschema (requires KiCad 10+ with IPC API). |
-| `kicad_probe_part` | `kicad_probe_part(refdes, pin=None)` | Highlight a component in KiCad Eeschema (requires KiCad 10+ with IPC API). |
-| `kicad_clear` | `kicad_clear()` | Clear all highlights in KiCad Eeschema. |
+| `kicad_annotate_dc` | `kicad_annotate_dc(voltages=None)` | Stamp DC operating-point values as schematic text. Auto-collects from active panel if no dict given. |
+| `kicad_clear_annotations` | `kicad_clear_annotations()` | Remove all back-annotation text from schematic. |
 
 **Configuration:**
 
 | Command | Signature | Description |
 |---------|-----------|-------------|
-| `kicad_config` | `kicad_config(key, value=None)` | Get or set bridge configuration. Keys: `watch_paths`, `auto_simulate`, `simulator`, `raw_output_dir`, `fix_slashes`, `fix_diode_pins`, `fix_bjt_pins`. |
+| `kicad_config` | `kicad_config(key, value=None)` | Get or set bridge configuration. Keys: `kicad_cli`. |
 
 ---
 
@@ -186,29 +185,42 @@ Every tutorial starts from a `.kicad_sch` file in `docs/kicad/examples/`. Open i
 | BJT Amplifier | `bjt_amplifier.kicad_sch` | Two-stage BJT amplifier | Transient 10 ms | BJT pin fix, multi-signal analysis |
 
 **Prerequisites:**
-- KiCad 8.0+ with `kicad-cli` in PATH (KiCad 10+ required for IPC API and cross-probe)
+- KiCad 8.0+ with `kicad-cli` in PATH
 - ngspice 42+ in PATH
+- KiCad 10+ with IPC API and kicad-python for back-annotation
 - pqwave installed
 
 ---
 
 ## IPC API Setup (KiCad 10+)
 
-pqwave supports the KiCad IPC API for netlist export, symbol data access,
-and cross-probe back-annotation.  This is the recommended path for KiCad 10
-and newer.
+pqwave supports the KiCad IPC API for back-annotation (stamping simulation
+values onto the schematic as text).  This requires KiCad 10 or newer with the
+IPC API server enabled.
 
 ### Prerequisites
 
-1. **KiCad 10 or newer** installed
+1. **KiCad 10 or newer** installed and running
 2. **IPC API enabled** in KiCad:
    - Open KiCad → Preferences → Plugins
    - Check "Enable IPC API Server"
    - Restart KiCad
 3. **kicad-python** installed in your pqwave Python environment:
+
+   **Option A — install from Git (recommended):**
    ```bash
    pip install git+https://gitlab.com/kicad/code/kicad-python.git
    ```
+
+   **Option B — build from local source:**
+   ```bash
+   cd /path/to/kicad-python
+   git submodule update --init
+   pip install -e .
+   ```
+
+   The kicad-python version must match your KiCad version.  Building from
+   source with the matching kicad submodule ensures API compatibility.
 
 ### Verifying the Setup
 
@@ -219,38 +231,22 @@ python -c "import kipy; print('kicad-python OK')"
 If you see `ModuleNotFoundError`, the package is not installed.
 If you see `kicad-python OK`, you're ready.
 
-### Cross-Probe Back-Annotation
-
-With the IPC API enabled, pqwave can highlight nets and components in
-KiCad Eeschema:
-
-1. **Click a trace** in pqwave to select it
-2. **Right-click → Probe in KiCad** to highlight the corresponding net
-3. **Move cursor A** along the trace — the highlighted net follows (250ms debounce)
-4. **Clear highlights** from the Cross-Probe menu or by clicking Clear
-
 ### Connection Status
 
 The KiCad control bar shows the connection state:
-- **Green**: Connected via IPC API
-- **Orange**: Using kicad-cli fallback (cross-probe unavailable)
-- **Red**: Disconnected
+- **Green**: Connected to schematic, IPC available (back-annotation ready)
+- **Green**: Connected to schematic, IPC unavailable (simulation only)
+- **Gray**: Not connected
 
 ### Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
-| "kicad-python is required" | Install kicad-python from Git: `pip install git+https://gitlab.com/kicad/code/kicad-python.git` |
-| "get_schematic() missing" | Your kicad-python is too old. Reinstall from Git. |
-| "IPC API connection failed" | Check KiCad is running. Preferences → Plugins → Enable IPC API Server. Restart KiCad. |
+| "kicad-python is required" | Install kicad-python (see above). |
+| "Annotation skipped — IPC API not available" | Check KiCad is running with IPC API enabled. Preferences → Plugins → Enable IPC API Server. Restart KiCad. |
+| "cannot import name 'SchematicText'" | Your kicad-python is too old (0.7.1 from PyPI). Upgrade from Git or build from source. |
+| "IPC API connection failed" | Check `/tmp/kicad/api.sock` exists. Verify KiCad is running. |
 | "Connection refused" | KiCad may not have the API server enabled. See above. |
-| Cross-probe doesn't highlight | The action names used by `run_action` may differ in your KiCad version. Report the issue. |
-
-### Falling Back to kicad-cli
-
-If the IPC API is unavailable, pqwave automatically falls back to
-`kicad-cli` for netlist export.  However, **cross-probe is only available
-via the IPC API**.  If you need cross-probe, you must enable the IPC API.
 
 ### Workflow (IPC API, Recommended)
 
@@ -287,16 +283,16 @@ A simple circuit with a common but silently-breaking KiCad export bug. The pipel
 
 #### Step 1: Set Up and Simulate
 
-1. In pqwave: **File > KiCad Bridge > Watch Schematic**.
-2. Select **`docs/kicad/examples/bridge.kicad_sch`**.
-3. The bridge status bar shows: **Watching 1 schematic**.
-4. In KiCad: open the schematic, verify it looks correct, press **Ctrl+S** to save.
-5. pqwave auto-detects the save, runs the pipeline, and loads results.
+1. In pqwave: **File > KiCad Bridge > Connect**.
+2. Select **`docs/kicad/examples/bridge/bridge.kicad_sch`**.
+3. The bridge status bar shows: **KiCad: bridge.kicad_sch** (green).
+4. Click **Simulate Now**.
+5. The pipeline runs and loads results.
 
 **Or via API:**
 ```python
-api.kicad_watch("docs/kicad/examples/bridge.kicad_sch")
-api.kicad_simulate("docs/kicad/examples/bridge.kicad_sch")
+api.kicad_connect("docs/kicad/examples/bridge/bridge.kicad_sch")
+api.kicad_simulate()
 ```
 
 **Expected output:** The console shows four diode pin fixes:
@@ -344,14 +340,14 @@ A realistic semiconductor characterization case: sweep the DC bias across a nonl
 
 #### Step 1: Open and Inspect the Netlist Fixes
 
-1. In pqwave: **File > KiCad Bridge > Watch Schematic**.
-2. Select **`docs/kicad/examples/cdg.kicad_sch`**.
+1. In pqwave: **File > KiCad Bridge > Connect**.
+2. Select **`docs/kicad/examples/cdg.kicad_sch`** (if this example exists).
 3. Click **Simulate Now**.
 
 **Or via API:**
 ```python
-api.kicad_watch("docs/kicad/examples/cdg.kicad_sch")
-result = api.kicad_simulate("docs/kicad/examples/cdg.kicad_sch")
+api.kicad_connect("docs/kicad/examples/cdg.kicad_sch")
+result = api.kicad_simulate()
 
 # See everything the post-processor fixed
 for fix in api.kicad_fix_info(result["netlist"]):
@@ -410,7 +406,7 @@ Verify that the BJT pin reordering fix is working — and see what happens witho
 
 #### Step 1: Run and Verify the Simulation
 
-1. In pqwave: watch and simulate `bjt_amplifier.kicad_sch`.
+1. In pqwave: connect and simulate `bjt_amplifier.kicad_sch`.
 2. The chat panel confirms BJT pin fixes:
 ```
 [kicad] Fixing Q1 (2N3904): reordered pins to stage1 Net-_Q1-B_ Net-_Q1-E_ (was Net-_Q1-E_ Net-_Q1-B_ stage1)
@@ -421,8 +417,8 @@ Verify that the BJT pin reordering fix is working — and see what happens witho
 
 **Or via API:**
 ```python
-api.kicad_watch("docs/kicad/examples/bjt_amplifier.kicad_sch")
-api.kicad_simulate("docs/kicad/examples/bjt_amplifier.kicad_sch")
+api.kicad_connect("docs/kicad/examples/bjt_amplifier.kicad_sch")
+api.kicad_simulate()
 api.select_panel(1)
 api.add_trace("v(in)")
 api.add_trace("v(stage1)")
@@ -448,7 +444,7 @@ api.add_trace("v(out)")
 1. Temporarily disable the BJT pin fix to see what happens without it:
 ```python
 api.kicad_config("fix_bjt_pins", False)
-api.kicad_simulate("docs/kicad/examples/bjt_amplifier.kicad_sch")
+api.kicad_simulate()
 ```
 2. The output waveform collapses — wrong pin order swaps collector and emitter, destroying the amplifier's gain.
 3. Re-enable:
@@ -462,31 +458,21 @@ api.kicad_config("fix_bjt_pins", True)
 
 ### Standalone Scripting Example
 
-A complete Python script that integrates KiCad schematic editing with pqwave simulation and analysis:
+A complete Python script that integrates KiCad schematic simulation with pqwave analysis:
 
 ```python
 import pqwave.session as session
 
 api = session.SessionAPI()
 
-# Configure the KiCad bridge
-api.kicad_config("watch_paths", ["/home/user/projects/amplifier/amplifier.kicad_sch"])
-api.kicad_config("auto_simulate", True)
-api.kicad_config("simulator", "ngspice")
-api.kicad_config("fix_slashes", True)
-api.kicad_config("fix_diode_pins", True)
-api.kicad_config("fix_bjt_pins", True)
+# Connect to a schematic and run simulation
+api.kicad_connect("/home/user/projects/amplifier/amplifier.kicad_sch")
+result = api.kicad_simulate()
 
-# Watch and run initial simulation
-api.kicad_watch("/home/user/projects/amplifier/amplifier.kicad_sch")
-result = api.kicad_simulate("/home/user/projects/amplifier/amplifier.kicad_sch")
-
-print(f"Simulation loaded: {result['signal_count']} signals")
-
-# Inspect what the post-processor fixed
-fixes = api.kicad_fix_info(result["netlist"])
-for fix in fixes:
-    print(f"  {fix['type']}: {fix['detail']}")
+print(f"Simulation complete, raw file: {result['raw_file']}")
+print(f"Fixes applied: {len(result.get('fix_info', []))}")
+for info in result.get("fix_info", []):
+    print(f"  {info}")
 
 # Plot key signals
 api.select_panel(1)
@@ -497,9 +483,11 @@ api.add_trace("v(in)")
 gain = api.eval_expr("max(v(out)) / max(v(in))", panel=1)
 print(f"Voltage gain: {gain:.2f} ({20 * gain.log10():.1f} dB)")
 
-# The file watcher keeps running in background.
-# Save the schematic in KiCad to trigger automatic re-simulation.
-# Press Ctrl+C in the REPL to stop watching.
+# Back-annotate DC operating point values (requires IPC API)
+api.kicad_annotate_dc()
+
+# Edit schematic in KiCad, re-run simulation when ready
+api.kicad_simulate()
 ```
 
 **Expected output:**
@@ -525,12 +513,12 @@ api.kicad_config("fix_diode_pins", False)
 api.kicad_config("fix_bjt_pins", False)
 ```
 
-### Cross-probe doesn't highlight in KiCad
+### Annotation skipped — IPC API not available
 
 1. Verify KiCad 10+ is running with IPC API enabled: Preferences → Plugins → Enable IPC API Server. Restart KiCad.
 2. Verify `kicad-python` is installed: `python -c "import kipy; print('kicad-python OK')"`.
-3. Check the KiCad control bar — it should show green "Connected via IPC API". If orange, the IPC API is unavailable and cross-probe is disabled.
-4. See [IPC API Setup](#ipc-api-setup-kicad-10) for detailed troubleshooting steps.
+3. If you see `cannot import name 'SchematicText'`, your kicad-python is too old (0.7.1). Upgrade from Git or build from source.
+4. Check the KiCad control bar — it shows "IPC ✓" when the API is available.
 
 ### "kicad-cli not found"
 

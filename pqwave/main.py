@@ -629,7 +629,7 @@ def main():
     # Bridge auto-connect arguments (used by editor Wave menus)
     parser.add_argument(
         "--connect",
-        choices=["xschem", "lepton", "qucs"],
+        choices=["xschem", "lepton", "qucs", "kicad"],
         default=None,
         help="Auto-connect to bridge on startup (used by editor Wave menu)"
     )

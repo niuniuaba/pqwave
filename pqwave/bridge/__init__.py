@@ -5,6 +5,8 @@ from pqwave.bridge.netlist_postprocessor import NetlistPostProcessor
 from pqwave.bridge.xschem.bridge import XschemBridge
 from pqwave.bridge.qucs_s.bridge import QucsSBridge
 from pqwave.bridge.qucs_s.control_bar import QucsSControlBar
+from pqwave.bridge.kicad.bridge import KiCadBridge
+from pqwave.bridge.kicad.control_bar import KiCadControlBar
 
 __all__ = [
     "SchematicBridge",
@@ -13,4 +15,6 @@ __all__ = [
     "XschemBridge",
     "QucsSBridge",
     "QucsSControlBar",
+    "KiCadBridge",
+    "KiCadControlBar",
 ]

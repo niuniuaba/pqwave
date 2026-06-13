@@ -240,6 +240,45 @@ class MenuManager:
         qucs_menu.addAction(qucs_disconn_action)
 
         file_menu.addMenu(qucs_menu)
+
+        # KiCad Bridge submenu
+        kicad_menu = QMenu("KiCad Bridge", self.parent)
+
+        kicad_connect_action = QAction("Connect...", self.parent)
+        kicad_connect_action.triggered.connect(
+            self.callbacks.get("kicad_connect", lambda: None)
+        )
+        kicad_menu.addAction(kicad_connect_action)
+
+        kicad_sim_action = QAction("Simulate Now", self.parent)
+        kicad_sim_action.triggered.connect(
+            self.callbacks.get("kicad_simulate", lambda: None)
+        )
+        kicad_menu.addAction(kicad_sim_action)
+
+        kicad_menu.addSeparator()
+
+        kicad_annotate_action = QAction("Annotate DC", self.parent)
+        kicad_annotate_action.triggered.connect(
+            self.callbacks.get("kicad_annotate_dc", lambda: None)
+        )
+        kicad_menu.addAction(kicad_annotate_action)
+
+        kicad_clear_action = QAction("Clear Annotations", self.parent)
+        kicad_clear_action.triggered.connect(
+            self.callbacks.get("kicad_clear_annotations", lambda: None)
+        )
+        kicad_menu.addAction(kicad_clear_action)
+
+        kicad_menu.addSeparator()
+
+        kicad_disconn_action = QAction("Disconnect", self.parent)
+        kicad_disconn_action.triggered.connect(
+            self.callbacks.get("kicad_disconnect", lambda: None)
+        )
+        kicad_menu.addAction(kicad_disconn_action)
+
+        file_menu.addMenu(kicad_menu)
         file_menu.addSeparator()
 
         open_file_action = QAction("Open File...", self.parent)
@@ -618,6 +657,12 @@ class MenuManager:
             self.callbacks.get("show_qucs_guide", lambda: None)
         )
         help_menu.addAction(qucs_guide_action)
+
+        kicad_guide_action = QAction("KiCad User Guide", self.parent)
+        kicad_guide_action.triggered.connect(
+            self.callbacks.get("show_kicad_guide", lambda: None)
+        )
+        help_menu.addAction(kicad_guide_action)
 
         self.menubar.addMenu(help_menu)
 

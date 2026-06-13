@@ -705,6 +705,136 @@ class SessionAPI:
         state._xschem_config[key] = value
         return {"status": "ok", key: value}
 
+    def _get_kicad_bridge(self):
+        """Get or create a cached KiCadBridge for API calls."""
+        if not hasattr(self, "_kicad_bridge") or self._kicad_bridge is None:
+            from pqwave.bridge.kicad.bridge import KiCadBridge
+            self._kicad_bridge = KiCadBridge()
+        return self._kicad_bridge
+
+    def kicad_connect(self, path: str) -> dict:
+        """Connect to a KiCad schematic file for simulation.
+
+        The schematic must exist and have a .kicad_sch extension.
+        kicad-cli must be available.
+        """
+        import os
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Schematic not found: {path!r}")
+        if not path.lower().endswith(".kicad_sch"):
+            raise ValueError(
+                f"Expected a .kicad_sch file, got: "
+                f"{os.path.splitext(path)[1]!r}"
+            )
+        if self._on_mutation:
+            self._on_mutation("kicad_connect", path=path)
+        bridge = self._get_kicad_bridge()
+        bridge.connect(path)
+        self._kicad_connected_path = path
+        return {"status": "ok", "path": os.path.abspath(path)}
+
+    def kicad_simulate(self, sch_path: str | None = None) -> dict:
+        """Run KiCad simulation pipeline: export → fix → ngspice → load.
+
+        If no path given, uses the last connected path.
+        """
+        import os
+        path = sch_path or getattr(self, "_kicad_connected_path", None)
+        if not path:
+            raise ValueError("No schematic connected. Use kicad_connect first.")
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Schematic not found: {path!r}")
+        if self._on_mutation:
+            self._on_mutation("kicad_simulate", path=path)
+        bridge = self._get_kicad_bridge()
+        result = bridge.simulate(path)
+        if result.get("raw_file"):
+            self.load(result["raw_file"])
+        return result
+
+    def kicad_disconnect(self) -> dict:
+        """Disconnect from the KiCad schematic."""
+        self._kicad_connected_path = None
+        if hasattr(self, "_kicad_bridge") and self._kicad_bridge is not None:
+            self._kicad_bridge.disconnect()
+            self._kicad_bridge = None
+        if self._on_mutation:
+            self._on_mutation("kicad_disconnect")
+        return {"status": "ok"}
+
+    def kicad_annotate_dc(self, voltages: dict[str, float] | None = None) -> dict:
+        """Stamp DC operating-point voltages onto the schematic.
+
+        Requires KiCad 10+ with IPC API enabled and kicad-python installed.
+        If no voltages dict is given, auto-collects from active panel traces.
+        """
+        if self._on_mutation:
+            self._on_mutation("kicad_annotate_dc", voltages=voltages)
+        bridge = self._get_kicad_bridge()
+        path = getattr(self, "_kicad_connected_path", None)
+        if path:
+            bridge.connect(path)
+        if voltages is None:
+            voltages = self._collect_trace_dc_values()
+        ok = bridge.annotate_dc(voltages) if voltages else False
+        return {
+            "status": "ok" if ok else "unavailable",
+            "count": len(voltages) if voltages else 0,
+            "message": "IPC API not available — install kicad-python and enable in KiCad"
+            if not ok else f"Annotated {len(voltages)} values",
+        }
+
+    def kicad_clear_annotations(self) -> dict:
+        """Remove all back-annotation text from the schematic."""
+        if self._on_mutation:
+            self._on_mutation("kicad_clear_annotations")
+        bridge = self._get_kicad_bridge()
+        path = getattr(self, "_kicad_connected_path", None)
+        if path:
+            bridge.connect(path)
+        ok = bridge.clear_dc_annotations()
+        return {
+            "status": "ok" if ok else "unavailable",
+            "message": "Cleared annotations" if ok else
+            "IPC API not available — install kicad-python and enable in KiCad",
+        }
+
+    def kicad_config(self, key: str, value=None) -> dict:
+        """Get or set KiCad bridge configuration.
+
+        Supported keys:
+          kicad_cli      — path to kicad-cli binary
+        """
+        state = self._state
+        if value is None:
+            return {"status": "ok", key:
+                    getattr(state, "_kicad_config", {}).get(key, "")}
+        cfg = dict(getattr(state, "_kicad_config", {}))
+        cfg[key] = value
+        state._kicad_config = cfg
+        return {"status": "ok", key: value}
+
+    def _collect_trace_dc_values(self) -> dict[str, float]:
+        """Extract mean voltages from v(node) variables in the last dataset.
+
+        TODO: duplicates MainWindow._extract_dc_voltages — extract shared helper.
+        """
+        import re
+        voltages = {}
+        state = self._state
+        if not state.datasets:
+            return {}
+        ds = state.datasets[-1]
+        for var in ds.variables:
+            m = re.match(r'^v\((.+)\)$', var.name, re.IGNORECASE)
+            if m and var.data is not None and len(var.data) > 0:
+                try:
+                    import numpy as np
+                    voltages[m.group(1)] = float(np.mean(var.data))
+                except (TypeError, ValueError):
+                    pass
+        return voltages
+
     def load(self, path: str) -> dict:
         """Load a raw, vcd, or json project file into the session."""
         import os
