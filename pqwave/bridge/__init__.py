@@ -7,6 +7,7 @@ from pqwave.bridge.qucs_s.bridge import QucsSBridge
 from pqwave.bridge.qucs_s.control_bar import QucsSControlBar
 from pqwave.bridge.kicad.bridge import KiCadBridge
 from pqwave.bridge.kicad.control_bar import KiCadControlBar
+from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
 
 __all__ = [
     "SchematicBridge",
@@ -17,4 +18,5 @@ __all__ = [
     "QucsSControlBar",
     "KiCadBridge",
     "KiCadControlBar",
+    "QspiceBridgeRunner",
 ]
