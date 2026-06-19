@@ -78,9 +78,9 @@ def resolve_qspice() -> str:
 
     # 5. All lookups exhausted
     raise FileNotFoundError(
-        f"Could not locate QSPICE64.exe / QSPICE.exe. "
-        f"Set the PQWAVE_QSPICE environment variable to the correct path, "
-        f"or configure it in Tool Paths in the pqwave settings dialog."
+        "Could not locate QSPICE64.exe / QSPICE.exe. "
+        "Set the PQWAVE_QSPICE environment variable to the correct path, "
+        "or configure it in Tool Paths in the pqwave settings dialog."
     )
 
 
@@ -161,13 +161,19 @@ class QspiceBridgeRunner:
                 )
             cmd = [wine, qspice, netlist_name]
 
-        proc = subprocess.run(
-            cmd,
-            cwd=netlist_dir,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=netlist_dir,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            sys.stderr.write(
+                "qspice-bridge: QSPICE simulation timed out after 300 seconds\n"
+            )
+            return 1
 
         # 4. Handle non-zero exit
         if proc.returncode != 0:
