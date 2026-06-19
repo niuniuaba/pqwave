@@ -329,6 +329,7 @@ class ApplicationState:
             "ghwdump": "",
             "lepton_netlist": "",
             "ngspice": "",
+            "qspice": "",
             "xschem": "",
         }
 
