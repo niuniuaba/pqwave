@@ -38,7 +38,50 @@ def resolve_qspice() -> str:
 
     This function MUST NOT import Qt.
     """
-    raise NotImplementedError("resolve_qspice not yet implemented")
+
+    # 1. PQWAVE_QSPICE env var
+    env_path = os.environ.get("PQWAVE_QSPICE")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    # 2. ApplicationState.tool_paths
+    # Lazy import to avoid pulling in Qt at module level.
+    from pqwave.models.state import ApplicationState  # noqa: PLC0415
+
+    state = ApplicationState()
+    state_path = state.tool_paths.get("qspice")
+    if state_path and os.path.isfile(state_path):
+        return state_path
+
+    # 3. Wine prefix search
+    qspice64_name = "QSPICE64.exe"
+    qspice_name = "QSPICE.exe"
+    for prefix in _wine_prefixes():
+        for exe_name in (qspice64_name, qspice_name):
+            candidate = os.path.join(
+                prefix,
+                "drive_c",
+                "Program Files",
+                "QSPICE",
+                exe_name,
+            )
+            if os.path.isfile(candidate):
+                return candidate
+
+    # 4. shutil.which search
+    found = shutil.which(qspice64_name)
+    if found:
+        return found
+    found = shutil.which(qspice_name)
+    if found:
+        return found
+
+    # 5. All lookups exhausted
+    raise FileNotFoundError(
+        f"Could not locate QSPICE64.exe / QSPICE.exe. "
+        f"Set the PQWAVE_QSPICE environment variable to the correct path, "
+        f"or configure it in Tool Paths in the pqwave settings dialog."
+    )
 
 
 class QspiceBridgeRunner:
