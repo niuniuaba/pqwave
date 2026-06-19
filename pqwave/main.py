@@ -420,6 +420,26 @@ def _run_qucs_bridge() -> int:
     return runner.run(workdir, netlist_name)
 
 
+def _run_qspice_bridge() -> int:
+    """Handle --qspice-bridge: run QSPICE simulation from netlist.
+
+    Invoked as: pqwave --qspice-bridge <netlist_file>
+
+    The netlist file is the first argument after --qspice-bridge.
+    No suffix assumption — any filename is accepted.
+    """
+    from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+    args = sys.argv[sys.argv.index('--qspice-bridge') + 1:]
+    if not args:
+        print("Usage: pqwave --qspice-bridge <netlist_file>", file=sys.stderr)
+        return 1
+
+    netlist_path = args[0]
+    runner = QspiceBridgeRunner()
+    return runner.run(netlist_path)
+
+
 def _run_setup_qucs_integration() -> int:
     """Handle --setup-qucs-integration: configure Qucs-S to use pqwave."""
     import shutil as _shutil
@@ -502,6 +522,10 @@ def _run_setup_qucs_integration() -> int:
 
 def main():
     """Main entry point for pqwave."""
+    # Handle --qspice-bridge before argparse (run QSPICE simulation)
+    if '--qspice-bridge' in sys.argv:
+        return _run_qspice_bridge()
+
     # Handle --qucs-bridge before argparse (post-simulation hook for Qucs-S)
     if '--qucs-bridge' in sys.argv:
         return _run_qucs_bridge()
