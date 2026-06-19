@@ -398,6 +398,21 @@ class SettingsWidget(QWidget):
         ngspice_reset.clicked.connect(lambda: self._reset_tool_path("ngspice"))
         tool_paths_layout.addWidget(ngspice_reset, 4, 2)
 
+        # qspice
+        tool_paths_layout.addWidget(QLabel("qspice:"), 5, 0)
+        self._qspice_edit = QLineEdit()
+        self._qspice_edit.setPlaceholderText(
+            "Auto-detect (set path to QSPICE64.exe under Wine)"
+        )
+        self._qspice_edit.setMinimumWidth(200)
+        self._qspice_edit.textChanged.connect(
+            lambda text: self._on_tool_path_changed("qspice"))
+        tool_paths_layout.addWidget(self._qspice_edit, 5, 1)
+
+        qspice_reset = QPushButton("Reset")
+        qspice_reset.clicked.connect(lambda: self._reset_tool_path("qspice"))
+        tool_paths_layout.addWidget(qspice_reset, 5, 2)
+
         tool_paths_group.setLayout(tool_paths_layout)
         content_layout.addWidget(tool_paths_group)
 
@@ -582,6 +597,9 @@ class SettingsWidget(QWidget):
         self._ngspice_edit.blockSignals(True)
         self._ngspice_edit.setText(self.state.tool_paths.get("ngspice", ""))
         self._ngspice_edit.blockSignals(False)
+        self._qspice_edit.blockSignals(True)
+        self._qspice_edit.setText(self.state.tool_paths.get("qspice", ""))
+        self._qspice_edit.blockSignals(False)
 
         # Load FFT settings
         fft = self.state.fft_config
@@ -905,6 +923,7 @@ class SettingsWidget(QWidget):
             "ghwdump": self._ghwdump_edit,
             "lepton_netlist": self._lepton_netlist_edit,
             "ngspice": self._ngspice_edit,
+            "qspice": self._qspice_edit,
         }
         if key in edit_map:
             self.state.tool_paths[key] = edit_map[key].text().strip()
@@ -917,6 +936,7 @@ class SettingsWidget(QWidget):
             "ghwdump": self._ghwdump_edit,
             "lepton_netlist": self._lepton_netlist_edit,
             "ngspice": self._ngspice_edit,
+            "qspice": self._qspice_edit,
         }
         if key in edit_map:
             edit = edit_map[key]
