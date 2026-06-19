@@ -102,10 +102,89 @@ class QspiceBridgeRunner:
             auto_open = False
         self._auto_open = auto_open
 
+    @staticmethod
+    def _launch_pqwave(qraw_path: str) -> int:
+        """Launch the pqwave GUI with the given .qraw file (headless)."""
+        cmd = [sys.executable, "-m", "pqwave.main", qraw_path]
+        try:
+            subprocess.Popen(
+                cmd,
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            sys.stderr.write(
+                "qspice-bridge: pqwave not found on PATH; "
+                ".qraw was saved but viewer could not be launched\n"
+            )
+        except OSError as exc:
+            sys.stderr.write(
+                f"qspice-bridge: failed to launch pqwave: {exc}\n"
+            )
+        return 0
+
     def run(self, netlist_path: str) -> int:
         """Run the full pipeline.
+
+        1. Verify netlist exists.
+        2. Resolve QSPICE path.
+        3. Build and execute the simulation command.
+        4. Verify .qraw output was created.
+        5. Optionally launch pqwave GUI.
 
         Returns:
             Exit code: 0 on success.
         """
-        raise NotImplementedError("run not yet implemented")
+        # 1. Verify netlist exists
+        abs_netlist = os.path.abspath(netlist_path)
+        if not os.path.isfile(abs_netlist):
+            raise FileNotFoundError(
+                f"Netlist not found: {abs_netlist}"
+            )
+
+        # 2. Resolve QSPICE path
+        qspice = self._qspice_path or resolve_qspice()
+
+        # 3. Build command
+        netlist_dir = os.path.dirname(os.path.abspath(netlist_path))
+        netlist_name = os.path.basename(netlist_path)
+
+        if sys.platform == "win32":
+            cmd = [qspice, netlist_name]
+        else:
+            wine = shutil.which("wine")
+            if wine is None:
+                raise FileNotFoundError(
+                    "wine not found on PATH; QSPICE requires Wine on this platform"
+                )
+            cmd = [wine, qspice, netlist_name]
+
+        proc = subprocess.run(
+            cmd,
+            cwd=netlist_dir,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+        # 4. Handle non-zero exit
+        if proc.returncode != 0:
+            sys.stderr.write(proc.stderr)
+            sys.stderr.write(proc.stdout)
+            return proc.returncode
+
+        # 5. Verify .qraw output
+        qraw_path = os.path.splitext(abs_netlist)[0] + ".qraw"
+        if not os.path.isfile(qraw_path):
+            sys.stderr.write(
+                f"qspice-bridge: expected .qraw output not found: {qraw_path}\n"
+            )
+            return 1
+
+        # 6. Optionally launch GUI
+        if self._auto_open:
+            self._launch_pqwave(qraw_path)
+
+        return 0

@@ -1,6 +1,7 @@
 """Tests for the QSPICE bridge wrapper."""
 
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -175,3 +176,139 @@ class TestResolveQspice:
             msg = str(exc_info.value)
             assert "QSPICE64.exe" in msg
             assert "PQWAVE_QSPICE" in msg
+
+
+class TestQspiceBridgeRunner:
+    """Tests for QspiceBridgeRunner.run()."""
+
+    # ------------------------------------------------------------------ #
+    # 1. Netlist not found raises FileNotFoundError                      #
+    # ------------------------------------------------------------------ #
+    def test_raises_if_netlist_not_found(self):
+        """Calling run() with a nonexistent path must raise."""
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+        runner = QspiceBridgeRunner()
+        with pytest.raises(FileNotFoundError):
+            runner.run("/nonexistent/netlist.cir")
+
+    # ------------------------------------------------------------------ #
+    # 2. auto_open defaults to True                                      #
+    # ------------------------------------------------------------------ #
+    def test_auto_open_defaults_true(self):
+        """Default construction yields _auto_open = True."""
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+        runner = QspiceBridgeRunner()
+        assert runner._auto_open is True
+
+    # ------------------------------------------------------------------ #
+    # 3. PQWAVE_QSPICE_AUTO_OPEN=0 suppresses auto_open                  #
+    # ------------------------------------------------------------------ #
+    def test_auto_open_env_var_suppresses(self, monkeypatch):
+        """Env var PQWAVE_QSPICE_AUTO_OPEN=0 must set _auto_open = False."""
+        monkeypatch.setenv("PQWAVE_QSPICE_AUTO_OPEN", "0")
+
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+        runner = QspiceBridgeRunner()
+        assert runner._auto_open is False
+
+    # ------------------------------------------------------------------ #
+    # 4. Full pipeline: run simulator, find .qraw, launch GUI            #
+    # ------------------------------------------------------------------ #
+    def test_runs_simulator_and_finds_qraw(
+        self, monkeypatch, tmp_path
+    ):
+        """Successful simulation produces .qraw and launches GUI."""
+        netlist = tmp_path / "test.cir"
+        netlist.write_text("")
+        qraw_path = tmp_path / "test.qraw"
+
+        monkeypatch.delenv("PQWAVE_QSPICE_AUTO_OPEN", raising=False)
+
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+        with (
+            patch(
+                "pqwave.bridge.qspice.wrapper.resolve_qspice",
+                return_value="/fake/QSPICE64.exe",
+            ),
+            patch(
+                "pqwave.bridge.qspice.wrapper.QspiceBridgeRunner._launch_pqwave",
+                return_value=0,
+            ) as mock_launch,
+            patch(
+                "pqwave.bridge.qspice.wrapper.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            # Create the .qraw file before run() checks it
+            qraw_path.write_text("")
+            runner = QspiceBridgeRunner()
+            result = runner.run(str(netlist))
+
+        assert result == 0
+        mock_launch.assert_called_once()
+
+    # ------------------------------------------------------------------ #
+    # 5. Non-zero exit: no GUI launch, returncode propagated             #
+    # ------------------------------------------------------------------ #
+    def test_nonzero_exit_no_gui_launch(self, monkeypatch, tmp_path):
+        """When QSPICE exits with non-zero, _launch_pqwave is NOT called."""
+        netlist = tmp_path / "test.cir"
+        netlist.write_text("")
+
+        monkeypatch.delenv("PQWAVE_QSPICE_AUTO_OPEN", raising=False)
+
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+        with (
+            patch(
+                "pqwave.bridge.qspice.wrapper.resolve_qspice",
+                return_value="/fake/QSPICE64.exe",
+            ),
+            patch(
+                "pqwave.bridge.qspice.wrapper.QspiceBridgeRunner._launch_pqwave",
+                return_value=0,
+            ) as mock_launch,
+            patch(
+                "pqwave.bridge.qspice.wrapper.subprocess.run",
+                return_value=MagicMock(returncode=3, stdout="", stderr=""),
+            ),
+        ):
+            runner = QspiceBridgeRunner()
+            result = runner.run(str(netlist))
+
+        assert result == 3
+        mock_launch.assert_not_called()
+
+    # ------------------------------------------------------------------ #
+    # 6. Wine not found on Linux raises FileNotFoundError                #
+    # ------------------------------------------------------------------ #
+    def test_wine_not_found_on_linux(self, monkeypatch, tmp_path):
+        """On Linux, if wine is not on PATH, run() must raise."""
+        netlist = tmp_path / "test.cir"
+        netlist.write_text("")
+
+        fake_qspice = tmp_path / "QSPICE64.exe"
+        fake_qspice.write_text("")
+        fake_qspice.chmod(0o755)
+
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.delenv("PQWAVE_QSPICE_AUTO_OPEN", raising=False)
+
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+        with (
+            patch(
+                "pqwave.bridge.qspice.wrapper.resolve_qspice",
+                return_value=str(fake_qspice),
+            ),
+            patch("shutil.which", return_value=None),
+        ):
+            runner = QspiceBridgeRunner()
+            with pytest.raises(FileNotFoundError) as exc_info:
+                runner.run(str(netlist))
+
+        assert "wine" in str(exc_info.value).lower()
