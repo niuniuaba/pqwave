@@ -479,6 +479,83 @@ class RawFile:
         except Exception:
             return []
 
+    def _try_load_qux(self, correct_variables: list, is_ac_or_complex: bool, raw_bytes: bytes):
+        """Try loading .qraw data via QSPICE's QUX.exe -Export.
+
+        Returns a dataset dict on success, or None if QUX is unavailable
+        or extraction fails.  Never raises — failures always fall back to
+        spicelib.
+        """
+        # Only try QUX for QSPICE-generated files (header contains "QSPICE"
+        # or file has .qraw extension).  QUX hangs on non-QSPICE formats.
+        is_qspice_file = (
+            self.filename.lower().endswith(".qraw")
+            or b"QSPICE" in raw_bytes
+        )
+        if not is_qspice_file:
+            return None
+
+        try:
+            from pqwave.bridge.qspice.qux_reader import load_qraw_via_qux
+        except ImportError:
+            return None
+
+        var_names = [v["name"] for v in correct_variables]
+        try:
+            result = load_qraw_via_qux(self.filename, var_names)
+        except Exception:
+            logger.debug("QUX load failed, falling back to spicelib", exc_info=True)
+            return None
+        if not var_names:
+            return None
+
+        result = load_qraw_via_qux(self.filename, var_names)
+        if result is None:
+            return None
+
+        data, meta = result
+        n_points, n_vars = data.shape
+
+        # Build variables list
+        variables = []
+        for i, cv in enumerate(correct_variables):
+            var_type = cv.get("type", "unknown")
+            if meta.get("is_complex") and not cv["name"].lower().startswith(
+                ("freq", "frequency", "hz", "time")
+            ):
+                var_type = (
+                    "voltage"
+                    if cv["name"].lower().startswith("v(")
+                    else "current"
+                    if cv["name"].lower().startswith("i(")
+                    else "unknown"
+                )
+            variables.append({
+                "index": i,
+                "name": cv["name"],
+                "type": var_type,
+            })
+
+        dataset = {
+            "title": "",
+            "date": "",
+            "plotname": meta.get("plotname", ""),
+            "flags": meta.get("flags", "real"),
+            "variables": variables,
+            "data": data,
+            "_is_ac_or_complex": meta.get("is_complex", is_ac_or_complex),
+        }
+
+        # Store step metadata from QUX
+        self._step_count = meta.get("step_count", self._step_count)
+
+        self.detected_format = "qspice"
+        logger.info(
+            "Loaded %s via QUX.exe: %d points, %d variables",
+            os.path.basename(self.filename), n_points, n_vars,
+        )
+        return dataset
+
     def _read_header_bytes(self) -> bytes:
         """Read only the header portion of the raw file (up to Binary:\n).
 
@@ -532,10 +609,7 @@ class RawFile:
         return bytes(buf)
 
     def parse(self):
-        """Parse the raw file using spicelib"""
-        if not SPICELIB_AVAILABLE:
-            raise ImportError("spicelib is not available. Install with: pip install spicelib")
-
+        """Parse the raw file — QUX.exe first, spicelib as fallback."""
         # Clear data cache from any previous parse
         self._data_cache = {}
 
@@ -545,6 +619,22 @@ class RawFile:
 
         # Parse variable names directly from bytes (correct UTF-8 decoding)
         correct_variables, is_ac_or_complex = _parse_header_variables(raw_bytes)
+
+        # Try QUX-based loading (official QSPICE data export — no encoding
+        # issues).  Falls back to spicelib transparently if QUX is absent.
+        qux_dataset = self._try_load_qux(correct_variables, is_ac_or_complex, raw_bytes)
+        if qux_dataset is not None:
+            self.datasets.append(qux_dataset)
+            self._extract_step_info()
+            return
+
+        # QUX unavailable or failed — fall back to spicelib
+        if not SPICELIB_AVAILABLE:
+            raise ImportError(
+                "Cannot read this file: spicelib is not installed and "
+                "QSPICE/QUX.exe is not available. "
+                "Install spicelib with: pip install spicelib"
+            )
 
         # Preprocess file for encoding (fix QSPICE special characters)
         # This is needed for spicelib to read the binary data
