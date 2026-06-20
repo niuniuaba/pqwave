@@ -84,6 +84,33 @@ def resolve_qspice() -> str:
     )
 
 
+def resolve_qux() -> str | None:
+    """Find QUX.exe alongside QSPICE64.exe.
+
+    QUX is QSPICE's data export tool, shipped in the same directory
+    as QSPICE64.exe.  Returns the path to QUX.exe, or None if QSPICE
+    is not installed.
+
+    This function MUST NOT import Qt.
+    """
+    try:
+        qspice_path = resolve_qspice()
+    except FileNotFoundError:
+        return None
+
+    qspice_dir = os.path.dirname(qspice_path)
+    for name in ("QUX.exe", "qux.exe", "QUX", "qux"):
+        candidate = os.path.join(qspice_dir, name)
+        if os.path.isfile(candidate):
+            return candidate
+
+    found = shutil.which("QUX.exe") or shutil.which("qux")
+    if found:
+        return found
+
+    return None
+
+
 class QspiceBridgeRunner:
     """Orchestrator for the QSPICE post-simulation pipeline.
 
