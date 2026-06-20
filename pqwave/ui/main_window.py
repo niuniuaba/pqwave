@@ -1399,6 +1399,61 @@ class MainWindow(QMainWindow):
         self._xschem_cp_net = net_name
         self._xschem_cp_timer.start()
 
+    # ---- QSPICE Bridge handlers ----
+
+    def _on_qspice_run_simulation(self):
+        """File > QSPICE Bridge > Run Simulation — run QSPICE from a netlist."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select SPICE Netlist",
+            os.path.expanduser("~"),
+            "Netlist Files (*.cir *.sp *.net);;All Files (*)"
+        )
+        if not path:
+            return
+
+        self.chat_panel.append_output(
+            f"[qspice] Running simulation: {path}\n"
+        )
+
+        import threading
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+
+        def _run():
+            runner = QspiceBridgeRunner(auto_open=False)
+            exit_code = runner.run(path)
+            if exit_code == 0:
+                qraw_path = os.path.splitext(os.path.abspath(path))[0] + ".qraw"
+                from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+                QMetaObject.invokeMethod(
+                    self, "_on_qspice_sim_done",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, qraw_path),
+                )
+            else:
+                QMetaObject.invokeMethod(
+                    self, "_on_qspice_sim_error",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(int, exit_code),
+                )
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_qspice_sim_done(self, qraw_path: str):
+        """Called from background thread when QSPICE simulation succeeds."""
+        self.chat_panel.append_output(
+            f"[qspice] Simulation complete: {qraw_path}\n"
+        )
+        self._load_raw_file(qraw_path)
+
+    def _on_qspice_sim_error(self, exit_code: int):
+        """Called from background thread when QSPICE simulation fails."""
+        self.chat_panel.append_output(
+            f"[qspice] Simulation failed (exit code {exit_code}). "
+            f"Check stderr for details.\n"
+        )
+
     # ---- Qucs-S Bridge handlers ----
 
     def _on_qucs_connect(self):
@@ -2193,6 +2248,7 @@ class MainWindow(QMainWindow):
             'kicad_annotate_dc': self._on_kicad_annotate_dc,
             'kicad_clear_annotations': self._on_kicad_clear_annotations,
             'show_kicad_guide': self._show_kicad_guide,
+            'qspice_run_simulation': self._on_qspice_run_simulation,
         }
 
     # --- Delegate properties (route to active panel) ---

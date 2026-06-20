@@ -279,6 +279,17 @@ class MenuManager:
         kicad_menu.addAction(kicad_disconn_action)
 
         file_menu.addMenu(kicad_menu)
+
+        # QSPICE Bridge submenu
+        qspice_menu = QMenu("QSPICE Bridge", self.parent)
+
+        qspice_run_action = QAction("Run Simulation...", self.parent)
+        qspice_run_action.triggered.connect(
+            self.callbacks.get("qspice_run_simulation", lambda: None)
+        )
+        qspice_menu.addAction(qspice_run_action)
+
+        file_menu.addMenu(qspice_menu)
         file_menu.addSeparator()
 
         open_file_action = QAction("Open File...", self.parent)
