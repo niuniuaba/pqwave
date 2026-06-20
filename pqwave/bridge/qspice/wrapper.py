@@ -243,7 +243,8 @@ class QspiceBridgeRunner:
                 cmd,
                 cwd=netlist_dir,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=300,
             )
         except subprocess.TimeoutExpired:

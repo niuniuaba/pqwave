@@ -216,7 +216,7 @@ def load_qraw_via_qux(filepath: str, var_names: list):
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=10,
+            cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         logger.warning("QUX SPICE metadata call failed: %s", exc)
@@ -244,7 +244,7 @@ def load_qraw_via_qux(filepath: str, var_names: list):
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120,
+            cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         logger.warning("QUX CSV data call failed: %s", exc)
