@@ -207,6 +207,12 @@ def load_qraw_via_qux(filepath: str, var_names: list):
     if not var_names:
         return None
 
+    # QUX hangs on probe names containing '#' (QSPICE internal syntax
+    # like V(d4#current)).  Fall back to spicelib for these files.
+    if any("#" in name for name in var_names):
+        logger.debug("Probe names contain '#' — skipping QUX, using spicelib")
+        return None
+
     probes = ",".join(var_names)
 
     # --- Step 1: metadata via SPICE format ---
@@ -219,7 +225,7 @@ def load_qraw_via_qux(filepath: str, var_names: list):
             cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.warning("QUX SPICE metadata call failed: %s", exc)
+        logger.debug("QUX SPICE metadata call failed: %s", exc)
         return None
 
     if proc.returncode != 0:
