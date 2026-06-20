@@ -16,7 +16,7 @@ import subprocess
 import shutil
 
 
-def _wine_prefixes() -> list:
+def _wine_prefixes() -> list[str]:
     """Return common Wine prefix paths to search for QSPICE."""
     home = os.path.expanduser("~")
     return [
