@@ -1408,7 +1408,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select SPICE Netlist",
             os.path.expanduser("~"),
-            "All Files (*)"
+            "All Files (*);;SPICE Netlist (*.cir *.sp *.net)"
         )
         if not path:
             return
