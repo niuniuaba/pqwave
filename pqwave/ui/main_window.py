@@ -1403,7 +1403,8 @@ class MainWindow(QMainWindow):
 
     def _on_qspice_run_simulation(self):
         """File > QSPICE Bridge > Run Simulation — .qsch or netlist → .qraw."""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from PyQt6.QtWidgets import QFileDialog, QApplication
+        from PyQt6.QtCore import Qt
 
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Schematic or Netlist",
@@ -1417,13 +1418,11 @@ class MainWindow(QMainWindow):
             f"[qspice] Running simulation: {path}\n"
         )
 
-        import threading
-        from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
         from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner, qsch2cir
 
-        def _run():
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
             netlist_path = path
-            # .qsch schematic → convert to .cir via QUX -Netlist
             if path.lower().endswith(".qsch"):
                 try:
                     self.chat_panel.append_output(
@@ -1434,30 +1433,18 @@ class MainWindow(QMainWindow):
                         f"[qspice] Netlist: {netlist_path}\n"
                     )
                 except Exception as e:
-                    QMetaObject.invokeMethod(
-                        self, "_on_qspice_sim_error",
-                        Qt.ConnectionType.QueuedConnection,
-                        Q_ARG(str, str(e)),
-                    )
+                    self._on_qspice_sim_error(str(e))
                     return
 
             runner = QspiceBridgeRunner(auto_open=False)
             exit_code = runner.run(netlist_path)
             if exit_code == 0:
                 qraw_path = os.path.splitext(os.path.abspath(netlist_path))[0] + ".qraw"
-                QMetaObject.invokeMethod(
-                    self, "_on_qspice_sim_done",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, qraw_path),
-                )
+                self._on_qspice_sim_done(qraw_path)
             else:
-                QMetaObject.invokeMethod(
-                    self, "_on_qspice_sim_error",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, f"exit code {exit_code}"),
-                )
-
-        threading.Thread(target=_run, daemon=True).start()
+                self._on_qspice_sim_error(f"exit code {exit_code}")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def _on_qspice_sim_done(self, qraw_path: str):
         """Called from background thread when QSPICE simulation succeeds."""
