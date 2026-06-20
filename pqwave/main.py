@@ -560,7 +560,8 @@ def main():
             "pqwave [-h] [options] [files ...]\n"
             "       or: pqwave --exec <code>\n"
             "       or: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <output>\n"
-            "       or: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>"
+            "       or: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>\n"
+            "       or: pqwave --qspice-bridge <netlist|.qsch>"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -606,6 +607,11 @@ def main():
         "--exec",
         action="store_true",
         help="Execute Python code headless: pqwave --exec '<code>'"
+    )
+    parser.add_argument(
+        "--qspice-bridge",
+        action="store_true",
+        help="Run QSPICE simulation: pqwave --qspice-bridge <netlist|.qsch>"
     )
     parser.add_argument(
         "--help-commands",
