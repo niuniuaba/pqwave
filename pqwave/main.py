@@ -428,14 +428,25 @@ def _run_qspice_bridge() -> int:
     The netlist file is the first argument after --qspice-bridge.
     No suffix assumption — any filename is accepted.
     """
-    from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+    from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner, qsch2cir
 
     args = sys.argv[sys.argv.index('--qspice-bridge') + 1:]
     if not args:
-        print("Usage: pqwave --qspice-bridge <netlist_file>", file=sys.stderr)
+        print("Usage: pqwave --qspice-bridge <netlist|.qsch>", file=sys.stderr)
         return 1
 
     netlist_path = args[0]
+
+    # .qsch schematic → convert to .cir first
+    if netlist_path.lower().endswith(".qsch"):
+        try:
+            print(f"Converting {netlist_path} → netlist ...", file=sys.stderr)
+            netlist_path = qsch2cir(netlist_path)
+            print(f"Netlist: {netlist_path}", file=sys.stderr)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
     runner = QspiceBridgeRunner()
     return runner.run(netlist_path)
 
