@@ -21,10 +21,9 @@ from pqwave.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Very large Nline so QUX exports all points without downsampling.
-# QSPICE uses Nline to control points-per-step: Nstep = total / (Nline+1).
-# A huge value forces Nstep=1 (all points in one step).
-_MAX_NLINE = 100_000_000
+# Minimal Nline for metadata-only calls — we just need header info
+# (variable names, plot type, point count), not actual data points.
+_META_NLINE = 1
 
 
 def _build_qux_cmd(qux_path: str, qraw_path: str, probes: str,
@@ -108,12 +107,8 @@ def _parse_spice_metadata(stdout: str) -> dict:
         elif pn.startswith("oper"):
             meta["x_label"] = "OP"
 
-    # Step count
-    n_points = meta.get("n_points", 0)
-    if n_points > 0:
-        meta["step_count"] = max(1, n_points // (_MAX_NLINE + 1) + 1)
-    else:
-        meta["step_count"] = 0
+    # Step count — refined later by _extract_step_info() via header parse
+    meta["step_count"] = 1 if meta.get("n_points", 0) > 0 else 0
 
     return meta
 
@@ -207,16 +202,10 @@ def load_qraw_via_qux(filepath: str, var_names: list):
     if not var_names:
         return None
 
-    # QUX hangs on probe names containing '#' (QSPICE internal syntax
-    # like V(d4#current)).  Fall back to spicelib for these files.
-    if any("#" in name for name in var_names):
-        logger.debug("Probe names contain '#' — skipping QUX, using spicelib")
-        return None
-
     probes = ",".join(var_names)
 
-    # --- Step 1: metadata via SPICE format ---
-    cmd = _build_qux_cmd(qux, filepath, probes, _MAX_NLINE, "SPICE")
+    # --- Step 1: metadata via SPICE format (minimal Nline — header only) ---
+    cmd = _build_qux_cmd(qux, filepath, probes, _META_NLINE, "SPICE")
     if cmd is None:
         return None
 
@@ -225,7 +214,7 @@ def load_qraw_via_qux(filepath: str, var_names: list):
             cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.debug("QUX SPICE metadata call failed: %s", exc)
+        logger.warning("QUX metadata call failed, falling back to spicelib: %s", exc)
         return None
 
     if proc.returncode != 0:
@@ -242,7 +231,7 @@ def load_qraw_via_qux(filepath: str, var_names: list):
     if n_points > 0:
         nline = n_points - 1  # all points in one step
     else:
-        nline = _MAX_NLINE
+        nline = 1_000_000  # fallback: generous but not absurd
 
     cmd = _build_qux_cmd(qux, filepath, probes, nline, "CSV")
     if cmd is None:
@@ -253,7 +242,7 @@ def load_qraw_via_qux(filepath: str, var_names: list):
             cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.warning("QUX CSV data call failed: %s", exc)
+        logger.warning("QUX data call failed, falling back to spicelib: %s", exc)
         return None
 
     if proc.returncode != 0:
