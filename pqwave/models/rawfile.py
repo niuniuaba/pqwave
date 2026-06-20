@@ -501,15 +501,14 @@ class RawFile:
             return None
 
         var_names = [v["name"] for v in correct_variables]
+        if not var_names:
+            return None
+
         try:
             result = load_qraw_via_qux(self.filename, var_names)
         except Exception:
             logger.debug("QUX load failed, falling back to spicelib", exc_info=True)
             return None
-        if not var_names:
-            return None
-
-        result = load_qraw_via_qux(self.filename, var_names)
         if result is None:
             return None
 

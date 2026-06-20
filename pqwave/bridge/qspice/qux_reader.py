@@ -14,7 +14,7 @@ import re
 import sys
 import shutil
 import subprocess
-import io
+
 import numpy as np
 
 from pqwave.logging_config import get_logger
