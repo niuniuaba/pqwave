@@ -15,6 +15,10 @@ import sys
 import subprocess
 import shutil
 
+from pqwave.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def _wine_prefixes() -> list[str]:
     """Return common Wine prefix paths to search for QSPICE."""
@@ -109,6 +113,52 @@ def resolve_qux() -> str | None:
         return found
 
     return None
+
+
+def qsch2cir(qsch_path: str) -> str:
+    """Convert a .qsch schematic to a .cir netlist via QUX.exe -Netlist.
+
+    QUX.exe is QSPICE's CLI tool — this does NOT require the QSPICE GUI.
+    Works under Wine on Linux.
+
+    Returns the path to the generated .cir file (alongside the .qsch).
+    Raises FileNotFoundError if QUX is unavailable.
+    Raises RuntimeError if QUX exits non-zero.
+    """
+    qux = resolve_qux()
+    if not qux:
+        raise FileNotFoundError(
+            "QUX.exe not found. QSPICE must be installed to convert "
+            ".qsch schematics. Set PQWAVE_QSPICE to the QSPICE64.exe path."
+        )
+
+    cir_path = os.path.splitext(qsch_path)[0] + ".cir"
+
+    if sys.platform == "win32":
+        cmd = [qux, "-Netlist", qsch_path, "-stdout"]
+    else:
+        wine = shutil.which("wine")
+        if not wine:
+            raise FileNotFoundError("wine not found on PATH")
+        cmd = [wine, qux, "-Netlist", qsch_path, "-stdout"]
+
+    proc = subprocess.run(
+        cmd, capture_output=True, timeout=30,
+    )
+
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
+        raise RuntimeError(
+            f"QUX -Netlist failed (exit {proc.returncode}): {stderr[:500]}"
+        )
+
+    # Write netlist bytes as-is — QSPICE64.exe reads the same encoding
+    with open(cir_path, "wb") as fh:
+        fh.write(proc.stdout)
+
+    logger.info("Converted %s → %s", os.path.basename(qsch_path),
+                 os.path.basename(cir_path))
+    return cir_path
 
 
 class QspiceBridgeRunner:

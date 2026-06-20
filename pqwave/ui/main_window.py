@@ -1402,13 +1402,13 @@ class MainWindow(QMainWindow):
     # ---- QSPICE Bridge handlers ----
 
     def _on_qspice_run_simulation(self):
-        """File > QSPICE Bridge > Run Simulation — run QSPICE from a netlist."""
+        """File > QSPICE Bridge > Run Simulation — .qsch or netlist → .qraw."""
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select SPICE Netlist",
+            self, "Select Schematic or Netlist",
             os.path.expanduser("~"),
-            "Netlist (*.cir *.sp *.net *.spice *.*)"
+            "QSPICE Files (*.qsch *.cir *.sp *.net *.spice *.*)"
         )
         if not path:
             return
@@ -1418,14 +1418,33 @@ class MainWindow(QMainWindow):
         )
 
         import threading
-        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner
+        from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+        from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner, qsch2cir
 
         def _run():
+            netlist_path = path
+            # .qsch schematic → convert to .cir via QUX -Netlist
+            if path.lower().endswith(".qsch"):
+                try:
+                    self.chat_panel.append_output(
+                        "[qspice] Converting .qsch → .cir ...\n"
+                    )
+                    netlist_path = qsch2cir(path)
+                    self.chat_panel.append_output(
+                        f"[qspice] Netlist: {netlist_path}\n"
+                    )
+                except Exception as e:
+                    QMetaObject.invokeMethod(
+                        self, "_on_qspice_sim_error",
+                        Qt.ConnectionType.QueuedConnection,
+                        Q_ARG(str, str(e)),
+                    )
+                    return
+
             runner = QspiceBridgeRunner(auto_open=False)
-            exit_code = runner.run(path)
+            exit_code = runner.run(netlist_path)
             if exit_code == 0:
-                qraw_path = os.path.splitext(os.path.abspath(path))[0] + ".qraw"
-                from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+                qraw_path = os.path.splitext(os.path.abspath(netlist_path))[0] + ".qraw"
                 QMetaObject.invokeMethod(
                     self, "_on_qspice_sim_done",
                     Qt.ConnectionType.QueuedConnection,
@@ -1435,7 +1454,7 @@ class MainWindow(QMainWindow):
                 QMetaObject.invokeMethod(
                     self, "_on_qspice_sim_error",
                     Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(int, exit_code),
+                    Q_ARG(str, f"exit code {exit_code}"),
                 )
 
         threading.Thread(target=_run, daemon=True).start()
@@ -1447,11 +1466,10 @@ class MainWindow(QMainWindow):
         )
         self._load_raw_file(qraw_path)
 
-    def _on_qspice_sim_error(self, exit_code: int):
+    def _on_qspice_sim_error(self, message: str):
         """Called from background thread when QSPICE simulation fails."""
         self.chat_panel.append_output(
-            f"[qspice] Simulation failed (exit code {exit_code}). "
-            f"Check stderr for details.\n"
+            f"[qspice] Simulation failed: {message}\n"
         )
 
     # ---- Qucs-S Bridge handlers ----
