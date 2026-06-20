@@ -144,20 +144,28 @@ def _parse_csv_data(stdout: str, var_names: list, is_complex: bool) -> np.ndarra
         data = np.zeros((n_points, n_vars), dtype=dtype)
 
         if is_complex:
+            # QUX AC format: Freq column is plain real; signal columns
+            # are "real-imag" or "real+imag" pairs.
+            _has_sign = re.compile(r".\d[-+]")
             for i, line in enumerate(lines):
                 parts = line.split(sep)
                 for j in range(min(n_vars, len(parts))):
                     val = parts[j].strip()
-                    if val:
-                        # QUX AC format: "real-imag" or "real+imag", append "j"
+                    if not val:
+                        continue
+                    if _has_sign.search(val):
+                        # Complex pair — normalise separators, append "j"
                         normalized = val.replace(",-", "-").replace(",", "+")
                         try:
                             data[i, j] = complex(normalized + "j")
                         except ValueError:
-                            try:
-                                data[i, j] = complex(normalized)
-                            except ValueError:
-                                data[i, j] = complex(0, 0)
+                            data[i, j] = complex(0, 0)
+                    else:
+                        # Plain real value (e.g. frequency axis)
+                        try:
+                            data[i, j] = complex(float(val), 0)
+                        except ValueError:
+                            data[i, j] = complex(0, 0)
         else:
             for i, line in enumerate(lines):
                 parts = line.split(sep)
