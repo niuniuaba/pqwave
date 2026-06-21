@@ -1459,6 +1459,10 @@ class MainWindow(QMainWindow):
         self.chat_panel.append_output(
             f"[qspice] Simulation failed: {message}\n"
         )
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.warning(
+            self, "QSPICE Simulation Failed", message,
+        )
 
     # ---- Qucs-S Bridge handlers ----
 
