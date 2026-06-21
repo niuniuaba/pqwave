@@ -67,6 +67,8 @@ class MainWindow(QMainWindow):
     _mutation_signal = pyqtSignal(str, object)
     _lepton_result_signal = pyqtSignal(dict)
     _lepton_error_signal = pyqtSignal(str)
+    _qspice_done_signal = pyqtSignal(str)     # qraw_path
+    _qspice_error_signal = pyqtSignal(str)    # error message
 
     _NET_EXPR_RE = re.compile(r'^[vV]\(\s*(.+?)\s*\)$')
 
@@ -182,6 +184,8 @@ class MainWindow(QMainWindow):
         # Cross-thread signals for lepton pipeline results.
         self._lepton_result_signal.connect(self._on_lepton_pipeline_result)
         self._lepton_error_signal.connect(self._on_lepton_pipeline_error)
+        self._qspice_done_signal.connect(self._on_qspice_sim_done)
+        self._qspice_error_signal.connect(self._on_qspice_sim_error)
 
         # Xschem bridge
         self.xschem_control_bar = None
@@ -1403,8 +1407,7 @@ class MainWindow(QMainWindow):
 
     def _on_qspice_run_simulation(self):
         """File > QSPICE Bridge > Run Simulation — .qsch or netlist → .qraw."""
-        from PyQt6.QtWidgets import QFileDialog, QApplication
-        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Schematic or Netlist",
@@ -1418,33 +1421,31 @@ class MainWindow(QMainWindow):
             f"[qspice] Running simulation: {path}\n"
         )
 
+        from threading import Thread
         from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner, qsch2cir
 
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
+        def _run():
             netlist_path = path
             if path.lower().endswith(".qsch"):
                 try:
-                    self.chat_panel.append_output(
-                        "[qspice] Converting .qsch → .cir ...\n"
-                    )
                     netlist_path = qsch2cir(path)
-                    self.chat_panel.append_output(
-                        f"[qspice] Netlist: {netlist_path}\n"
-                    )
                 except Exception as e:
-                    self._on_qspice_sim_error(str(e))
+                    self._qspice_error_signal.emit(
+                        f"Failed to convert .qsch: {e}"
+                    )
                     return
 
             runner = QspiceBridgeRunner(auto_open=False)
             exit_code = runner.run(netlist_path)
             if exit_code == 0:
-                qraw_path = os.path.splitext(os.path.abspath(netlist_path))[0] + ".qraw"
-                self._on_qspice_sim_done(qraw_path)
+                qraw_path = os.path.splitext(
+                    os.path.abspath(netlist_path)
+                )[0] + ".qraw"
+                self._qspice_done_signal.emit(qraw_path)
             else:
-                self._on_qspice_sim_error(f"exit code {exit_code}")
-        finally:
-            QApplication.restoreOverrideCursor()
+                self._qspice_error_signal.emit(f"exit code {exit_code}")
+
+        Thread(target=_run, daemon=True).start()
 
     def _on_qspice_sim_done(self, qraw_path: str):
         """Called when QSPICE simulation succeeds."""
