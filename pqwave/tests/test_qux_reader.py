@@ -80,21 +80,23 @@ class TestParseSpiceMetadata:
 
 class TestParseCsvData:
     def test_transient_real_data(self):
-        stdout = "0.0,1.0,2.0\n0.1,1.1,2.1\n0.2,1.2,2.2\n"
+        # CSV: X-axis col + 3 probes
+        stdout = "0.0,0.0,1.0,2.0\n0.1,0.1,1.1,2.1\n0.2,0.2,1.2,2.2\n"
         data = _parse_csv_data(stdout, ["time", "V(out)", "I(R1)"], is_complex=False)
         assert data.shape == (3, 3)
         assert data.dtype == np.float32
-        assert data[0, 0] == pytest.approx(0.0)
-        assert data[1, 1] == pytest.approx(1.1)
-        assert data[2, 2] == pytest.approx(2.2)
+        assert data[0, 0] == pytest.approx(0.0)  # time (col 1, probe 0)
+        assert data[1, 1] == pytest.approx(1.1)  # V(out)
+        assert data[2, 2] == pytest.approx(2.2)  # I(R1)
 
     def test_ac_complex_data(self):
-        stdout = "1.0\t10.0-1.0\n10.0\t5.0+2.0\n"
+        # CSV: X-axis col + 2 probes
+        stdout = "1.0\t1.0\t10.0-1.0\n10.0\t10.0\t5.0+2.0\n"
         data = _parse_csv_data(stdout, ["Freq", "V(out)"], is_complex=True)
         assert data.shape == (2, 2)
         assert np.iscomplexobj(data)
-        assert data[0, 0] == pytest.approx(complex(1, 0))
-        assert data[0, 1] == pytest.approx(complex(10, -1))
+        assert data[0, 0] == pytest.approx(complex(1, 0))   # Freq
+        assert data[0, 1] == pytest.approx(complex(10, -1))  # V(out)
         assert data[1, 1] == pytest.approx(complex(5, 2))
 
     def test_empty_csv(self):
@@ -137,7 +139,7 @@ class TestLoadQrawViaQux:
             "\t1\tV(out)\tvoltage\n"
             "Values:\n"
         )
-        csv_stdout = "0.0,1.0\n0.1,2.0\n0.2,3.0\n"
+        csv_stdout = "0.0,0.0,1.0\n0.1,0.1,2.0\n0.2,0.2,3.0\n"
 
         call_count = [0]
 

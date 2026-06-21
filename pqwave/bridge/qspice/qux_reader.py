@@ -143,25 +143,25 @@ def _parse_csv_data(stdout: str, var_names: list, is_complex: bool) -> np.ndarra
         dtype = np.complex64 if is_complex else np.float32
         data = np.zeros((n_points, n_vars), dtype=dtype)
 
+        # QUX CSV has an X-axis column at index 0, followed by the
+        # requested probes at indices 1..n_vars.  Skip column 0.
+        col_offset = 1
+
         if is_complex:
-            # QUX AC format: Freq column is plain real; signal columns
-            # are "real-imag" or "real+imag" pairs.
             _has_sign = re.compile(r".\d[-+]")
             for i, line in enumerate(lines):
                 parts = line.split(sep)
-                for j in range(min(n_vars, len(parts))):
-                    val = parts[j].strip()
+                for j in range(min(n_vars, len(parts) - col_offset)):
+                    val = parts[j + col_offset].strip()
                     if not val:
                         continue
                     if _has_sign.search(val):
-                        # Complex pair — normalise separators, append "j"
                         normalized = val.replace(",-", "-").replace(",", "+")
                         try:
                             data[i, j] = complex(normalized + "j")
                         except ValueError:
                             data[i, j] = complex(0, 0)
                     else:
-                        # Plain real value (e.g. frequency axis)
                         try:
                             data[i, j] = complex(float(val), 0)
                         except ValueError:
@@ -169,9 +169,9 @@ def _parse_csv_data(stdout: str, var_names: list, is_complex: bool) -> np.ndarra
         else:
             for i, line in enumerate(lines):
                 parts = line.split(sep)
-                for j in range(min(n_vars, len(parts))):
+                for j in range(min(n_vars, len(parts) - col_offset)):
                     try:
-                        data[i, j] = float(parts[j].strip())
+                        data[i, j] = float(parts[j + col_offset].strip())
                     except ValueError:
                         data[i, j] = 0.0
 
