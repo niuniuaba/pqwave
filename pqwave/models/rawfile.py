@@ -175,44 +175,6 @@ def _parse_header_variables(raw_bytes: bytes):
     return variables, is_ac_or_complex
 
 
-def _extract_raw_var_names(raw_bytes: bytes) -> list:
-    """Extract variable names from raw header bytes, decoded as Latin-1.
-
-    Unlike _parse_header_variables, this does NOT apply the CP1252→Unicode
-    special character mapping.  The returned strings use Latin-1 code
-    points that match the original CP1252 bytes.  These can be safely
-    passed to QUX.exe via subprocess with encoding='latin-1'.
-    """
-    for marker in (b'Binary:\n', b'Values:\n'):
-        pos = raw_bytes.find(marker)
-        if pos >= 0:
-            header_bytes = raw_bytes[:pos]
-            break
-    else:
-        header_bytes = raw_bytes
-
-    text = header_bytes.decode('latin-1')
-    lines = text.split('\n')
-
-    var_start = None
-    for i, line in enumerate(lines):
-        if line.strip().lower() == 'variables:':
-            var_start = i + 1
-            break
-
-    if var_start is None:
-        return []
-
-    names = []
-    for line in lines[var_start:]:
-        if not line.strip():
-            continue
-        parts = line.lstrip().split('\t')
-        if len(parts) >= 3:
-            names.append(parts[1])
-    return names
-
-
 def _is_utf16le(filepath: str) -> bool:
     """Detect UTF-16 LE encoding via BOM or zero-byte pattern.
 
@@ -519,117 +481,6 @@ class RawFile:
         except Exception:
             return []
 
-    def _try_load_qux(self, correct_variables: list, is_ac_or_complex: bool, raw_bytes: bytes):
-        """Try loading .qraw data via QSPICE's QUX.exe -Export.
-
-        Returns a dataset dict on success, or None if QUX is unavailable
-        or extraction fails.  Never raises — failures always fall back to
-        spicelib.
-        """
-        # Only try QUX for QSPICE-generated files (header contains "QSPICE"
-        # or file has .qraw extension).  QUX hangs on non-QSPICE formats.
-        is_qspice_file = (
-            self.filename.lower().endswith(".qraw")
-            or b"QSPICE" in raw_bytes
-        )
-        if not is_qspice_file:
-            return None
-
-        try:
-            from pqwave.bridge.qspice.qux_reader import load_qraw_via_qux
-        except ImportError:
-            return None
-
-        # Extract raw probe names from header bytes (Latin-1 decoded,
-        # preserving original CP1252 byte values).  The Unicode-decoded
-        # names from correct_variables would encode as multi-byte UTF-8
-        # when passed to QUX via subprocess, breaking probe recognition.
-        raw_var_names = _extract_raw_var_names(raw_bytes)
-        if not raw_var_names:
-            return None
-
-        # QUX cannot parse probes containing non-ASCII bytes (CP1252 Greek
-        # letters, symbols like †).  Filter to ASCII-only probes; the full
-        # variable set is still available via spicelib fallback.
-        var_names = [n for n in raw_var_names if all(0x20 <= ord(c) < 0x7f for c in n)]
-        if len(var_names) < len(raw_var_names):
-            logger.debug(
-                "QUX: %d/%d probes are non-ASCII — using ASCII subset",
-                len(raw_var_names) - len(var_names), len(raw_var_names),
-            )
-        if not var_names:
-            return None
-
-        # Parse No. Points from the raw file header — this is the
-        # authoritative point count (QUX metadata reports export count,
-        # not file total).
-        total_points = 0
-        import re
-        header_text = raw_bytes.decode("utf-8", errors="replace")
-        m = re.search(r"No\. Points:\s*(\d+)", header_text)
-        if m:
-            total_points = int(m.group(1))
-
-        try:
-            result = load_qraw_via_qux(self.filename, var_names, total_points)
-        except Exception:
-            logger.debug("QUX load failed, falling back to spicelib", exc_info=True)
-            return None
-        if result is None:
-            return None
-
-        data, meta = result
-        n_points, n_vars = data.shape
-
-        # Build type lookup from the full decoded variable list.
-        # Map by Unicode name for display; QUX var_names are Latin-1
-        # but ASCII probes are identical in both encodings.
-        cv_by_name = {cv["name"]: cv for cv in correct_variables}
-
-        variables = []
-        for i, name in enumerate(var_names):
-            # Match to the correct_variables entry by name
-            cv = cv_by_name.get(name)
-            if cv is None:
-                # Non-ASCII probe filtered out — skip (shouldn't happen now)
-                continue
-            var_type = cv.get("type", "unknown")
-            if meta.get("is_complex") and not name.lower().startswith(
-                ("freq", "frequency", "hz", "time")
-            ):
-                var_type = (
-                    "voltage"
-                    if name.lower().startswith("v(")
-                    else "current"
-                    if name.lower().startswith("i(")
-                    else "unknown"
-                )
-            variables.append({
-                "index": i,
-                "name": cv["name"],
-                "type": var_type,
-            })
-
-        dataset = {
-            "title": "",
-            "date": "",
-            "plotname": meta.get("plotname", ""),
-            "flags": meta.get("flags", "real"),
-            "variables": variables,
-            "data": data,
-            "_is_ac_or_complex": meta.get("is_complex", is_ac_or_complex),
-        }
-
-        # Store step metadata from QUX
-        self._step_count = meta.get("step_count", self._step_count)
-
-        self.detected_format = "qspice"
-        logger.info(
-            "Loaded %s via QUX.exe: %d points, %d variables",
-            os.path.basename(self.filename), n_points, n_vars,
-        )
-        return dataset
-
     def _read_header_bytes(self) -> bytes:
         """Read only the header portion of the raw file (up to Binary:\n).
 
@@ -683,7 +534,10 @@ class RawFile:
         return bytes(buf)
 
     def parse(self):
-        """Parse the raw file — spicelib first, QUX.exe as fallback."""
+        """Parse the raw file using spicelib."""
+        if not SPICELIB_AVAILABLE:
+            raise ImportError("spicelib is not available. Install with: pip install spicelib")
+
         # Reject empty files early
         if os.path.getsize(self.filename) == 0:
             raise ValueError(
@@ -694,43 +548,14 @@ class RawFile:
         self._data_cache = {}
 
         # Read only the header portion for variable name parsing
+        # (spicelib's character-by-character header reading breaks multi-byte UTF-8)
         raw_bytes = self._read_header_bytes()
 
         # Parse variable names directly from bytes (correct UTF-8 decoding)
         correct_variables, is_ac_or_complex = _parse_header_variables(raw_bytes)
 
-        # --- Try spicelib first (exact original simulation data) ---
-        spicelib_ok = False
-        if SPICELIB_AVAILABLE:
-            try:
-                self._load_via_spicelib(correct_variables, is_ac_or_complex)
-                spicelib_ok = True
-            except Exception:
-                logger.debug("spicelib failed, trying QUX fallback", exc_info=True)
-
-        if spicelib_ok:
-            return
-
-        # --- spicelib unavailable or failed — try QUX ---
-        qux_dataset = self._try_load_qux(correct_variables, is_ac_or_complex, raw_bytes)
-        if qux_dataset is not None:
-            self.datasets.append(qux_dataset)
-            self._extract_step_info()
-            return
-
-        # --- Both failed ---
-        if not SPICELIB_AVAILABLE:
-            raise ImportError(
-                "Cannot read this file: spicelib is not installed and "
-                "QSPICE/QUX.exe is not available. "
-                "Install spicelib with: pip install spicelib"
-            )
-        raise RuntimeError(
-            "Failed to parse file with both spicelib and QUX.exe"
-        )
-
-    def _load_via_spicelib(self, correct_variables, is_ac_or_complex):
-        """Load raw file data via spicelib (original simulation timesteps)."""
+        # Preprocess file for encoding (fix QSPICE special characters)
+        # This is needed for spicelib to read the binary data
         load_path = preprocess_raw_file(self.filename)
         if load_path != self.filename:
             self._tmp_file = load_path
@@ -738,9 +563,6 @@ class RawFile:
         try:
             self.raw_data = RawRead(load_path)
         except SpiceReadException:
-            # spicelib auto-detect fails for Xyce files without a Command:
-            # header line.  Try ngspice and xyce dialects directly — both
-            # use identical binary layouts (doubles for everything).
             for dialect in ('ngspice', 'xyce'):
                 try:
                     self.raw_data = RawRead(load_path, dialect=dialect)
@@ -750,33 +572,21 @@ class RawFile:
             else:
                 raise
 
-        # Save detected dialect before raw_data is released
         self.detected_format = self.raw_data.dialect
 
-        # Get raw properties from spicelib
         raw_props = self.raw_data.get_raw_properties()
 
-        # Get trace names from spicelib (may have garbled chars for
-        # multi-byte UTF-8) and build a position-based mapping.
-        # Spicelib may have MORE traces than our header vars due to
-        # aliases being exposed as separate traces.
         trace_names = self.raw_data.get_trace_names()
 
-        # Build mapping: correct_name -> spicelib_name (by position,
-        # up to the count of our header variables)
         correct_to_spicelib = {}
-        n_correct = len(correct_variables)
         for i, correct_var in enumerate(correct_variables):
             if i < len(trace_names):
                 correct_to_spicelib[correct_var['name']] = trace_names[i]
 
-        # Store mapping for later use in get_variable_data
         self._name_map = correct_to_spicelib
 
-        # Create variables list using our correctly-decoded names
         variables = []
         for i, correct_var in enumerate(correct_variables):
-            # Use our correct type classification
             var = {
                 'index': correct_var['index'],
                 'name': correct_var['name'],
@@ -784,35 +594,18 @@ class RawFile:
             }
             variables.append(var)
 
-        # Build list of spicelib trace names for all variables
         all_spicelib_names = [
             correct_to_spicelib.get(cv['name'], cv['name'])
             for cv in correct_variables
         ]
 
-        # Work around spicelib bug: empty _steps list crashes
-        # set_steps() with IndexError. This happens with some
-        # QSPICE files where step detection produces zero steps.
-        # Setting _steps to None skips the set_steps call safely.
         plot = self.raw_data._plots[0]
         if (hasattr(plot, '_steps') and isinstance(plot._steps, list)
                 and len(plot._steps) == 0):
             plot._steps = None
 
-        # Key optimization: pre-read ALL traces at once so spicelib
-        # only reads the binary data section once.  Without this,
-        # each get_trace() call re-reads the entire file in Normal
-        # Access mode (row-interleaved), causing O(N×filesize) I/O
-        # and intermediate buffer accumulation.
-        #
-        # For FastAccess (column-interleaved) this is also efficient
-        # since it batches all reads into a single sequential scan.
         plot.read_trace_data(all_spicelib_names)
 
-        # Now get_trace() returns from _read_traces cache (zero I/O)
-        # Get data for all traces using our correct variable names.
-        # For large files, use np.memmap to avoid keeping a full
-        # in-memory copy of the column-stacked matrix.
         data_list = []
         valid_variables = []
         ref_dtype = None
@@ -830,7 +623,6 @@ class RawFile:
                         else:
                             data = np.array(trace)
 
-                        # Downcast to float32 to reduce memory usage
                         if data.dtype == np.float64:
                             data = data.astype(np.float32)
                         elif data.dtype == np.complex128:
@@ -840,7 +632,6 @@ class RawFile:
                             ref_dtype = data.dtype
                             n_points = len(data)
 
-                        # Reclassify type with complex awareness
                         if is_ac_or_complex:
                             var_type = 'voltage' if name.lower().startswith('v(') else \
                                        'current' if name.lower().startswith('i(') else 'unknown'
@@ -861,11 +652,9 @@ class RawFile:
                 logger.warning(f"Could not get trace {name}: {e}")
                 continue
 
-        # Build the data matrix
         if data_list:
             estimated_total = n_points * len(valid_variables) * ref_dtype.itemsize
             if estimated_total > 500 * 1024 * 1024:
-                # Use memmap to avoid a second full copy in memory
                 mmap_fd, mmap_path = tempfile.mkstemp(prefix='pqwave_mmap_')
                 os.close(mmap_fd)
                 shape = (n_points, len(valid_variables))
@@ -884,7 +673,7 @@ class RawFile:
                 )
             else:
                 data = np.column_stack(data_list)
-                del data_list  # Release list immediately after stack
+                del data_list
         else:
             data = np.array([])
 
@@ -899,11 +688,8 @@ class RawFile:
         }
         self.datasets.append(dataset)
 
-        # Extract step metadata from spicelib while raw_data is still alive
         self._extract_spicelib_step_info()
 
-        # Release spicelib raw_data to free ~50% of parsed memory.
-        # All data is now in the memmap/column_stack matrix.
         self.raw_data = None
         logger.info(
             f"Released spicelib raw_data; data retained in memmap/column_stack"
