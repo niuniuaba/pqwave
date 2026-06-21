@@ -1447,14 +1447,14 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
 
     def _on_qspice_sim_done(self, qraw_path: str):
-        """Called from background thread when QSPICE simulation succeeds."""
+        """Called when QSPICE simulation succeeds."""
         self.chat_panel.append_output(
             f"[qspice] Simulation complete: {qraw_path}\n"
         )
         self._load_raw_file(qraw_path)
 
     def _on_qspice_sim_error(self, message: str):
-        """Called from background thread when QSPICE simulation fails."""
+        """Called when QSPICE simulation fails."""
         self.chat_panel.append_output(
             f"[qspice] Simulation failed: {message}\n"
         )

@@ -242,6 +242,11 @@ def load_qraw_via_qux(filepath: str, var_names: list,
         nline = total_points - 1
     else:
         nline = 1_000_000  # fallback: generous but not absurd
+        logger.warning(
+            "No. Points unavailable from header; using fallback Nline=%d "
+            "— data may be truncated for simulations with >%d points",
+            nline, nline + 1,
+        )
 
     cmd = _build_qux_cmd(qux, filepath, probes, nline, "CSV")
     if cmd is None:
@@ -256,7 +261,8 @@ def load_qraw_via_qux(filepath: str, var_names: list,
         return None
 
     if proc.returncode != 0:
-        logger.debug("QUX CSV call exited %d", proc.returncode)
+        logger.debug("QUX CSV call exited %d: %s", proc.returncode,
+                      proc.stderr[:200] if proc.stderr else "")
         return None
 
     is_complex = meta.get("is_complex", False)

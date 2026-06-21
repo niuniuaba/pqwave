@@ -115,6 +115,8 @@ class TraceManager(QtCore.QObject):
 
     # Emitted when user right-clicks a trace legend item
     trace_context_menu_requested = QtCore.pyqtSignal(str)
+    # Emitted when a trace is removed (expression string)
+    trace_removed = QtCore.pyqtSignal(str)
 
     @staticmethod
     def _is_fft_expression(expr: str) -> bool:
@@ -586,6 +588,10 @@ class TraceManager(QtCore.QObject):
         self.logger.debug(f"add_trace_from_variable: variable_name={variable_name}, x_var_name={x_var_name}")
         quoted_var = f'"{variable_name}"'
         return self.add_trace(quoted_var, x_var_name, y_axis, custom_color, error_out)
+
+    def refresh_legend(self) -> None:
+        """Public method to refresh the legend display."""
+        self._refresh_legend()
 
     def _refresh_legend(self) -> None:
         """Clear and re-populate the legend from the current trace list."""
@@ -1176,6 +1182,12 @@ class TraceManager(QtCore.QObject):
         self.logger.info(f"Removed trace for variable '{variable_name}'")
         self._auto_range_y_axis(AxisAssignment.Y1)
         self._auto_range_x()
+        try:
+            self.trace_removed.emit(var)
+        except Exception:
+            self.logger.warning(
+                "trace_removed slot failed for '%s'", var, exc_info=True
+            )
         return True
 
     def update_traces_for_log_mode(self) -> None:

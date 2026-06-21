@@ -34,6 +34,7 @@ class TestParseSpiceMetadata:
         assert meta["x_label"] == "Freq"
         assert meta["x_min"] == 1.0
         assert meta["x_max"] == 100000000.0
+        assert meta["step_count"] == 1
 
     def test_transient_analysis(self):
         stdout = (
@@ -50,6 +51,7 @@ class TestParseSpiceMetadata:
         assert meta["is_complex"] is False
         assert meta["is_ac"] is False
         assert meta["x_label"] == "time"  # first var name after Variables:
+        assert meta["step_count"] == 1
 
     def test_dc_analysis(self):
         stdout = (
@@ -65,6 +67,7 @@ class TestParseSpiceMetadata:
         assert meta["n_points"] == 30000
         assert meta["x_label"] == "V2"  # first variable after Variables:
         assert meta["is_complex"] is False
+        assert meta["step_count"] == 1
 
     def test_missing_plotname(self):
         stdout = "No. Points: 100\nFlags: real\n"
@@ -98,6 +101,23 @@ class TestParseCsvData:
         assert data[0, 0] == pytest.approx(complex(1, 0))   # Freq
         assert data[0, 1] == pytest.approx(complex(10, -1))  # V(out)
         assert data[1, 1] == pytest.approx(complex(5, 2))
+
+    def test_skips_quoted_csv_header(self):
+        """CSV header line with quoted column names is stripped."""
+        stdout = '"Time","Time","V(out)"\n0.0,0.0,1.0\n0.1,0.1,2.0\n'
+        data = _parse_csv_data(stdout, ["Time", "V(out)"], is_complex=False)
+        assert data.shape == (2, 2)
+        assert data[0, 0] == pytest.approx(0.0)
+        assert data[0, 1] == pytest.approx(1.0)
+
+    def test_short_csv_line_zero_filled(self):
+        """Row with only X-axis column — probe columns default to 0."""
+        stdout = "0.0,1.0,2.0\n0.1\n"  # second row: X-axis only, no probes
+        data = _parse_csv_data(stdout, ["Time", "V(out)"], is_complex=False)
+        assert data.shape == (2, 2)
+        # Second row has only the X-axis column (skipped) → probes are 0
+        assert data[1, 0] == pytest.approx(0.0)  # Time probe: missing → 0
+        assert data[1, 1] == pytest.approx(0.0)  # V(out): missing → 0
 
     def test_empty_csv(self):
         data = _parse_csv_data("", ["a"], is_complex=False)
@@ -198,6 +218,46 @@ class TestLoadQrawViaQux:
             with mock.patch("shutil.which", return_value=None):
                 result = load_qraw_via_qux("/fake/path.qraw", ["V(out)"])
                 assert result is None
+
+    def test_total_points_passed_to_csv_call(self, monkeypatch):
+        """When total_points is given, CSV Nline = total_points - 1."""
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        spice_stdout = (
+            "No. Points: 11\n"  # metadata Nline+1, ignored
+            "Plotname: Transient Analysis\n"
+            "Flags: real\n"
+        )
+        csv_stdout = "0.0,0.0,1.0\n0.1,0.1,2.0\n"
+
+        call_count = [0]
+
+        def fake_run(cmd, **_kwargs):
+            call_count[0] += 1
+            result = mock.MagicMock()
+            result.returncode = 0
+            if call_count[0] == 1:
+                result.stdout = spice_stdout
+                result.stderr = ""
+            else:
+                result.stdout = csv_stdout
+                result.stderr = ""
+                # Verify the CSV command uses total_points-1 as Nline
+                cmd_str = " ".join(str(a) for a in cmd)
+                assert " 999 " in cmd_str, f"Expected Nline=999 in: {cmd_str}"
+            return result
+
+        with mock.patch(
+            "pqwave.bridge.qspice.wrapper.resolve_qux",
+            return_value="/fake/qux.exe",
+        ):
+            with mock.patch("shutil.which", return_value="/usr/bin/wine"):
+                with mock.patch("subprocess.run", side_effect=fake_run):
+                    result = load_qraw_via_qux(
+                        "/fake/path.qraw", ["Time", "V(out)"],
+                        total_points=1000,
+                    )
+                    assert result is not None
 
 
 class TestRawFileQuxFallback:
