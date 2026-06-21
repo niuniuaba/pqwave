@@ -621,6 +621,12 @@ class RawFile:
 
     def parse(self):
         """Parse the raw file — QUX.exe first, spicelib as fallback."""
+        # Reject empty files early
+        if os.path.getsize(self.filename) == 0:
+            raise ValueError(
+                f"File is empty: {self.filename}"
+            )
+
         # Clear data cache from any previous parse
         self._data_cache = {}
 
