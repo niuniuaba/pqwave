@@ -236,10 +236,12 @@ def preprocess_raw_file(filepath: str) -> str:
             f.seek(-overlap, 1)
 
     if header_end is None:
-        raise ValueError(
-            f"No Binary:/Values: marker found within first {MAX_HEADER_SCAN // 1024**2} MB. "
-            f"File may not be a valid SPICE raw file."
+        logger.warning(
+            "No Binary:/Values: marker found in %s — returning as-is; "
+            "spicelib may fail",
+            os.path.basename(filepath),
         )
+        return filepath
     else:
         with open(filepath, 'rb') as f:
             header_bytes = f.read(header_end)
