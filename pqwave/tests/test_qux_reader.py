@@ -299,18 +299,22 @@ class TestRawFileQuxFallback:
         }
 
         with mock.patch(
-            "pqwave.bridge.qspice.qux_reader.load_qraw_via_qux",
-            return_value=(fake_data, fake_meta),
+            "pqwave.models.rawfile._extract_raw_var_names",
+            return_value=["time", "V(out)"],
         ):
-            result = rf._try_load_qux(
-                [{"name": "time", "type": "time"}, {"name": "V(out)", "type": "voltage"}],
-                False,
-                b"",
-            )
-            assert result is not None
-            assert result["variables"][0]["name"] == "time"
-            assert result["variables"][1]["type"] == "voltage"
-            assert result["data"].shape == (1, 2)
+            with mock.patch(
+                "pqwave.bridge.qspice.qux_reader.load_qraw_via_qux",
+                return_value=(fake_data, fake_meta),
+            ):
+                result = rf._try_load_qux(
+                    [{"name": "time", "type": "time"}, {"name": "V(out)", "type": "voltage"}],
+                    False,
+                    b"",
+                )
+        assert result is not None
+        assert result["variables"][0]["name"] == "time"
+        assert result["variables"][1]["type"] == "voltage"
+        assert result["data"].shape == (1, 2)
 
     def test_qux_failure_returns_none(self):
         """Returns None when load_qraw_via_qux returns None."""
@@ -321,12 +325,16 @@ class TestRawFileQuxFallback:
         rf._step_count = 0
 
         with mock.patch(
-            "pqwave.bridge.qspice.qux_reader.load_qraw_via_qux",
-            return_value=None,
+            "pqwave.models.rawfile._extract_raw_var_names",
+            return_value=["V(out)"],
         ):
-            result = rf._try_load_qux(
-                [{"name": "V(out)", "type": "voltage"}],
-                False,
-                b"",
-            )
-            assert result is None
+            with mock.patch(
+                "pqwave.bridge.qspice.qux_reader.load_qraw_via_qux",
+                return_value=None,
+            ):
+                result = rf._try_load_qux(
+                    [{"name": "V(out)", "type": "voltage"}],
+                    False,
+                    b"",
+                )
+        assert result is None

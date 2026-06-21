@@ -175,6 +175,44 @@ def _parse_header_variables(raw_bytes: bytes):
     return variables, is_ac_or_complex
 
 
+def _extract_raw_var_names(raw_bytes: bytes) -> list:
+    """Extract variable names from raw header bytes, decoded as Latin-1.
+
+    Unlike _parse_header_variables, this does NOT apply the CP1252→Unicode
+    special character mapping.  The returned strings use Latin-1 code
+    points that match the original CP1252 bytes.  These can be safely
+    passed to QUX.exe via subprocess with encoding='latin-1'.
+    """
+    for marker in (b'Binary:\n', b'Values:\n'):
+        pos = raw_bytes.find(marker)
+        if pos >= 0:
+            header_bytes = raw_bytes[:pos]
+            break
+    else:
+        header_bytes = raw_bytes
+
+    text = header_bytes.decode('latin-1')
+    lines = text.split('\n')
+
+    var_start = None
+    for i, line in enumerate(lines):
+        if line.strip().lower() == 'variables:':
+            var_start = i + 1
+            break
+
+    if var_start is None:
+        return []
+
+    names = []
+    for line in lines[var_start:]:
+        if not line.strip():
+            continue
+        parts = line.lstrip().split('\t')
+        if len(parts) >= 3:
+            names.append(parts[1])
+    return names
+
+
 def _is_utf16le(filepath: str) -> bool:
     """Detect UTF-16 LE encoding via BOM or zero-byte pattern.
 
@@ -502,7 +540,23 @@ class RawFile:
         except ImportError:
             return None
 
-        var_names = [v["name"] for v in correct_variables]
+        # Extract raw probe names from header bytes (Latin-1 decoded,
+        # preserving original CP1252 byte values).  The Unicode-decoded
+        # names from correct_variables would encode as multi-byte UTF-8
+        # when passed to QUX via subprocess, breaking probe recognition.
+        raw_var_names = _extract_raw_var_names(raw_bytes)
+        if not raw_var_names:
+            return None
+
+        # QUX cannot parse probes containing non-ASCII bytes (CP1252 Greek
+        # letters, symbols like †).  Filter to ASCII-only probes; the full
+        # variable set is still available via spicelib fallback.
+        var_names = [n for n in raw_var_names if all(0x20 <= ord(c) < 0x7f for c in n)]
+        if len(var_names) < len(raw_var_names):
+            logger.debug(
+                "QUX: %d/%d probes are non-ASCII — using ASCII subset",
+                len(raw_var_names) - len(var_names), len(raw_var_names),
+            )
         if not var_names:
             return None
 
@@ -527,18 +581,27 @@ class RawFile:
         data, meta = result
         n_points, n_vars = data.shape
 
-        # Build variables list
+        # Build type lookup from the full decoded variable list.
+        # Map by Unicode name for display; QUX var_names are Latin-1
+        # but ASCII probes are identical in both encodings.
+        cv_by_name = {cv["name"]: cv for cv in correct_variables}
+
         variables = []
-        for i, cv in enumerate(correct_variables):
+        for i, name in enumerate(var_names):
+            # Match to the correct_variables entry by name
+            cv = cv_by_name.get(name)
+            if cv is None:
+                # Non-ASCII probe filtered out — skip (shouldn't happen now)
+                continue
             var_type = cv.get("type", "unknown")
-            if meta.get("is_complex") and not cv["name"].lower().startswith(
+            if meta.get("is_complex") and not name.lower().startswith(
                 ("freq", "frequency", "hz", "time")
             ):
                 var_type = (
                     "voltage"
-                    if cv["name"].lower().startswith("v(")
+                    if name.lower().startswith("v(")
                     else "current"
-                    if cv["name"].lower().startswith("i(")
+                    if name.lower().startswith("i(")
                     else "unknown"
                 )
             variables.append({

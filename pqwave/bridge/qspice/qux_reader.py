@@ -211,6 +211,8 @@ def load_qraw_via_qux(filepath: str, var_names: list,
     if not var_names:
         return None
 
+    # Probe names are already Latin-1 strings preserving original CP1252
+    # byte values (from _extract_raw_var_names in rawfile.py).
     probes = ",".join(var_names)
 
     # --- Step 1: metadata via SPICE format (minimal Nline — header only) ---
@@ -220,7 +222,7 @@ def load_qraw_via_qux(filepath: str, var_names: list,
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10,
+            cmd, capture_output=True, encoding="latin-1", errors="replace", timeout=10,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         logger.warning("QUX metadata call failed, falling back to spicelib: %s", exc)
@@ -254,7 +256,7 @@ def load_qraw_via_qux(filepath: str, var_names: list,
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=120,
+            cmd, capture_output=True, encoding="latin-1", errors="replace", timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         logger.warning("QUX data call failed, falling back to spicelib: %s", exc)
