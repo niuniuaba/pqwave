@@ -21,9 +21,9 @@ from pqwave.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Minimal Nline for metadata-only calls — we just need header info
-# (variable names, plot type, point count), not actual data points.
-_META_NLINE = 1
+# Nline for metadata-only SPICE calls — need enough points so QUX reports
+# accurate plot type info, but not so many that it's slow.
+_META_NLINE = 10
 
 
 def _build_qux_cmd(qux_path: str, qraw_path: str, probes: str,
@@ -128,6 +128,11 @@ def _parse_csv_data(stdout: str, var_names: list, is_complex: bool) -> np.ndarra
             return np.array([])
 
         lines = text.splitlines()
+
+        # QUX CSV output has a header line with quoted column names
+        if lines and lines[0].startswith('"'):
+            lines = lines[1:]
+
         n_vars = len(var_names)
         n_points = len(lines)
 
@@ -177,12 +182,16 @@ def _parse_csv_data(stdout: str, var_names: list, is_complex: bool) -> np.ndarra
         return np.array([])
 
 
-def load_qraw_via_qux(filepath: str, var_names: list):
+def load_qraw_via_qux(filepath: str, var_names: list,
+                      total_points: int = 0):
     """Try to load .qraw data via QUX.exe -Export.
 
     Args:
         filepath: Path to the .qraw file.
         var_names: List of variable names to extract (from header parse).
+        total_points: Actual point count from the file header (No. Points
+            line).  Used for the data-export Nline so QUX returns every
+            point.  If 0, falls back to a large fixed Nline.
 
     Returns:
         ``(data, metadata)`` on success where *data* is a 2-D numpy
@@ -227,9 +236,10 @@ def load_qraw_via_qux(filepath: str, var_names: list):
         return None
 
     # --- Step 2: data via CSV format ---
-    n_points = meta.get("n_points", 0)
-    if n_points > 0:
-        nline = n_points - 1  # all points in one step
+    # Use the actual point count from the file header (trustworthy), not
+    # the metadata call's No. Points (which reports export count = Nline+1).
+    if total_points > 0:
+        nline = total_points - 1
     else:
         nline = 1_000_000  # fallback: generous but not absurd
 

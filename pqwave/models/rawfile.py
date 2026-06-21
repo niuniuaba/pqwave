@@ -504,8 +504,18 @@ class RawFile:
         if not var_names:
             return None
 
+        # Parse No. Points from the raw file header — this is the
+        # authoritative point count (QUX metadata reports export count,
+        # not file total).
+        total_points = 0
+        import re
+        header_text = raw_bytes.decode("utf-8", errors="replace")
+        m = re.search(r"No\. Points:\s*(\d+)", header_text)
+        if m:
+            total_points = int(m.group(1))
+
         try:
-            result = load_qraw_via_qux(self.filename, var_names)
+            result = load_qraw_via_qux(self.filename, var_names, total_points)
         except Exception:
             logger.debug("QUX load failed, falling back to spicelib", exc_info=True)
             return None
