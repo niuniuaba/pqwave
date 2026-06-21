@@ -683,7 +683,7 @@ class RawFile:
         return bytes(buf)
 
     def parse(self):
-        """Parse the raw file — QUX.exe first, spicelib as fallback."""
+        """Parse the raw file — spicelib first, QUX.exe as fallback."""
         # Reject empty files early
         if os.path.getsize(self.filename) == 0:
             raise ValueError(
@@ -694,30 +694,43 @@ class RawFile:
         self._data_cache = {}
 
         # Read only the header portion for variable name parsing
-        # (spicelib's character-by-character header reading breaks multi-byte UTF-8)
         raw_bytes = self._read_header_bytes()
 
         # Parse variable names directly from bytes (correct UTF-8 decoding)
         correct_variables, is_ac_or_complex = _parse_header_variables(raw_bytes)
 
-        # Try QUX-based loading (official QSPICE data export — no encoding
-        # issues).  Falls back to spicelib transparently if QUX is absent.
+        # --- Try spicelib first (exact original simulation data) ---
+        spicelib_ok = False
+        if SPICELIB_AVAILABLE:
+            try:
+                self._load_via_spicelib(correct_variables, is_ac_or_complex)
+                spicelib_ok = True
+            except Exception:
+                logger.debug("spicelib failed, trying QUX fallback", exc_info=True)
+
+        if spicelib_ok:
+            return
+
+        # --- spicelib unavailable or failed — try QUX ---
         qux_dataset = self._try_load_qux(correct_variables, is_ac_or_complex, raw_bytes)
         if qux_dataset is not None:
             self.datasets.append(qux_dataset)
             self._extract_step_info()
             return
 
-        # QUX unavailable or failed — fall back to spicelib
+        # --- Both failed ---
         if not SPICELIB_AVAILABLE:
             raise ImportError(
                 "Cannot read this file: spicelib is not installed and "
                 "QSPICE/QUX.exe is not available. "
                 "Install spicelib with: pip install spicelib"
             )
+        raise RuntimeError(
+            "Failed to parse file with both spicelib and QUX.exe"
+        )
 
-        # Preprocess file for encoding (fix QSPICE special characters)
-        # This is needed for spicelib to read the binary data
+    def _load_via_spicelib(self, correct_variables, is_ac_or_complex):
+        """Load raw file data via spicelib (original simulation timesteps)."""
         load_path = preprocess_raw_file(self.filename)
         if load_path != self.filename:
             self._tmp_file = load_path
