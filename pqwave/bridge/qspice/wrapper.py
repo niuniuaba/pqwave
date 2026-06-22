@@ -115,11 +115,15 @@ def resolve_qux() -> str | None:
     return None
 
 
-def qsch2cir(qsch_path: str) -> str:
+def qsch2cir(qsch_path: str, timeout: int = 30) -> str:
     """Convert a .qsch schematic to a .cir netlist via QUX.exe -Netlist.
 
     QUX.exe is QSPICE's CLI tool — this does NOT require the QSPICE GUI.
     Works under Wine on Linux.
+
+    Args:
+        qsch_path: Path to the .qsch schematic file.
+        timeout: Seconds to wait for QUX -Netlist (default 30).
 
     Returns the path to the generated .cir file (alongside the .qsch).
     Raises FileNotFoundError if QUX is unavailable.
@@ -143,7 +147,7 @@ def qsch2cir(qsch_path: str) -> str:
         cmd = [wine, qux, "-Netlist", qsch_path, "-stdout"]
 
     proc = subprocess.run(
-        cmd, capture_output=True, timeout=30,
+        cmd, capture_output=True, timeout=timeout,
     )
 
     if proc.returncode != 0:
@@ -256,7 +260,8 @@ class QspiceBridgeRunner:
         # 4. Handle non-zero exit
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr)
-            sys.stderr.write(proc.stdout)
+            if not proc.stderr and proc.stdout:
+                sys.stderr.write(proc.stdout)
             return proc.returncode
 
         # 5. Verify .qraw output
