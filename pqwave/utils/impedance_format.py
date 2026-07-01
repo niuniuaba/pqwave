@@ -6,7 +6,6 @@ or rectangular (R+jX) format with SI prefixes.
 from __future__ import annotations
 
 import math
-import numpy as np
 
 
 def format_complex(

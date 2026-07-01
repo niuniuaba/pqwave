@@ -17,7 +17,7 @@ class TestFormatComplex:
     def test_polar_negative_phase(self):
         from pqwave.utils.impedance_format import format_complex
         result = format_complex(50.0 - 30.0j, "Ω", "polar")
-        assert "-" in result or "∠" in result  # negative phase marker
+        assert "∠ -" in result  # negative phase should show minus sign in angle
 
     def test_rectangular_positive_reactance(self):
         from pqwave.utils.impedance_format import format_complex
