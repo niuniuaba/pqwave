@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QLineEdit,
 )
 from PyQt6.QtCore import Qt as QtCore_Qt
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal, pyqtSlot, QObject
 from PyQt6.QtGui import QColor, QFont
 
 from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme, FontConfig, AxisConfig
@@ -60,10 +60,11 @@ import uuid
 logger = get_logger(__name__)
 
 
-class _VarTreeRenameFilter:
+class _VarTreeRenameFilter(QObject):
     """Event filter to handle Escape key during inline rename in the variable tree."""
 
     def __init__(self, cancel_callback):
+        super().__init__()
         self._cancel = cancel_callback
 
     def eventFilter(self, obj, event):
@@ -271,6 +272,7 @@ class MainWindow(QMainWindow):
         self.chat_panel = ChatPanel()
         from pqwave.session.api import SessionAPI
         self._repl = ReplExecutor(session=SessionAPI(state=self.state))
+        self.session_api = self._repl._session
         self._ai_translator = None
         self._connect_chat_panel()
 
@@ -4395,17 +4397,13 @@ class MainWindow(QMainWindow):
                             f"'{old_name}'. Remove the trace first.")
                         return
 
-            ds = self.state.datasets[dataset_idx]
-            try:
-                ds.rename_variable(old_name, new_name)
-            except KeyError:
+            # Use the session API for the rename (includes active trace check)
+            result = self.session_api.execute(
+                f"rename_vector({dataset_idx}, '{old_name}', '{new_name}')")
+            if not result.get("ok"):
                 QMessageBox.warning(
                     self, "Rename Failed",
-                    f"Variable '{old_name}' not found in dataset {dataset_idx}.")
-                return
-            except ValueError as e:
-                QMessageBox.warning(
-                    self, "Rename Failed", str(e))
+                    result.get("error", "Unknown error"))
                 return
 
             # Update UI
