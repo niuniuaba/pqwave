@@ -18,14 +18,24 @@ from pqwave.analysis.polar import (
     detect_polar_vectors,
 )
 from pqwave.analysis.power_analyzer import power_analysis
+from pqwave.analysis.smith import (
+    clamp_gamma,
+    compute_reflection_coefficient,
+    normalize_impedance,
+    smith_grid_circles,
+)
 
 __all__ = [
+    "clamp_gamma",
     "compute_bode",
     "compute_histogram",
     "compute_nyquist_trace",
     "compute_polar_trace",
+    "compute_reflection_coefficient",
     "detect_bode_vectors",
     "detect_nyquist_vectors",
     "detect_polar_vectors",
+    "normalize_impedance",
     "power_analysis",
+    "smith_grid_circles",
 ]
