@@ -2244,7 +2244,9 @@ class MainWindow(QMainWindow):
         with open(netlist_path, "r") as f:
             netlist_text = f.read()
 
-        from pqwave.analysis.worst_case import enumerate_corners, modify_netlist
+        from pqwave.analysis.worst_case import (
+            enumerate_corners, modify_netlist, parse_op_output,
+        )
 
         corners = enumerate_corners(components)
 
@@ -2287,15 +2289,8 @@ class MainWindow(QMainWindow):
                     timeout=60,
                     cwd=work_dir,
                 )
-                # Inline fallback: try to parse a float from last word
-                # of stdout. Task 14 will add a proper parse_op_output.
-                output_value: float | None = None
-                if proc.stdout and proc.stdout.strip():
-                    try:
-                        output_value = float(
-                            proc.stdout.strip().split()[-1])
-                    except (ValueError, IndexError):
-                        output_value = None
+                output_value: float | None = parse_op_output(
+                    proc.stdout)
 
                 results.append({
                     "corner": i,

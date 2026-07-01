@@ -188,3 +188,31 @@ class TestFormatSpiceValue:
         assert "k" not in result
         assert "M" not in result
         assert result == "999"
+
+
+class TestParseOpOutput:
+    """Test ngspice .op output parsing."""
+
+    def test_parse_simple_voltage(self):
+        from pqwave.analysis.worst_case import parse_op_output
+        stdout = "v(out) = 5.000000e+00\nv(in) = 1.000000e+00\n"
+        result = parse_op_output(stdout, "v(out)")
+        assert abs(result - 5.0) < 1e-9
+
+    def test_parse_first_voltage_when_no_target(self):
+        from pqwave.analysis.worst_case import parse_op_output
+        stdout = "v(1) = 3.300000e+00\nv(2) = 1.800000e+00\n"
+        result = parse_op_output(stdout)
+        assert abs(result - 3.3) < 1e-9
+
+    def test_parse_no_match_returns_none(self):
+        from pqwave.analysis.worst_case import parse_op_output
+        stdout = "some random text\nwithout voltages\n"
+        result = parse_op_output(stdout, "v(out)")
+        assert result is None
+
+    def test_parse_current(self):
+        from pqwave.analysis.worst_case import parse_op_output
+        stdout = "i(vsource) = 1.234000e-03\n"
+        result = parse_op_output(stdout, "i(vsource)")
+        assert abs(result - 0.001234) < 1e-9

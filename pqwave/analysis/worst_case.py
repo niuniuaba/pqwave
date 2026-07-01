@@ -108,6 +108,30 @@ def modify_netlist(netlist: str, corner: dict[str, float]) -> str:
     return "\n".join(result)
 
 
+def parse_op_output(stdout: str, target: str | None = None) -> float | None:
+    """Parse an ngspice .op output for a voltage or current value.
+
+    Args:
+        stdout: ngspice stdout text from a .op simulation.
+        target: Optional variable name to match (e.g., "v(out)").
+                If None, returns the first voltage/current found.
+
+    Returns:
+        Float value or None if no match found.
+    """
+    pattern = re.compile(
+        r'([vi])\((\S+)\)\s*=\s*([-+]?\d+\.?\d*(?:[eE][-+]?\d+)?)'
+    )
+    for match in pattern.finditer(stdout):
+        vtype = match.group(1)
+        node = match.group(2)
+        value_str = match.group(3)
+        full_name = f"{vtype}({node})"
+        if target is None or full_name.lower() == target.lower():
+            return float(value_str)
+    return None
+
+
 def _format_spice_value(value: float) -> str:
     """Format a float as a SPICE-compatible value string."""
     if abs(value) >= 1e6:
