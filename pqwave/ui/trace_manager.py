@@ -21,6 +21,7 @@ from pqwave.models.state import ApplicationState
 from pqwave.models.trace import Trace, AxisAssignment
 from pqwave.models.expression import ExprEvaluator
 from pqwave.utils.colors import ColorManager
+from pqwave.utils.impedance_format import format_complex
 from pqwave.digital.digital_renderer import threshold_and_step
 from pqwave.digital.threshold_config import ThresholdConfig
 from pqwave.digital.trace_type_manager import TraceTypeManager
@@ -1321,14 +1322,23 @@ class TraceManager(QtCore.QObject):
 
             # Collect Y values for visible X cursors. Store XA value for back-annotation.
             values = []
+            has_complex = np.iscomplexobj(trace.y_data)
             for ci, cursor_x in enumerate((xa_linear, xb_linear)):
                 if cursor_x is not None and len(trace.x_data) > 0:
                     x_min, x_max = float(trace.x_data[0]), float(trace.x_data[-1])
                     clipped_x = max(x_min, min(cursor_x, x_max))
-                    y_val = float(np.interp(clipped_x, trace.x_data, trace.y_data))
-                    values.append(f"{y_val:.6g}")
-                    if ci == 0:  # XA cursor
-                        self.last_cursor_y[trace.name] = y_val
+                    if has_complex:
+                        mode = ApplicationState().impedance_format
+                        y_interp = np.interp(clipped_x, trace.x_data, trace.y_data)
+                        s = format_complex(y_interp, "", mode)
+                        values.append(s)
+                        if ci == 0:
+                            self.last_cursor_y[trace.name] = float(np.abs(y_interp))
+                    else:
+                        y_val = float(np.interp(clipped_x, trace.x_data, trace.y_data))
+                        values.append(f"{y_val:.6g}")
+                        if ci == 0:
+                            self.last_cursor_y[trace.name] = y_val
 
             suffix = " " + " ".join(values) if values else ""
             full_name = base_name + suffix

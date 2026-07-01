@@ -43,6 +43,7 @@ from pqwave.ui.axis_manager import AxisManager
 from pqwave.ui.panel_grid import PanelGrid
 from pqwave.ui.mark_panel import MarkPanel
 from pqwave.utils.colors import ColorManager
+from pqwave.utils.impedance_format import format_complex
 from pqwave.logging_config import get_logger
 from pqwave.bridge.xschem.window_registry import get_registry
 from pqwave.ui.keybinding_manager import KeyBindingManager
@@ -4314,11 +4315,23 @@ class MainWindow(QMainWindow):
         """
         state = ApplicationState()
         state.impedance_format = mode
-        # Refresh cursor readouts to reflect new format
+        # Refresh all cursor readouts to reflect new format
         if self._bound_plot_widget:
-            xa = self._bound_plot_widget.cursor_xa_line
-            if xa and self._bound_plot_widget.cursor_xa_visible:
+            pw = self._bound_plot_widget
+            xa = pw.cursor_xa_line
+            if xa and pw.cursor_xa_visible:
                 self._on_cursor_xa_changed(xa.value())
+            ya = pw.cursor_yA_line
+            if ya and pw.cursor_yA_visible:
+                self._on_cursor_yA_changed(ya.value())
+            yb = pw.cursor_yB_line
+            if yb and pw.cursor_yB_visible:
+                self._on_cursor_yB_changed(yb.value())
+            y2 = pw.cursor_y2_line
+            if y2 and pw.cursor_y2_visible:
+                self._on_cursor_y2_changed(y2.value())
+        # Force refresh legend cursor values
+        self._update_legend_cursor_values()
 
     def _open_mark_panel(self):
         """Create and show the mark data panel."""
@@ -5146,12 +5159,41 @@ class MainWindow(QMainWindow):
         finally:
             self._cursor_sync_in_progress = False
 
+    def _has_complex_trace(self) -> bool:
+        """Check if any visible trace in the active panel has complex data."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return False
+        for trace in panel.trace_manager.state_traces:
+            if trace.visible and np.iscomplexobj(trace.y_data):
+                return True
+        return False
+
     def _update_cursor_status(self) -> None:
         """Read cursor positions and deltas, update status bar and legend."""
         positions = self.plot_widget.get_cursor_positions()
         deltas = self.plot_widget.get_cursor_deltas()
+        # Build complex-formatted overrides when traces have complex data
+        complex_formats = None
+        if self._has_complex_trace():
+            state = ApplicationState()
+            mode = state.impedance_format
+            cf = {}
+            ya = positions.get('yA')
+            if ya is not None:
+                cf['yA'] = format_complex(complex(ya, 0), '', mode)
+            yb = positions.get('yB')
+            if yb is not None:
+                cf['yB'] = format_complex(complex(yb, 0), '', mode)
+            dy1 = deltas.get('dy1')
+            if dy1 is not None:
+                cf['dy1'] = format_complex(complex(dy1, 0), '', mode)
+            dy2 = deltas.get('dy2')
+            if dy2 is not None:
+                cf['dy2'] = format_complex(complex(dy2, 0), '', mode)
+            complex_formats = cf if cf else None
         if self.menu_manager:
-            self.menu_manager.update_cursor_status(positions, deltas)
+            self.menu_manager.update_cursor_status(positions, deltas, complex_formats)
         self._update_legend_cursor_values()
 
     def _update_legend_cursor_values(self) -> None:
@@ -5537,6 +5579,9 @@ class MainWindow(QMainWindow):
             self.state.impedance_format = imp_fmt
         else:
             self.state.impedance_format = 'polar'
+        # Sync menu radio button with restored state
+        if self.menu_manager:
+            self.menu_manager.set_impedance_format_checked(imp_fmt)
 
         # Font configs
         self.state.title_font = FontConfig.from_dict(data.get('title_font', {}))

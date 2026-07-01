@@ -545,6 +545,10 @@ class MenuManager:
         action_group.addAction(rect_action)
         action_group.setExclusive(True)
 
+        # Store for external access (menu state sync)
+        self.actions['impedance_polar'] = polar_action
+        self.actions['impedance_rect'] = rect_action
+
         self.menubar.addMenu(view_menu)
 
         # Analyze menu
@@ -968,12 +972,30 @@ class MenuManager:
         """
         pass  # No dynamic enable/disable needed — items always available
 
-    def update_cursor_status(self, positions: dict, deltas: dict) -> None:
+    def set_impedance_format_checked(self, mode: str) -> None:
+        """Sync impedance format menu radio button with saved state.
+
+        Args:
+            mode: 'polar' or 'rectangular'
+        """
+        polar = self.actions.get('impedance_polar')
+        rect = self.actions.get('impedance_rect')
+        if mode == 'polar' and polar:
+            polar.setChecked(True)
+        elif mode == 'rectangular' and rect:
+            rect.setChecked(True)
+
+    def update_cursor_status(self, positions: dict, deltas: dict,
+                              complex_formats: Optional[dict] = None) -> None:
         """Update cursor delta display in status bar.
 
         Args:
             positions: dict with keys xa, xb, yA, yB, y2
             deltas: dict with keys dx, dy1, dy2
+            complex_formats: optional dict overriding yA, yB, dy1, dy2 with
+                             pre-formatted complex-value strings (e.g. "5.2 ∠ 30.0°").
+                             When provided, the matching position/delta label uses
+                             this string instead of the auto-formatted float.
         """
         import math
 
@@ -1005,10 +1027,11 @@ class MenuManager:
 
         # Y cursor section
         y_parts = []
-        ya_s = fmt(positions.get("yA"))
-        yb_s = fmt(positions.get("yB"))
-        dy1_s = fmt(deltas.get("dy1"))
-        dy2_s = fmt(deltas.get("dy2"))
+        cf = complex_formats or {}
+        ya_s = cf.get('yA', fmt(positions.get("yA")))
+        yb_s = cf.get('yB', fmt(positions.get("yB")))
+        dy1_s = cf.get('dy1', fmt(deltas.get("dy1")))
+        dy2_s = cf.get('dy2', fmt(deltas.get("dy2")))
         if ya_s is not None:
             y_parts.append(f"YA:{ya_s}")
         if yb_s is not None:
