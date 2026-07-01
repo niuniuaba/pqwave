@@ -13,13 +13,19 @@ from pqwave.analysis.nyquist import (
     compute_nyquist_trace,
     detect_nyquist_vectors,
 )
+from pqwave.analysis.polar import (
+    compute_polar_trace,
+    detect_polar_vectors,
+)
 from pqwave.analysis.power_analyzer import power_analysis
 
 __all__ = [
     "compute_bode",
     "compute_histogram",
     "compute_nyquist_trace",
+    "compute_polar_trace",
     "detect_bode_vectors",
     "detect_nyquist_vectors",
+    "detect_polar_vectors",
     "power_analysis",
 ]

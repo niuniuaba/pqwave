@@ -2257,6 +2257,7 @@ class MainWindow(QMainWindow):
             'compute_power_analysis': self._compute_power_analysis,
             'histogram': self._show_histogram,
             'nyquist': self._show_nyquist,
+            'polar': self._show_polar,
             'bode': self._show_bode,
             'mc_stats': self._on_mc_stats,
             'mc_histogram': self._on_mc_histogram,
@@ -6453,6 +6454,63 @@ class MainWindow(QMainWindow):
         pw.addItem(curve)
         pw.set_axis_label("X", "Real")
         pw.set_axis_label("Y1", "Imaginary")
+        pw.getViewBox().setAspectLocked(True, ratio=1.0)
+        pw.autoRange()
+
+    def _show_polar(self) -> None:
+        """Compute and display Polar plot in a new split panel."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        if self.raw_file is None or self.state.current_dataset_idx is None:
+            self.statusBar().showMessage("No data loaded", 3000)
+            return
+
+        dataset_idx = self.state.current_dataset_idx
+        var_names = self.raw_file.get_variable_names(dataset_idx)
+
+        from pqwave.analysis.polar import detect_polar_vectors
+        auto_pair = detect_polar_vectors(var_names)
+
+        from pqwave.ui.polar_dialog import PolarVectorDialog
+        dlg = PolarVectorDialog(var_names, self, auto_pair=auto_pair)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        mag_var, phase_var = dlg.selected_pair()
+        mag_data = self.raw_file.get_variable_data(mag_var, dataset_idx)
+        phase_data = self.raw_file.get_variable_data(phase_var, dataset_idx)
+        if mag_data is None or phase_data is None:
+            QMessageBox.warning(self, "Data Error",
+                                "Could not read vector data.")
+            return
+
+        from pqwave.analysis.polar import compute_polar_trace
+        result = compute_polar_trace(mag=mag_data, phase=phase_data)
+
+        if self.panel_grid.panel_count >= 4:
+            QMessageBox.information(
+                self, "Max Panels",
+                "Maximum 4 panels reached. Close a panel first.")
+            return
+
+        new_panel = self.panel_grid.split_panel(
+            self.panel_grid.active_panel_id, orientation="vertical")
+        if new_panel is None:
+            return
+
+        import pyqtgraph as pg
+
+        pw = new_panel.plot_widget
+
+        curve = pg.PlotCurveItem(
+            result["x"], result["y"],
+            pen=pg.mkPen("cyan", width=1),
+            skipFiniteCheck=True,
+        )
+        pw.addItem(curve)
+        pw.set_axis_label("X", "Real (mag.cos(theta))")
+        pw.set_axis_label("Y1", "Imag (mag.sin(theta))")
         pw.getViewBox().setAspectLocked(True, ratio=1.0)
         pw.autoRange()
 
