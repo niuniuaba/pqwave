@@ -588,6 +588,12 @@ class MenuManager:
         analyze_menu.addAction(polar_action)
         self.actions["polar"] = polar_action
 
+        smith_action = QAction("Smith Chart", self.parent)
+        smith_action.triggered.connect(
+            self.callbacks.get("smith", lambda: None))
+        analyze_menu.addAction(smith_action)
+        self.actions["smith"] = smith_action
+
         bode_action = QAction("Bode Plot", self.parent)
         bode_action.triggered.connect(
             self.callbacks.get("bode", lambda: None))

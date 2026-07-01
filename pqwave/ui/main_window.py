@@ -2258,6 +2258,7 @@ class MainWindow(QMainWindow):
             'histogram': self._show_histogram,
             'nyquist': self._show_nyquist,
             'polar': self._show_polar,
+            'smith': self._show_smith,
             'bode': self._show_bode,
             'mc_stats': self._on_mc_stats,
             'mc_histogram': self._on_mc_histogram,
@@ -6513,6 +6514,93 @@ class MainWindow(QMainWindow):
         pw.set_axis_label("Y1", "Imag (mag.sin(theta))")
         pw.getViewBox().setAspectLocked(True, ratio=1.0)
         pw.autoRange()
+
+    def _show_smith(self) -> None:
+        """Compute and display Smith chart in a new split panel."""
+        panel = self.panel_grid.get_active_panel()
+        if panel is None:
+            return
+        if self.raw_file is None or self.state.current_dataset_idx is None:
+            self.statusBar().showMessage("No data loaded", 3000)
+            return
+
+        dataset_idx = self.state.current_dataset_idx
+        var_names = self.raw_file.get_variable_names(dataset_idx)
+
+        from pqwave.ui.smith_dialog import SmithVectorDialog
+
+        dlg = SmithVectorDialog(var_names, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        var_name = dlg.selected_vector()
+        z0 = dlg.reference_impedance()
+        z_data = self.raw_file.get_variable_data(var_name, dataset_idx)
+        if z_data is None:
+            QMessageBox.warning(self, "Data Error",
+                                "Could not read vector data.")
+            return
+
+        from pqwave.analysis.smith import (
+            compute_reflection_coefficient,
+            smith_grid_circles,
+            clamp_gamma,
+        )
+        gamma = compute_reflection_coefficient(z_data.astype(np.complex128), z0)
+        gamma = clamp_gamma(gamma)
+
+        if self.panel_grid.panel_count >= 4:
+            QMessageBox.information(
+                self, "Max Panels",
+                "Maximum 4 panels reached. Close a panel first.")
+            return
+
+        new_panel = self.panel_grid.split_panel(
+            self.panel_grid.active_panel_id, orientation="vertical")
+        if new_panel is None:
+            return
+
+        import pyqtgraph as pg
+        from PyQt6.QtGui import QPen, QColor
+        from PyQt6.QtWidgets import QGraphicsPathItem
+        from PyQt6.QtGui import QPainterPath
+
+        pw = new_panel.plot_widget
+
+        # Render Smith chart grid as QPainterPath
+        grid = smith_grid_circles()
+        grid_pen = QPen(QColor(80, 80, 80), 1)
+
+        for r_str, (cx, cy, radius) in grid["r_circles"].items():
+            path = QPainterPath()
+            path.addEllipse(cx - radius, cy - radius, 2 * radius, 2 * radius)
+            item = QGraphicsPathItem(path)
+            item.setPen(grid_pen)
+            pw.addItem(item)
+
+        for x_str, (cx, cy, radius) in grid["x_arcs"].items():
+            path = QPainterPath()
+            path.addEllipse(cx - radius, cy - radius, 2 * radius, 2 * radius)
+            item = QGraphicsPathItem(path)
+            item.setPen(
+                QPen(QColor(60, 60, 60), 1, pg.QtCore.Qt.PenStyle.DashLine)
+            )
+            pw.addItem(item)
+
+        # Plot trace
+        curve = pg.PlotCurveItem(
+            gamma.real,
+            gamma.imag,
+            pen=pg.mkPen("cyan", width=1),
+            skipFiniteCheck=True,
+        )
+        pw.addItem(curve)
+        pw.set_axis_label("X", "Re(Gamma)")
+        pw.set_axis_label("Y1", "Im(Gamma)")
+        pw.getViewBox().setAspectLocked(True, ratio=1.0)
+        # Set view to [-1.2, 1.2] to show full Smith chart + margin
+        pw.getViewBox().setXRange(-1.2, 1.2)
+        pw.getViewBox().setYRange(-1.2, 1.2)
 
     def _show_bode(self) -> None:
         """Compute and display Bode plot in dual split panels (gain + phase)."""
