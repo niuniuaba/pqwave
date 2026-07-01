@@ -321,6 +321,8 @@ class ApplicationState:
         self.repl_bg: str = ""  # empty = use default dark bg
 
         self.fft_config: FftConfig = FftConfig()
+        # Impedance display format: 'polar' or 'rectangular'
+        self.impedance_format: str = 'polar'
         self.eye_diagram_config: EyeDiagramConfig = EyeDiagramConfig()
 
         # Tool paths for external converters (none = use $PATH)
@@ -535,6 +537,7 @@ class ApplicationState:
             'tick_font': self.tick_font.to_dict(),
             'ui_font': self.ui_font.to_dict(),
             'fft_config': self.fft_config.to_dict(),
+            'impedance_format': self.impedance_format,
             'eye_diagram_config': self.eye_diagram_config.to_dict(),
             # Per-panel state (new format)
             'panels': {pid: ps.to_dict() for pid, ps in self.panels.items()},
@@ -563,6 +566,7 @@ class ApplicationState:
             'panel_order': list(self.panel_order),
             'active_panel_id': self.active_panel_id,
             'fft_config': self.fft_config.to_dict(),
+            'impedance_format': self.impedance_format,
             'eye_diagram_config': self.eye_diagram_config.to_dict(),
         }
         # Backward compat: include flat keys for the active panel

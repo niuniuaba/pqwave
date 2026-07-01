@@ -10,7 +10,7 @@ and action management.
 """
 
 from PyQt6.QtWidgets import QMenuBar, QMenu, QToolBar, QStatusBar, QLabel, QStyle
-from PyQt6.QtGui import QAction, QKeySequence, QIcon
+from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
 from PyQt6.QtCore import Qt
 
 
@@ -519,6 +519,31 @@ class MenuManager:
         )
         view_menu.addAction(close_panel_action)
         self.actions["close_panel"] = close_panel_action
+
+        view_menu.addSeparator()
+
+        # Impedance Format submenu
+        impedance_menu = view_menu.addMenu("Impedance Format")
+
+        polar_action = QAction("Polar (|Z| Angle)", self.parent)
+        polar_action.setCheckable(True)
+        polar_action.setChecked(True)  # default
+        polar_action.triggered.connect(
+            lambda: self.parent._set_impedance_format("polar"))
+        impedance_menu.addAction(polar_action)
+
+        rect_action = QAction("Rectangular (R+jX)", self.parent)
+        rect_action.setCheckable(True)
+        rect_action.setChecked(False)
+        rect_action.triggered.connect(
+            lambda: self.parent._set_impedance_format("rectangular"))
+        impedance_menu.addAction(rect_action)
+
+        # Make mutually exclusive
+        action_group = QActionGroup(self.parent)
+        action_group.addAction(polar_action)
+        action_group.addAction(rect_action)
+        action_group.setExclusive(True)
 
         self.menubar.addMenu(view_menu)
 

@@ -4306,6 +4306,20 @@ class MainWindow(QMainWindow):
             self.menu_manager.set_y_cursor_B_checked(checked)
         self._update_cursor_status()
 
+    def _set_impedance_format(self, mode: str) -> None:
+        """Set impedance display format and refresh cursor readouts.
+
+        Args:
+            mode: 'polar' or 'rectangular'
+        """
+        state = ApplicationState()
+        state.impedance_format = mode
+        # Refresh cursor readouts to reflect new format
+        if self._bound_plot_widget:
+            xa = self._bound_plot_widget.cursor_xa_line
+            if xa and self._bound_plot_widget.cursor_xa_visible:
+                self._on_cursor_xa_changed(xa.value())
+
     def _open_mark_panel(self):
         """Create and show the mark data panel."""
         if self.mark_panel is None:
@@ -5486,6 +5500,7 @@ class MainWindow(QMainWindow):
                 'status_bar_visible': self.state.status_bar_visible,
                 'chat_panel_visible': self.state.chat_panel_visible,
                 'tool_paths': dict(self.state.tool_paths),
+                'impedance_format': self.state.impedance_format,
             }
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -5515,6 +5530,13 @@ class MainWindow(QMainWindow):
             self.plot_widget.set_viewbox_theme(self.state.viewbox_theme)
         except ValueError as e:
             logger.warning("Invalid viewbox theme in preferences: %s", e)
+
+        # Impedance display format
+        imp_fmt = data.get('impedance_format', 'polar')
+        if imp_fmt in ('polar', 'rectangular'):
+            self.state.impedance_format = imp_fmt
+        else:
+            self.state.impedance_format = 'polar'
 
         # Font configs
         self.state.title_font = FontConfig.from_dict(data.get('title_font', {}))
