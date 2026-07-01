@@ -113,43 +113,55 @@ class TestTimingAccuracy:
 
     @pytest.fixture
     def pulse_1mhz(self):
-        """1 MHz pulse, 10%-90% rise = 10 ns, sampled at 1 GHz."""
+        """1 MHz pulse, 0->1 rise and 1->0 fall each take 10 ns (linear).
+        The 10%-90% rise/fall time is therefore 8 ns.
+        Sampled at 1 GHz (100k points over a 1 us window so edges have
+        ~1000 sample points for reliable edge detection)."""
         n = 100_000
-        t = np.linspace(0, 1e-3, n)  # 1 ms window
-        # Generate a pulse with 10 ns rise time
-        v = np.zeros(n)
-        for i in range(n):
-            if t[i] < 100e-9:
-                v[i] = 0.0
-            elif t[i] < 110e-9:
-                v[i] = (t[i] - 100e-9) / 10e-9  # linear rise
-            elif t[i] < 300e-9:
-                v[i] = 1.0
-            elif t[i] < 310e-9:
-                v[i] = 1.0 - (t[i] - 300e-9) / 10e-9  # linear fall
-            else:
-                v[i] = 0.0
+        t = np.linspace(0, 1e-6, n)  # 1 us window
+        # Generate a pulse with 10 ns rise time (vectorized)
+        v = np.select(
+            [
+                t < 100e-9,
+                t < 110e-9,
+                t < 300e-9,
+                t < 310e-9,
+            ],
+            [
+                0.0,
+                (t - 100e-9) / 10e-9,           # linear rise
+                1.0,
+                1.0 - (t - 300e-9) / 10e-9,    # linear fall
+            ],
+            default=0.0,
+        )
         return t, v
 
     def test_rise_time_full_range(self, pulse_1mhz):
-        """Rise time on full data should be ~10 ns."""
+        """Rise time on full data should be ~8 ns (10%-90% of 10 ns ramp)."""
         t, v = pulse_1mhz
         lo, hi = 0.1, 0.9
         rise_mask = (v >= lo) & (v <= hi)
         rising_edges = np.where(rise_mask & (np.gradient(v) > 0))[0]
-        if len(rising_edges) >= 2:
-            dt = t[rising_edges[-1]] - t[rising_edges[0]]
-            assert abs(dt - 10e-9) < 1e-9, f"rise_time={dt}, expected ~10ns"
+        assert len(rising_edges) >= 2, (
+            f"Expected at least 2 rising edge points, got {len(rising_edges)}"
+        )
+        dt = t[rising_edges[-1]] - t[rising_edges[0]]
+        # 10%-90% of a 0-to-1 linear ramp over 10 ns is exactly 8 ns
+        assert abs(dt - 8e-9) < 2e-10, f"rise_time={dt}, expected ~8ns"
 
     def test_fall_time_full_range(self, pulse_1mhz):
-        """Fall time on full data should be ~10 ns."""
+        """Fall time on full data should be ~8 ns (10%-90% of 10 ns ramp)."""
         t, v = pulse_1mhz
         lo, hi = 0.1, 0.9
         fall_mask = (v >= lo) & (v <= hi)
         falling_edges = np.where(fall_mask & (np.gradient(v) < 0))[0]
-        if len(falling_edges) >= 2:
-            dt = t[falling_edges[-1]] - t[falling_edges[0]]
-            assert abs(dt - 10e-9) < 1e-9, f"fall_time={dt}, expected ~10ns"
+        assert len(falling_edges) >= 2, (
+            f"Expected at least 2 falling edge points, got {len(falling_edges)}"
+        )
+        dt = t[falling_edges[-1]] - t[falling_edges[0]]
+        # 10%-90% of a 1-to-0 linear ramp over 10 ns is exactly 8 ns
+        assert abs(dt - 8e-9) < 2e-10, f"fall_time={dt}, expected ~8ns"
 
     def test_rise_time_decimated(self, pulse_1mhz):
         """Rise time measured on decimated data (1600 points) may be skewed.
@@ -264,7 +276,7 @@ class TestRmsAndIntegral:
 
     def test_rms_full_sine(self, sine_1khz_1ms):
         """RMS of a unit sine over an integer number of periods = 1/sqrt(2)."""
-        t, v = sine_1khz_1ms
+        _, v = sine_1khz_1ms
         rms = float(np.sqrt(np.mean(v**2)))
         expected = 1.0 / np.sqrt(2)
         # Relaxed tolerance: discrete sampling introduces ~3.5e-6 error
