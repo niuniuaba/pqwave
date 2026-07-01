@@ -47,11 +47,94 @@ def _add(executor, expr, axis="Y1"):
 
 
 # ---------------------------------------------------------------------------
-# Dataset model unit tests
+# Dataset model unit tests (pure, no file I/O)
 # ---------------------------------------------------------------------------
 
 class TestRenameVariable:
-    """Test Dataset.rename_variable method directly."""
+    """Test Dataset.rename_variable method with minimal in-memory Dataset.
+
+    These tests construct a Dataset using a FakeRawFile mock, so they do NOT
+    depend on any real .raw file or ReplExecutor.  This keeps them as true
+    unit tests that can run without test data on disk.
+    """
+
+    # ------------------------------------------------------------------
+    # Helper: build a minimal in-memory Dataset
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_dataset():
+        """Construct a minimal Dataset backed by a FakeRawFile (no I/O)."""
+        import numpy as np
+        from pqwave.models.dataset import Dataset
+
+        class _FakeRawFile:
+            pass
+
+        rf = _FakeRawFile()
+        rf.datasets = [{
+            "title": "test",
+            "date": "",
+            "plotname": "Transient Analysis",
+            "flags": "real",
+            "variables": [
+                {"index": 0, "name": "time", "type": "time"},
+                {"index": 1, "name": "v(in)", "type": "voltage"},
+                {"index": 2, "name": "v(out)", "type": "voltage"},
+            ],
+            "data": np.column_stack([
+                np.linspace(0, 1e-6, 100),
+                np.sin(np.linspace(0, np.pi, 100)),
+                np.cos(np.linspace(0, np.pi, 100)),
+            ]),
+            "_is_ac_or_complex": False,
+        }]
+        return Dataset(rf)
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
+
+    def test_rename_updates_var_map(self):
+        """After rename, _var_map must contain the new name, not old."""
+        ds = self._make_dataset()
+        ds.rename_variable("v(in)", "v(in_renamed)")
+        assert "v(in)" not in ds._var_map
+        assert "v(in_renamed)" in ds._var_map
+
+    def test_rename_updates_variable_object_name(self):
+        """The Variable object's name attribute must be updated."""
+        ds = self._make_dataset()
+        var = ds.get_variable("v(in)")
+        assert var is not None
+        ds.rename_variable("v(in)", "v(in_renamed)")
+        assert var.name == "v(in_renamed)"
+
+    def test_rename_nonexistent_raises_keyerror(self):
+        """KeyError must be raised when old_name is not found."""
+        ds = self._make_dataset()
+        with pytest.raises(KeyError):
+            ds.rename_variable("nonexistent", "newname")
+
+    def test_rename_duplicate_raises_valueerror(self):
+        """ValueError must be raised when new_name already exists."""
+        ds = self._make_dataset()
+        with pytest.raises(ValueError):
+            ds.rename_variable("v(in)", "v(out)")
+
+
+# ---------------------------------------------------------------------------
+# Dataset model integration tests (uses ReplExecutor + real .raw file)
+# ---------------------------------------------------------------------------
+
+class TestRenameVariableIntegration:
+    """Integration-level: tests Dataset.rename_variable via ReplExecutor.
+
+    These tests exercise the full code path (ReplExecutor -> ApplicationState
+    -> Dataset -> RawFile) with a real bridge.raw file on disk.  They verify
+    that rename_variable works end-to-end through a parsed RawFile, which is
+    a heavier dependency than the in-memory unit tests above.
+    """
 
     def test_rename_updates_var_map(self):
         """After rename, _var_map must contain the new name, not old."""
@@ -73,9 +156,8 @@ class TestRenameVariable:
         ds = state.datasets[0]
         var = ds.get_variable("v(ac_p)")
         assert var is not None
-        old_name = var.name
-        ds.rename_variable("v(ac_p)", "v(ac_p_renamed")
-        assert var.name == "v(ac_p_renamed"
+        ds.rename_variable("v(ac_p)", "v(ac_p_renamed)")
+        assert var.name == "v(ac_p_renamed)"
 
     def test_rename_nonexistent_raises_keyerror(self):
         """KeyError must be raised when old_name is not found."""
