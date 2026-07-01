@@ -2207,6 +2207,162 @@ class MainWindow(QMainWindow):
             return True
         return False
 
+    def _show_worst_case(self) -> None:
+        """Open worst-case analysis configuration dialog."""
+        netlist_path = ""
+        # Try to get netlist path from active bridge
+        state = ApplicationState()
+        if state.source_files:
+            latest = state.source_files[-1]
+            if latest.path.endswith((".cir", ".sp", ".spice", ".net")):
+                netlist_path = latest.path
+
+        from pqwave.ui.worst_case_dialog import WorstCaseDialog
+        dlg = WorstCaseDialog(self, netlist_path=netlist_path)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        components = dlg.get_components()
+        if not components:
+            QMessageBox.warning(
+                self, "No Components",
+                "Add at least one component with tolerance.")
+            return
+
+        # Temperature range and analysis type are read for future use
+        # (tempco adjustment, analysis-type-aware simulation).
+        _ = dlg.get_temperature_range()
+        _ = dlg.get_analysis_type()
+        netlist_path = dlg.get_netlist_path()
+
+        if not netlist_path or not os.path.isfile(netlist_path):
+            QMessageBox.warning(
+                self, "Invalid Netlist",
+                "Select a valid SPICE netlist file.")
+            return
+
+        with open(netlist_path, "r") as f:
+            netlist_text = f.read()
+
+        from pqwave.analysis.worst_case import enumerate_corners, modify_netlist
+
+        corners = enumerate_corners(components)
+
+        # If too many corners, warn user
+        if len(corners) > 256:
+            reply = QMessageBox.question(
+                self, "Many Corners",
+                f"{len(corners)} corners will be generated. Continue?",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        # Generate corner netlists and run simulations
+        status = self.statusBar()
+        status.showMessage(
+            f"Running {len(corners)} corner simulations...")
+
+        import subprocess
+        import tempfile
+        import shutil
+
+        results = []
+        ngspice = shutil.which("ngspice") or "ngspice"
+        work_dir = tempfile.mkdtemp(prefix="pqwave_wc_")
+
+        try:
+            for i, corner in enumerate(corners):
+                modified = modify_netlist(netlist_text, corner)
+                cir_path = os.path.join(work_dir,
+                                        f"corner_{i:04d}.cir")
+                with open(cir_path, "w") as f:
+                    f.write(modified)
+
+                proc = subprocess.run(
+                    [ngspice, "-b", cir_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    cwd=work_dir,
+                )
+                # Inline fallback: try to parse a float from last word
+                # of stdout. Task 14 will add a proper parse_op_output.
+                output_value: float | None = None
+                if proc.stdout and proc.stdout.strip():
+                    try:
+                        output_value = float(
+                            proc.stdout.strip().split()[-1])
+                    except (ValueError, IndexError):
+                        output_value = None
+
+                results.append({
+                    "corner": i,
+                    "components": corner.copy(),
+                    "output": output_value,
+                    "stdout": proc.stdout,
+                    "stderr": proc.stderr,
+                })
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+        # Sort by output value; identify worst min and max
+        results.sort(key=lambda r: r["output"] or 0.0)
+        worst_min = results[0] if results else None
+        worst_max = results[-1] if results else None
+
+        # Show results in a table dialog
+        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem
+        from PyQt6.QtGui import QColor
+
+        result_dlg = QDialog(self)
+        result_dlg.setWindowTitle(
+            f"Worst-Case Results — {len(results)} corners")
+        result_dlg.resize(700, 400)
+        result_layout = QVBoxLayout(result_dlg)
+
+        table = QTableWidget(len(results), 3)
+        table.setHorizontalHeaderLabels(
+            ["Corner", "Components", "Output"])
+        for row, r in enumerate(results):
+            table.setItem(
+                row, 0, QTableWidgetItem(str(r["corner"])))
+            comp_str = ", ".join(
+                f"{k}={v:.4g}"
+                for k, v in r["components"].items())
+            table.setItem(
+                row, 1, QTableWidgetItem(comp_str))
+            table.setItem(
+                row, 2,
+                QTableWidgetItem(
+                    f"{r['output']:.6g}"
+                    if r["output"] is not None
+                    else "N/A"))
+            # Highlight worst min (blue) and worst max (red)
+            if r is worst_min:
+                for col in range(3):
+                    table.item(row, col).setBackground(
+                        QColor(0, 0, 180, 80))
+            if r is worst_max:
+                for col in range(3):
+                    table.item(row, col).setBackground(
+                        QColor(180, 0, 0, 80))
+        result_layout.addWidget(table)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok)
+        btns.accepted.connect(result_dlg.accept)
+        result_layout.addWidget(btns)
+        result_dlg.exec()
+
+        if worst_min and worst_max:
+            status.showMessage(
+                f"Worst-case: min={worst_min['output']:.4g}, "
+                f"max={worst_max['output']:.4g}")
+        else:
+            status.showMessage("Worst-case analysis complete")
+
     def _create_menu_callbacks(self):
         """Create callback dictionary for menu manager."""
         return {
@@ -2260,6 +2416,7 @@ class MainWindow(QMainWindow):
             'polar': self._show_polar,
             'smith': self._show_smith,
             'bode': self._show_bode,
+            'worst_case': self._show_worst_case,
             'mc_stats': self._on_mc_stats,
             'mc_histogram': self._on_mc_histogram,
             'mc_yield': self._on_mc_yield,

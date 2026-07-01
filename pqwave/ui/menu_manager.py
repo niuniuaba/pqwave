@@ -602,6 +602,14 @@ class MenuManager:
 
         analyze_menu.addSeparator()
 
+        wc_action = QAction("Worst Case Analysis", self.parent)
+        wc_action.triggered.connect(
+            self.callbacks.get("worst_case", lambda: None))
+        analyze_menu.addAction(wc_action)
+        self.actions["worst_case"] = wc_action
+
+        analyze_menu.addSeparator()
+
         analyze_label = QAction("── Monte Carlo ──", self.parent)
         analyze_label.setEnabled(False)
         analyze_menu.addAction(analyze_label)
