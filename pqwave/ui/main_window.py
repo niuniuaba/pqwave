@@ -6656,6 +6656,10 @@ class MainWindow(QMainWindow):
 
         pw = new_panel.plot_widget
 
+        from pqwave.ui.polar_grid import render_polar_grid
+
+        render_polar_grid(pw, n_rings=5, n_radials=12)
+
         curve = pg.PlotCurveItem(
             result["x"], result["y"],
             pen=pg.mkPen("cyan", width=1),
