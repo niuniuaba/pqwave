@@ -162,6 +162,33 @@ class Dataset:
         """Number of variables in the dataset."""
         return len(self.variables)
 
+    def rename_variable(self, old_name: str, new_name: str) -> None:
+        """Rename a variable in-place.
+
+        Args:
+            old_name: Current variable name.
+            new_name: New variable name.
+
+        Raises:
+            KeyError: If old_name does not exist.
+            ValueError: If new_name already exists.
+        """
+        if old_name not in self._var_map:
+            raise KeyError(f"Variable '{old_name}' not found in dataset")
+        if new_name in self._var_map:
+            raise ValueError(f"Variable '{new_name}' already exists in dataset")
+
+        var = self._var_map.pop(old_name)
+        var.name = new_name
+        self._var_map[new_name] = var
+
+        # Update the column header in the dataset dict if present
+        dataset_dict = self.raw_file.datasets[self.dataset_idx]
+        for vd in dataset_dict.get('variables', []):
+            if vd['name'] == old_name:
+                vd['name'] = new_name
+                break
+
     def get_variable_names(self, include_derived: bool = False) -> List[str]:
         """Get list of variable names.
 

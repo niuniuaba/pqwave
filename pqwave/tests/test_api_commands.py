@@ -75,6 +75,7 @@ COMMAND_SPECS = {
     "hide_all":      {"needs": "trace_added", "valid_call": "hide_all()"},
     "remove_all":    {"needs": "trace_added", "valid_call": "remove_all()"},
     "show_matching": {"needs": "file_loaded", "valid_call": "show_matching('v(*)')"},
+    "rename_vector": {"needs": "file_loaded", "valid_call": "rename_vector(0, 'v(ac_p)', 'v(ac_p_rn)')"},
 
     # Measurements
     "measure":        {"needs": "trace_added", "valid_call": "measure('avg(v(ac_p))')"},

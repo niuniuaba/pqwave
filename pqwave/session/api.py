@@ -2075,6 +2075,48 @@ def _cmd_show_matching(session: SessionAPI, pattern: str):
     return session.show_matching(pattern)
 
 
+@api_command("rename_vector", "rename_vector(dataset_index, old_name, new_name)",
+             "Rename a vector (node) in a loaded dataset")
+def _cmd_rename_vector(session: SessionAPI, dataset_index: int,
+                       old_name: str, new_name: str) -> dict:
+    """Rename a vector in the specified dataset.
+
+    Blocks if any active trace references the old name.
+    """
+    from pqwave.models.state import ApplicationState
+    state = ApplicationState()
+    if dataset_index < 0 or dataset_index >= len(state.datasets):
+        return {"status": "error",
+                "message": f"Dataset index {dataset_index} out of range"}
+
+    ds = state.datasets[dataset_index]
+
+    # Check for active traces referencing old_name across all panels
+    for panel_id in state.panel_order:
+        panel = state.panels.get(panel_id)
+        if panel is None:
+            continue
+        for trace in panel.traces:
+            if old_name in (trace.name or ""):
+                return {"status": "error",
+                        "message": f"Cannot rename: active trace '{trace.name}' "
+                                   f"on panel '{panel_id}' references "
+                                   f"'{old_name}'. Remove the trace first."}
+            if old_name in (trace.expression or ""):
+                return {"status": "error",
+                        "message": f"Cannot rename: active trace expression "
+                                   f"'{trace.expression}' references "
+                                   f"'{old_name}'. Remove the trace first."}
+
+    try:
+        ds.rename_variable(old_name, new_name)
+        return {"status": "ok",
+                "message": f"Renamed '{old_name}' -> '{new_name}' "
+                           f"in dataset {dataset_index}"}
+    except (KeyError, ValueError) as e:
+        return {"status": "error", "message": str(e)}
+
+
 @api_command("range", "range(xmin=None, xmax=None, ymin=None, ymax=None)",
              "Set view range of the active panel")
 def _cmd_range(session: SessionAPI, xmin: float = None, xmax: float = None,
