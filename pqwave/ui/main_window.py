@@ -22,6 +22,7 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox,
     QDialog, QCheckBox, QDialogButtonBox, QLabel, QApplication, QSplitter,
+    QTreeWidget, QTreeWidgetItem, QLineEdit,
 )
 from PyQt6.QtCore import Qt as QtCore_Qt
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal, pyqtSlot
@@ -57,6 +58,23 @@ import uuid
 
 
 logger = get_logger(__name__)
+
+
+class _VarTreeRenameFilter:
+    """Event filter to handle Escape key during inline rename in the variable tree."""
+
+    def __init__(self, cancel_callback):
+        self._cancel = cancel_callback
+
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtCore import Qt as _Qt
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() == _Qt.Key.Key_Escape:
+                self._cancel()
+                return True
+        return False
+
 
 class MainWindow(QMainWindow):
     """Main application window orchestrating all UI components."""
@@ -119,6 +137,7 @@ class MainWindow(QMainWindow):
         self.menu_manager = None
         self.panel_grid = None
         self.control_panel = None
+        self._var_tree = None
         self.color_manager = None
         self._bound_plot_widget: Optional[PlotWidget] = None
         self._bound_axis_manager: Optional[AxisManager] = None
@@ -219,12 +238,29 @@ class MainWindow(QMainWindow):
         callbacks = self._create_menu_callbacks()
         self.menu_manager = MenuManager(self, callbacks, keybinding_manager=self.keybinding_manager)
 
-        # Upper area: panel + control
+        # Upper area: variable tree | panel + control
         upper = QWidget()
         upper_layout = QVBoxLayout()
         upper_layout.setContentsMargins(0, 0, 0, 0)
         upper_layout.setSpacing(10)
-        upper_layout.addWidget(self.panel_grid, 1)
+
+        # Horizontal splitter: variable browser tree (left) | panel grid (right)
+        self._var_tree = QTreeWidget()
+        self._var_tree.setHeaderHidden(True)
+        self._var_tree.setMinimumWidth(180)
+        self._var_tree.setMaximumWidth(400)
+        self._var_tree.setContextMenuPolicy(
+            QtCore_Qt.ContextMenuPolicy.CustomContextMenu)
+        self._var_tree.customContextMenuRequested.connect(
+            self._on_var_tree_context_menu)
+
+        _h_splitter = QSplitter(QtCore_Qt.Orientation.Horizontal)
+        _h_splitter.addWidget(self._var_tree)
+        _h_splitter.addWidget(self.panel_grid)
+        _h_splitter.setStretchFactor(0, 0)  # Var tree does not stretch
+        _h_splitter.setStretchFactor(1, 1)  # Panel grid stretches
+
+        upper_layout.addWidget(_h_splitter, 1)
         upper_layout.addWidget(self.control_panel)
         upper.setLayout(upper_layout)
 
@@ -4305,6 +4341,94 @@ class MainWindow(QMainWindow):
         menu.addAction("Zoom to Fit", self.zoom_to_fit)
         menu.exec(QCursor.pos())
 
+    def _on_var_tree_context_menu(self, pos):
+        """Show context menu for the variable browser tree."""
+        item = self._var_tree.itemAt(pos)
+        if item is None or item.parent() is None:
+            return  # Only leaf items (actual variables), not group headers
+
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QCursor
+
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename Vector")
+        action = menu.exec(self._var_tree.viewport().mapToGlobal(pos))
+        if action == rename_action:
+            self._start_inline_rename(item)
+
+    def _start_inline_rename(self, item):
+        """Open an inline QLineEdit on the tree item for renaming."""
+        old_name = item.text(0)
+
+        editor = QLineEdit(old_name, self._var_tree)
+        editor.selectAll()
+        editor.setFocus()
+
+        def finish_rename():
+            new_name = editor.text().strip()
+            editor.deleteLater()
+            if not new_name or new_name == old_name:
+                return
+
+            dataset_idx = self.state.current_dataset_idx
+            if dataset_idx is None or dataset_idx >= len(self.state.datasets):
+                return
+
+            # Check for active traces referencing old_name (same logic as API command)
+            for panel_id in self.state.panel_order:
+                panel = self.state.panels.get(panel_id)
+                if panel is None:
+                    continue
+                for trace in panel.traces:
+                    if old_name in (trace.name or ""):
+                        QMessageBox.warning(
+                            self, "Rename Failed",
+                            f"Cannot rename: active trace '{trace.name}' "
+                            f"on panel '{panel_id}' references "
+                            f"'{old_name}'. Remove the trace first.")
+                        return
+                    if old_name in (trace.expression or ""):
+                        QMessageBox.warning(
+                            self, "Rename Failed",
+                            f"Cannot rename: active trace expression "
+                            f"'{trace.expression}' references "
+                            f"'{old_name}'. Remove the trace first.")
+                        return
+
+            ds = self.state.datasets[dataset_idx]
+            try:
+                ds.rename_variable(old_name, new_name)
+            except KeyError:
+                QMessageBox.warning(
+                    self, "Rename Failed",
+                    f"Variable '{old_name}' not found in dataset {dataset_idx}.")
+                return
+            except ValueError as e:
+                QMessageBox.warning(
+                    self, "Rename Failed", str(e))
+                return
+
+            # Update UI
+            item.setText(0, new_name)
+            item.setToolTip(0, new_name)
+            self._update_variable_combo()
+            # Also refresh the vector combo's groups (variable list popup)
+            if self.control_panel.vector_combo:
+                self.control_panel.vector_combo.set_groups(
+                    self._get_variable_groups())
+
+        def cancel_rename():
+            editor.deleteLater()
+
+        editor.editingFinished.connect(finish_rename)
+        # Handle Escape key to cancel rename
+        filter_instance = _VarTreeRenameFilter(cancel_rename)
+        editor.installEventFilter(filter_instance)
+        # Keep reference alive
+        self._var_tree._rename_filter = filter_instance
+
+        self._var_tree.setItemWidget(item, 0, editor)
+
     def _find_panel_with_trace(self, trace_name: str):
         """Return the Panel containing *trace_name*, or None."""
         for p in self.panel_grid.panels.values():
@@ -4459,6 +4583,7 @@ class MainWindow(QMainWindow):
             # Update control panel
             self._update_dataset_combo()
             self._update_variable_combo()
+            self._update_var_tree()
             self.control_panel.clear_expression()  # Clear trace expression for new file
 
             # Set raw file reference in trace manager
@@ -4552,6 +4677,12 @@ class MainWindow(QMainWindow):
 
     def _update_variable_combo(self):
         """Update variable combo box in control panel (grouped by source)."""
+        groups = self._get_variable_groups()
+        if groups:
+            self.control_panel.set_variables(groups)
+
+    def _get_variable_groups(self) -> dict:
+        """Build and return the variable groups dict (shared with _update_variable_combo)."""
         groups: dict[str, list[str]] = {}
 
         # Raw file vectors
@@ -4575,8 +4706,35 @@ class MainWindow(QMainWindow):
         if vcd_names:
             groups[vcd_label] = sorted(vcd_names)
 
-        if groups:
-            self.control_panel.set_variables(groups)
+        return groups
+
+    def _update_var_tree(self):
+        """Populate the variable browser tree with variables from the current dataset."""
+        self._var_tree.clear()
+        if not self.raw_file or self.state.current_dataset_idx is None:
+            return
+
+        try:
+            var_names = self.raw_file.get_variable_names(
+                self.state.current_dataset_idx)
+        except Exception:
+            logger.warning("Failed to get variable names for tree", exc_info=True)
+            return
+
+        if not var_names:
+            return
+
+        # Add a root item (source file name)
+        label = os.path.basename(self.raw_file.filename)
+        root = QTreeWidgetItem(self._var_tree, [label])
+        root.setExpanded(True)
+        font = root.font(0)
+        font.setBold(True)
+        root.setFont(0, font)
+
+        for name in var_names:
+            item = QTreeWidgetItem(root, [name])
+            item.setToolTip(0, name)
 
     def _update_dataset_label(self):
         """Update dataset label in status bar."""
@@ -4595,6 +4753,7 @@ class MainWindow(QMainWindow):
         self.state.current_dataset_idx = index
         self.trace_manager.set_current_dataset(index)
         self._update_variable_combo()
+        self._update_var_tree()
         self._update_dataset_label()
         # Clear trace expression as previous expression may not be valid for new dataset
         self.control_panel.clear_expression()
