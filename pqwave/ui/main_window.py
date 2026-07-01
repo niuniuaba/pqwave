@@ -20,17 +20,40 @@ from typing import Optional, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox,
-    QDialog, QCheckBox, QDialogButtonBox, QLabel, QApplication, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QLineEdit,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFileDialog,
+    QMessageBox,
+    QDialog,
+    QCheckBox,
+    QDialogButtonBox,
+    QLabel,
+    QApplication,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QLineEdit,
 )
 from PyQt6.QtCore import Qt as QtCore_Qt
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal, pyqtSlot, QObject
 from PyQt6.QtGui import QColor, QFont
 
-from pqwave.models.state import ApplicationState, AxisId, ViewboxTheme, FontConfig, AxisConfig
+from pqwave.models.state import (
+    ApplicationState,
+    AxisId,
+    ViewboxTheme,
+    FontConfig,
+    AxisConfig,
+)
 from pqwave.models.rawfile import RawFile
-from pqwave.models.raw_converter import write_raw_file, write_vcd_file, FORMAT_CONFIG, extract_traces_to_raw
+from pqwave.models.raw_converter import (
+    write_raw_file,
+    write_vcd_file,
+    FORMAT_CONFIG,
+    extract_traces_to_raw,
+)
 from pqwave.models.dataset import Dataset
 from pqwave.models.trace import AxisAssignment
 from pqwave.ui.menu_manager import MenuManager
@@ -57,7 +80,6 @@ from pqwave.measure.measure_script_parser import parse_meas_script
 from pqwave.digital.eye_renderer import render_overlay, render_persistence
 import uuid
 
-
 logger = get_logger(__name__)
 
 
@@ -71,6 +93,7 @@ class _VarTreeRenameFilter(QObject):
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
         from PyQt6.QtCore import Qt as _Qt
+
         if event.type() == QEvent.Type.KeyPress:
             if event.key() == _Qt.Key.Key_Escape:
                 self._cancel()
@@ -87,10 +110,10 @@ class MainWindow(QMainWindow):
     _mutation_signal = pyqtSignal(str, object)
     _lepton_result_signal = pyqtSignal(dict)
     _lepton_error_signal = pyqtSignal(str)
-    _qspice_done_signal = pyqtSignal(str)     # qraw_path
-    _qspice_error_signal = pyqtSignal(str)    # error message
+    _qspice_done_signal = pyqtSignal(str)  # qraw_path
+    _qspice_error_signal = pyqtSignal(str)  # error message
 
-    _NET_EXPR_RE = re.compile(r'^[vV]\(\s*(.+?)\s*\)$')
+    _NET_EXPR_RE = re.compile(r"^[vV]\(\s*(.+?)\s*\)$")
 
     @staticmethod
     def _extract_net_name(expression: str) -> str:
@@ -98,8 +121,14 @@ class MainWindow(QMainWindow):
         m = MainWindow._NET_EXPR_RE.match(expression)
         return m.group(1) if m else expression
 
-    def __init__(self, initial_file=None, xschem_ba_port=2021,
-                 initial_files=None, auto_connect=None, auto_connect_sch_path=None):
+    def __init__(
+        self,
+        initial_file=None,
+        xschem_ba_port=2021,
+        initial_files=None,
+        auto_connect=None,
+        auto_connect_sch_path=None,
+    ):
         """
         Initialize MainWindow.
 
@@ -129,7 +158,7 @@ class MainWindow(QMainWindow):
         self.state.window_registry.register_window(
             window_id=self.window_id,
             window_instance=self,
-            raw_file_path=self.raw_file_path
+            raw_file_path=self.raw_file_path,
         )
 
         self.initial_files = initial_files
@@ -159,7 +188,9 @@ class MainWindow(QMainWindow):
         self._measure_results = None  # lazy-created MeasureResultsWidget
 
         # Xschem pending commands (when raw_file not yet loaded)
-        self.pending_xschem_commands = []  # list of (command_type, args, client_addr, connection_state)
+        self.pending_xschem_commands = (
+            []
+        )  # list of (command_type, args, client_addr, connection_state)
 
         # Setup UI
         self._setup_ui()
@@ -227,6 +258,7 @@ class MainWindow(QMainWindow):
         # Xschem cursor cross-probe timer (debounce net highlight in schematic).
         # Interval is read from xschem_config; defaults to 250 ms.
         from pqwave.models.state import ApplicationState
+
         _xs_cfg = getattr(ApplicationState(), "_xschem_config", {})
         _xs_debounce = _xs_cfg.get("cross_probe_debounce_ms", 250)
 
@@ -238,7 +270,9 @@ class MainWindow(QMainWindow):
 
         self.keybinding_manager = KeyBindingManager()
         callbacks = self._create_menu_callbacks()
-        self.menu_manager = MenuManager(self, callbacks, keybinding_manager=self.keybinding_manager)
+        self.menu_manager = MenuManager(
+            self, callbacks, keybinding_manager=self.keybinding_manager
+        )
 
         # Upper area: variable tree | panel + control
         upper = QWidget()
@@ -252,9 +286,11 @@ class MainWindow(QMainWindow):
         self._var_tree.setMinimumWidth(180)
         self._var_tree.setMaximumWidth(400)
         self._var_tree.setContextMenuPolicy(
-            QtCore_Qt.ContextMenuPolicy.CustomContextMenu)
+            QtCore_Qt.ContextMenuPolicy.CustomContextMenu
+        )
         self._var_tree.customContextMenuRequested.connect(
-            self._on_var_tree_context_menu)
+            self._on_var_tree_context_menu
+        )
 
         _h_splitter = QSplitter(QtCore_Qt.Orientation.Horizontal)
         _h_splitter.addWidget(self._var_tree)
@@ -272,13 +308,14 @@ class MainWindow(QMainWindow):
 
         self.chat_panel = ChatPanel()
         from pqwave.session.api import SessionAPI
+
         self._repl = ReplExecutor(session=SessionAPI(state=self.state))
         self.session_api = self._repl._session
         self._ai_translator = None
         self._connect_chat_panel()
 
         self.chat_panel.visibility_changed.connect(
-            lambda visible: setattr(self.state, 'chat_panel_visible', visible)
+            lambda visible: setattr(self.state, "chat_panel_visible", visible)
         )
 
         # QSplitter: upper (plots + controls) | chat panel (resizable)
@@ -320,8 +357,15 @@ class MainWindow(QMainWindow):
         from pqwave.llm.templates import _FUNC_MAP
 
         items = [
-            "/ai", "/python", "/clear", "/help", "/backend", "/test-backend",
-            "/remember", "/font", "/promote",
+            "/ai",
+            "/python",
+            "/clear",
+            "/help",
+            "/backend",
+            "/test-backend",
+            "/remember",
+            "/font",
+            "/promote",
         ]
         for name, entry in get_command_registry().items():
             items.append(name)
@@ -357,6 +401,7 @@ class MainWindow(QMainWindow):
             expr = str(kwargs.get("expr", ""))
             axis = str(kwargs.get("axis", "Y1"))
             from pqwave.models.trace import AxisAssignment
+
             axis_enum = AxisAssignment.Y1 if axis.upper() == "Y1" else AxisAssignment.Y2
             x_var = self.state.current_x_var or "time"
             already_plotted = any(v == expr for v, _, _ in tm.traces)
@@ -408,6 +453,7 @@ class MainWindow(QMainWindow):
         elif action == "load":
             path = str(kwargs.get("path", ""))
             import os
+
             if os.path.exists(path):
                 ext = os.path.splitext(path)[1].lower()
                 if ext.endswith(".vcd"):
@@ -420,6 +466,7 @@ class MainWindow(QMainWindow):
             if pw is None:
                 return
             from pqwave.measure.measure_engine import _parse_value
+
             xmin = kwargs.get("xmin")
             xmax = kwargs.get("xmax")
             ymin = kwargs.get("ymin")
@@ -461,19 +508,23 @@ class MainWindow(QMainWindow):
         # ---- Cursor operations ----
 
         elif action == "cursor_xa":
-            if pw is None: return
+            if pw is None:
+                return
             pw.set_cursor_xa_visible(True, kwargs.get("value"))
 
         elif action == "cursor_xb":
-            if pw is None: return
+            if pw is None:
+                return
             pw.set_cursor_xb_visible(True, kwargs.get("value"))
 
         elif action == "cursor_ya":
-            if pw is None: return
+            if pw is None:
+                return
             pw.set_cursor_yA_visible(True, kwargs.get("value"))
 
         elif action == "cursor_yb":
-            if pw is None: return
+            if pw is None:
+                return
             pw.set_cursor_yB_visible(True, kwargs.get("value"))
 
         elif action == "cursor_delta":
@@ -603,6 +654,7 @@ class MainWindow(QMainWindow):
             period = kwargs.get("period")
             if period:
                 from pqwave.measure.measure_engine import _parse_value
+
                 t_period = _parse_value(str(period))
                 self.state.eye_diagram_config.period = t_period
             # Show the signal if not already a trace, then select it
@@ -640,6 +692,7 @@ class MainWindow(QMainWindow):
             panel = self.panel_grid.get_active_panel()
             if panel and path:
                 import pyqtgraph.exporters as exp
+
                 pw = panel.plot_widget
                 plot_item = pw.plotItem
                 exporter = exp.ImageExporter(plot_item)
@@ -650,6 +703,7 @@ class MainWindow(QMainWindow):
         elif action == "theme":
             name = str(kwargs.get("name", "")).lower()
             from pqwave.models.state import ViewboxTheme
+
             if name in ("dark", "light"):
                 self.state.viewbox_theme = ViewboxTheme(name)
                 self.plot_widget.set_viewbox_theme(self.state.viewbox_theme)
@@ -695,12 +749,15 @@ class MainWindow(QMainWindow):
                 if pattern:
                     from pqwave.models.rawfile import detect_naming_pattern
                     from pqwave.models.mc_collection import MCRun
+
                     if self.raw_file is not None:
                         names = self.raw_file.get_trace_names()
                         groups = detect_naming_pattern(names)
                         if signal in groups:
-                            mc.runs = [MCRun(dataset_idx=0, step_index=i)
-                                       for i in range(groups[signal]["count"])]
+                            mc.runs = [
+                                MCRun(dataset_idx=0, step_index=i)
+                                for i in range(groups[signal]["count"])
+                            ]
                             self._update_mc_control_display()
                             for panel in self.panel_grid.panels.values():
                                 panel.trace_manager.rebuild_from_state()
@@ -717,6 +774,7 @@ class MainWindow(QMainWindow):
         elif action == "mc_correlation_load":
             from pqwave.models.mc_collection import CorrelationMatrix
             import csv
+
             mc = self.state.mc_collection
             if mc is None:
                 return
@@ -736,6 +794,7 @@ class MainWindow(QMainWindow):
             mc._correlation = CorrelationMatrix(params=headers, matrix=flat)
         elif action == "mc_generate":
             from pqwave.session.api import _mc_generate_core
+
             _mc_generate_core(
                 self.state,
                 kwargs.get("output_path", ""),
@@ -838,24 +897,31 @@ class MainWindow(QMainWindow):
         # Check if gafrc/gschemrc are configured (one-time reminder).
         gafrc_path = os.path.expanduser("~/.config/lepton-eda/gafrc")
         gschemrc_path = os.path.expanduser("~/.config/lepton-eda/gschemrc")
+
         def _file_contains(path, text):
             return os.path.exists(path) and text in open(path).read()
+
         gafrc_ok = _file_contains(gafrc_path, "pqwave-server.scm")
         gschemrc_ok = _file_contains(gschemrc_path, "pqwave-menus.scm")
         if not gafrc_ok or not gschemrc_ok:
             msg = ["[lepton] Config missing. Add these files:"]
             if not gafrc_ok:
                 msg.append("  ~/.config/lepton-eda/gafrc:")
-                msg.append('    (load "/path/to/pqwave/bridge/lepton/pqwave-server.scm")')
+                msg.append(
+                    '    (load "/path/to/pqwave/bridge/lepton/pqwave-server.scm")'
+                )
             if not gschemrc_ok:
                 msg.append("  ~/.config/lepton-eda/gschemrc:")
-                msg.append('    (load "/path/to/pqwave/bridge/lepton/menu-additions.scm")')
+                msg.append(
+                    '    (load "/path/to/pqwave/bridge/lepton/menu-additions.scm")'
+                )
             msg.append("[lepton] Then restart lepton-schematic.")
             self.chat_panel.append_output("\n".join(msg) + "\n")
 
         # Check for port conflicts before starting bridge
         from pqwave.models.state import ApplicationState as _AS
-        lepton_port = getattr(_AS(), '_lepton_config', {}).get('port', 9424)
+
+        lepton_port = getattr(_AS(), "_lepton_config", {}).get("port", 9424)
         reserved = {2026: "xschem server", 2021: "xschem back-annotation"}
         if lepton_port in reserved:
             self.chat_panel.append_output(
@@ -867,6 +933,7 @@ class MainWindow(QMainWindow):
         # Check for stale Guile bytecode cache (FHI: Guile auto-compiles
         # .scm → .go and won't recompile on source change until restart).
         from pqwave.bridge.lepton.cross_probe import check_scheme_server as _css
+
         _info = _css()
         if _info.get("guile_cache_stale"):
             self.chat_panel.append_output(
@@ -896,25 +963,31 @@ class MainWindow(QMainWindow):
                 upper.layout().addWidget(self.lepton_control_bar)
             self.lepton_control_bar.connect_clicked.connect(self._on_lepton_connect)
             self.lepton_control_bar.simulate_clicked.connect(self._on_lepton_simulate)
-            self.lepton_control_bar.disconnect_clicked.connect(self._on_lepton_disconnect)
+            self.lepton_control_bar.disconnect_clicked.connect(
+                self._on_lepton_disconnect
+            )
             self.lepton_control_bar.annotate_dc_clicked.connect(
-                lambda: self._on_lepton_annotate_dc())
+                lambda: self._on_lepton_annotate_dc()
+            )
             self.lepton_control_bar.clear_annotations_clicked.connect(
-                self._on_lepton_clear_annotations)
+                self._on_lepton_clear_annotations
+            )
 
         self._lepton_cross_probe.net_selected.connect(self._on_lepton_net_selected)
         self._lepton_cross_probe.schematic_path.connect(self._on_lepton_schematic_path)
         self._lepton_cross_probe.error_occurred.connect(
-            lambda msg: self.chat_panel.append_output(f"[lepton] {msg}\n"))
+            lambda msg: self.chat_panel.append_output(f"[lepton] {msg}\n")
+        )
         self._lepton_cross_probe.connected.connect(
             lambda: (
                 self.chat_panel.append_output(
-                    "[lepton] TCP connected to lepton-schematic on port 9424\n"),
+                    "[lepton] TCP connected to lepton-schematic on port 9424\n"
+                ),
                 self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS"),
                 self._lepton_cross_probe.send_command("$CLEAR:DC"),
-            ))
-        self._lepton_cross_probe.disconnected.connect(
-            self._on_lepton_disconnected)
+            )
+        )
+        self._lepton_cross_probe.disconnected.connect(self._on_lepton_disconnected)
 
         # Always show control bar so the user can retry.
         self.lepton_control_bar.setVisible(True)
@@ -922,11 +995,13 @@ class MainWindow(QMainWindow):
         # Connect TCP client to lepton-schematic's cross-probe server.
         if not self._lepton_cross_probe.is_connected():
             self.chat_panel.append_output(
-                "[lepton] Connecting to lepton-schematic:9424...\n")
+                "[lepton] Connecting to lepton-schematic:9424...\n"
+            )
             if not self._lepton_cross_probe.connect_to_server():
                 self.chat_panel.append_output(
                     "[lepton] lepton-schematic not running — cross-probe unavailable.\n"
-                    "Start lepton-schematic and click Connect to try again.\n")
+                    "Start lepton-schematic and click Connect to try again.\n"
+                )
                 return  # Don't mark as connected — user must click Connect again.
 
         self._lepton_connected = True
@@ -951,10 +1026,12 @@ class MainWindow(QMainWindow):
             self._run_lepton_pipeline(path)
         else:
             from PyQt6.QtWidgets import QFileDialog
+
             path, _ = QFileDialog.getOpenFileName(
-                self, "Select Lepton-EDA Schematic",
+                self,
+                "Select Lepton-EDA Schematic",
                 os.path.expanduser("~"),
-                "Schematic (*.sch);;All Files (*)"
+                "Schematic (*.sch);;All Files (*)",
             )
             if path:
                 self._lepton_connected_path = path
@@ -974,16 +1051,21 @@ class MainWindow(QMainWindow):
 
     def _run_lepton_pipeline(self, sch_path: str):
         if self._lepton_simulating:
-            self.chat_panel.append_output("[lepton] pipeline skipped (already simulating)\n")
+            self.chat_panel.append_output(
+                "[lepton] pipeline skipped (already simulating)\n"
+            )
             return
         if self._lepton_bridge is None:
             return
         self._lepton_simulating = True
         if self.lepton_control_bar:
             self.lepton_control_bar.set_simulating(True)
-        self.chat_panel.append_output("[lepton] Exporting netlist + running simulation...\n")
+        self.chat_panel.append_output(
+            "[lepton] Exporting netlist + running simulation...\n"
+        )
         # Run in background to avoid freezing the UI.
         from threading import Thread
+
         def _run():
             try:
                 result = self._lepton_bridge.simulate(sch_path)
@@ -991,6 +1073,7 @@ class MainWindow(QMainWindow):
                 self._lepton_result_signal.emit(result)
             except (FileNotFoundError, RuntimeError) as e:
                 self._lepton_error_signal.emit(str(e))
+
         Thread(target=_run, daemon=True).start()
 
     def _on_lepton_pipeline_result(self, result: dict):
@@ -1060,6 +1143,7 @@ class MainWindow(QMainWindow):
         """File > Lepton Bridge > Cross-Probe > Clear Highlight."""
         if self._lepton_cross_probe is None:
             from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+
             self._lepton_cross_probe = LeptonCrossProbeClient()
         if not self._lepton_cross_probe.is_connected():
             self._lepton_cross_probe.connect_to_server()
@@ -1095,6 +1179,7 @@ class MainWindow(QMainWindow):
         """
         if not self._lepton_cross_probe:
             from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+
             self._lepton_cross_probe = LeptonCrossProbeClient()
         if not self._lepton_connected and not force_reconnect:
             return
@@ -1178,28 +1263,36 @@ class MainWindow(QMainWindow):
         may not represent a meaningful operating point.
         """
         import re, numpy as np
+
         voltages = {}
         state = self.state
         if not state.datasets:
             logger.warning("_extract_dc_voltages: no datasets loaded")
             return voltages
         ds = state.datasets[-1]
-        logger.debug("_extract_dc_voltages: dataset has %d variables", len(ds.variables))
+        logger.debug(
+            "_extract_dc_voltages: dataset has %d variables", len(ds.variables)
+        )
         for var in ds.variables:
-            m = re.match(r'^v\((.+)\)$', var.name, re.IGNORECASE)
+            m = re.match(r"^v\((.+)\)$", var.name, re.IGNORECASE)
             if m:
                 if var.data is not None and len(var.data) > 0:
                     try:
                         voltages[m.group(1)] = float(np.mean(var.data))
                     except (TypeError, ValueError):
-                        logger.debug("_extract_dc_voltages: skip %s (complex/non-float)", var.name)
+                        logger.debug(
+                            "_extract_dc_voltages: skip %s (complex/non-float)",
+                            var.name,
+                        )
                 else:
                     logger.debug("_extract_dc_voltages: skip %s (no data)", var.name)
             else:
                 logger.debug("_extract_dc_voltages: skip %s (not v(...))", var.name)
         if not voltages:
-            logger.warning("_extract_dc_voltages: no voltage variables found in %d variables",
-                         len(ds.variables))
+            logger.warning(
+                "_extract_dc_voltages: no voltage variables found in %d variables",
+                len(ds.variables),
+            )
         return voltages
 
     # ---- Xschem Bridge handlers ----
@@ -1235,19 +1328,23 @@ class MainWindow(QMainWindow):
                 upper.layout().addWidget(self.xschem_control_bar)
             self.xschem_control_bar.connect_clicked.connect(self._on_xschem_connect)
             self.xschem_control_bar.simulate_clicked.connect(self._on_xschem_simulate)
-            self.xschem_control_bar.disconnect_clicked.connect(self._on_xschem_disconnect)
+            self.xschem_control_bar.disconnect_clicked.connect(
+                self._on_xschem_disconnect
+            )
             self.xschem_control_bar.annotate_dc_clicked.connect(
-                self._on_xschem_annotate_dc)
+                self._on_xschem_annotate_dc
+            )
             self.xschem_control_bar.clear_annotations_clicked.connect(
-                self._on_xschem_clear_annotations)
+                self._on_xschem_clear_annotations
+            )
 
         self._xschem_cross_probe.error_occurred.connect(
-            lambda msg: self.chat_panel.append_output(f"[xschem] {msg}\n"))
+            lambda msg: self.chat_panel.append_output(f"[xschem] {msg}\n")
+        )
 
         # Discover the .sch path from xschem if not already known.
         if not sch_path:
-            ok, result = self._xschem_cross_probe.send_command(
-                "xschem get schname")
+            ok, result = self._xschem_cross_probe.send_command("xschem get schname")
             if ok and result.strip():
                 sch_path = result.strip()
 
@@ -1268,10 +1365,12 @@ class MainWindow(QMainWindow):
             self._run_xschem_pipeline(path)
         else:
             from PyQt6.QtWidgets import QFileDialog
+
             path, _ = QFileDialog.getOpenFileName(
-                self, "Select Xschem Schematic",
+                self,
+                "Select Xschem Schematic",
                 os.path.expanduser("~"),
-                "Xschem Schematics (*.sch);;All Files (*)"
+                "Xschem Schematics (*.sch);;All Files (*)",
             )
             if path:
                 self._xschem_connected_path = path
@@ -1293,14 +1392,14 @@ class MainWindow(QMainWindow):
         voltages = self._extract_dc_voltages()
         if not voltages:
             self.chat_panel.append_output(
-                "[xschem] Annotate DC: no v(node) variables found in dataset\n")
+                "[xschem] Annotate DC: no v(node) variables found in dataset\n"
+            )
             return
-        values: dict[str, str] = {
-            net: f"{v:.6g}" for net, v in voltages.items()
-        }
+        values: dict[str, str] = {net: f"{v:.6g}" for net, v in voltages.items()}
         self._xschem_cross_probe.stamp_dc_values(values)
         self.chat_panel.append_output(
-            f"[xschem] DC annotations stamped: {len(values)} nets\n")
+            f"[xschem] DC annotations stamped: {len(values)} nets\n"
+        )
 
     def _on_xschem_clear_annotations(self):
         """Clear DC annotations only (cursor has its own clear mechanism)."""
@@ -1311,6 +1410,7 @@ class MainWindow(QMainWindow):
     def _run_xschem_pipeline(self, sch_path: str):
         """Export -> post-process -> ngspice -> load .raw."""
         import os as _os
+
         if self._xschem_simulating:
             self.chat_panel.append_output(
                 "[xschem] pipeline skipped (already simulating)\n"
@@ -1346,7 +1446,8 @@ class MainWindow(QMainWindow):
                 self._load_raw_file(result["raw_file"])
                 self.chat_panel.append_output(
                     f"[xschem] Simulation complete: "
-                    f"{len(self.state.datasets[-1].variables)} signals loaded\n")
+                    f"{len(self.state.datasets[-1].variables)} signals loaded\n"
+                )
         except (FileNotFoundError, RuntimeError) as e:
             self.chat_panel.append_output(f"[xschem] {e}\n")
         finally:
@@ -1357,8 +1458,7 @@ class MainWindow(QMainWindow):
     def _on_xschem_sim_done(self, result: dict):
         """Handle successful simulation completion (called from mutation dispatch)."""
         self.chat_panel.append_output(
-            f"[xschem] Simulation complete: "
-            f"{result.get('raw_file', 'unknown')}\n"
+            f"[xschem] Simulation complete: " f"{result.get('raw_file', 'unknown')}\n"
         )
 
     def _on_xschem_sim_error(self, data: dict):
@@ -1366,9 +1466,7 @@ class MainWindow(QMainWindow):
         error = data.get("error") or data.get("result", {}).get(
             "stderr", "unknown error"
         )
-        self.chat_panel.append_output(
-            f"[xschem] Simulation failed: {error}\n"
-        )
+        self.chat_panel.append_output(f"[xschem] Simulation failed: {error}\n")
 
     def _on_xschem_probe_net_selected(self):
         """Cross-probe menu: Probe Selected Net."""
@@ -1388,8 +1486,8 @@ class MainWindow(QMainWindow):
         """
         if self._xschem_cross_probe is None:
             from pqwave.bridge.xschem.cross_probe import XschemCrossProbeClient
-            self._xschem_cross_probe = XschemCrossProbeClient()
 
+            self._xschem_cross_probe = XschemCrossProbeClient()
 
     def _xschem_probe_trace(self, trace, force_reconnect: bool = False):
         """Cross-probe a specific trace's net in xschem."""
@@ -1432,7 +1530,7 @@ class MainWindow(QMainWindow):
             # Specific net was queued — ensure client is connected,
             # then probe it (don't fall through to active-trace).
             self._xschem_ensure_client()
-            logger.debug(f"xschem cp: $NET: \"{net_to_probe}\"")
+            logger.debug(f'xschem cp: $NET: "{net_to_probe}"')
             self._xschem_cross_probe.probe_net(net_to_probe)
         else:
             self._xschem_probe_active_trace()
@@ -1449,16 +1547,15 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Schematic or Netlist",
+            self,
+            "Select Schematic or Netlist",
             os.path.expanduser("~"),
-            "QSPICE Files (*.qsch *.cir *.sp *.net *.spice *.*)"
+            "QSPICE Files (*.qsch *.cir *.sp *.net *.spice *.*)",
         )
         if not path:
             return
 
-        self.chat_panel.append_output(
-            f"[qspice] Running simulation: {path}\n"
-        )
+        self.chat_panel.append_output(f"[qspice] Running simulation: {path}\n")
 
         from threading import Thread
         from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner, qsch2cir
@@ -1469,17 +1566,13 @@ class MainWindow(QMainWindow):
                 try:
                     netlist_path = qsch2cir(path)
                 except Exception as e:
-                    self._qspice_error_signal.emit(
-                        f"Failed to convert .qsch: {e}"
-                    )
+                    self._qspice_error_signal.emit(f"Failed to convert .qsch: {e}")
                     return
 
             runner = QspiceBridgeRunner(auto_open=False)
             exit_code = runner.run(netlist_path)
             if exit_code == 0:
-                qraw_path = os.path.splitext(
-                    os.path.abspath(netlist_path)
-                )[0] + ".qraw"
+                qraw_path = os.path.splitext(os.path.abspath(netlist_path))[0] + ".qraw"
                 self._qspice_done_signal.emit(qraw_path)
             else:
                 self._qspice_error_signal.emit(f"exit code {exit_code}")
@@ -1488,19 +1581,18 @@ class MainWindow(QMainWindow):
 
     def _on_qspice_sim_done(self, qraw_path: str):
         """Called when QSPICE simulation succeeds."""
-        self.chat_panel.append_output(
-            f"[qspice] Simulation complete: {qraw_path}\n"
-        )
+        self.chat_panel.append_output(f"[qspice] Simulation complete: {qraw_path}\n")
         self._load_raw_file(qraw_path)
 
     def _on_qspice_sim_error(self, message: str):
         """Called when QSPICE simulation fails."""
-        self.chat_panel.append_output(
-            f"[qspice] Simulation failed: {message}\n"
-        )
+        self.chat_panel.append_output(f"[qspice] Simulation failed: {message}\n")
         from PyQt6.QtWidgets import QMessageBox
+
         QMessageBox.warning(
-            self, "QSPICE Simulation Failed", message,
+            self,
+            "QSPICE Simulation Failed",
+            message,
         )
 
     # ---- Qucs-S Bridge handlers ----
@@ -1522,10 +1614,15 @@ class MainWindow(QMainWindow):
 
         # Always read current config from disk
         if not self._qucs_bridge.detect_tool():
-            self.chat_panel.append_output("[qucs] Qucs-S config not found. Is Qucs-S installed?\n")
-            QMessageBox.information(self, "Qucs-S Not Found",
+            self.chat_panel.append_output(
+                "[qucs] Qucs-S config not found. Is Qucs-S installed?\n"
+            )
+            QMessageBox.information(
+                self,
+                "Qucs-S Not Found",
                 "Qucs-S configuration file not found.\n\n"
-                "Install Qucs-S first, then use Connect to configure the integration.")
+                "Install Qucs-S first, then use Connect to configure the integration.",
+            )
             return
 
         status = self._qucs_bridge.get_status()
@@ -1545,8 +1642,11 @@ class MainWindow(QMainWindow):
 
         # Show dialog with current vs proposed
         import shutil as _shutil
+
         pqwave_exe = _shutil.which("pqwave") or "pqwave"
-        reply = QMessageBox.question(self, "Configure Qucs-S Integration",
+        reply = QMessageBox.question(
+            self,
+            "Configure Qucs-S Integration",
             "Set pqwave as the waveform viewer for Qucs-S?\n\n"
             "⚠  CLOSE Qucs-S BEFORE clicking OK.\n\n"
             f"Current:\n"
@@ -1557,7 +1657,8 @@ class MainWindow(QMainWindow):
             f"  NgspiceParams     = --qucs-bridge\n\n"
             "You can undo at any time via File > Qucs-S Bridge > Disconnect.",
             QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Ok)
+            QMessageBox.StandardButton.Ok,
+        )
         if reply != QMessageBox.StandardButton.Ok:
             self.chat_panel.append_output("[qucs] Cancelled.\n")
             return
@@ -1570,18 +1671,26 @@ class MainWindow(QMainWindow):
                 f"       NgspiceParams     = {status['params']}\n"
                 "[qucs] ⚠  Restart Qucs-S for the change to take effect.\n"
             )
-            QMessageBox.information(self, "Integration Configured",
+            QMessageBox.information(
+                self,
+                "Integration Configured",
                 f"Qucs-S will use pqwave as its waveform viewer.\n\n"
-                f"⚠  Restart Qucs-S for the change to take effect.")
+                f"⚠  Restart Qucs-S for the change to take effect.",
+            )
             self.qucs_control_bar.refresh()
         else:
-            self.chat_panel.append_output("[qucs] Configuration failed. See manual setup.\n")
-            QMessageBox.warning(self, "Configuration Failed",
+            self.chat_panel.append_output(
+                "[qucs] Configuration failed. See manual setup.\n"
+            )
+            QMessageBox.warning(
+                self,
+                "Configuration Failed",
                 "Failed to update Qucs-S configuration.\n\n"
                 "Configure manually:\n"
                 "  Qucs-S → Simulation → Simulator settings\n"
                 "  Ngspice executable = pqwave\n"
-                "  Ngspice CLI parameters = --qucs-bridge")
+                "  Ngspice CLI parameters = --qucs-bridge",
+            )
 
     def _on_qucs_disconnect(self):
         """File > Qucs-S Bridge > Disconnect — restore original config."""
@@ -1598,16 +1707,24 @@ class MainWindow(QMainWindow):
         )
 
         if not status["configured"]:
-            self.chat_panel.append_output("[qucs] Not configured — nothing to disconnect.\n")
-            QMessageBox.information(self, "Not Configured",
+            self.chat_panel.append_output(
+                "[qucs] Not configured — nothing to disconnect.\n"
+            )
+            QMessageBox.information(
+                self,
+                "Not Configured",
                 "Qucs-S integration is not active.\n\n"
-                "Use File > Qucs-S Bridge > Connect to set it up.")
+                "Use File > Qucs-S Bridge > Connect to set it up.",
+            )
             return
 
         # Detect what we'll restore to
         from pqwave.bridge.qucs_s.config import detect_ngspice as _detect_ngspice
+
         ngspice = _detect_ngspice() or "/usr/bin/ngspice"
-        reply = QMessageBox.warning(self, "Disconnect Qucs-S Integration",
+        reply = QMessageBox.warning(
+            self,
+            "Disconnect Qucs-S Integration",
             "Restore the original Qucs-S simulator configuration?\n\n"
             "⚠  CLOSE Qucs-S BEFORE clicking OK.\n\n"
             f"Current:\n"
@@ -1618,7 +1735,8 @@ class MainWindow(QMainWindow):
             f"  NgspiceParams     = (empty)\n\n"
             "You can reconnect at any time via File > Qucs-S Bridge > Connect.",
             QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Ok)
+            QMessageBox.StandardButton.Ok,
+        )
         if reply != QMessageBox.StandardButton.Ok:
             self.chat_panel.append_output("[qucs] Cancelled.\n")
             return
@@ -1630,29 +1748,44 @@ class MainWindow(QMainWindow):
                 f"       NgspiceExecutable = {status['exe']}\n"
                 "[qucs] Qucs-S will use its original simulator directly.\n"
             )
-            QMessageBox.information(self, "Disconnected",
+            QMessageBox.information(
+                self,
+                "Disconnected",
                 f"Qucs-S integration has been disabled.\n\n"
-                f"Simulator restored to: {status['exe']}")
+                f"Simulator restored to: {status['exe']}",
+            )
             if self.qucs_control_bar:
                 self.qucs_control_bar.refresh()
         else:
-            self.chat_panel.append_output("[qucs] Disconnect failed. Restore manually.\n")
-            QMessageBox.warning(self, "Disconnect Failed",
+            self.chat_panel.append_output(
+                "[qucs] Disconnect failed. Restore manually.\n"
+            )
+            QMessageBox.warning(
+                self,
+                "Disconnect Failed",
                 "Failed to restore original configuration.\n"
-                "Restore manually from backup: ~/.config/qucs/qucs_s.conf.pqwave_backup")
+                "Restore manually from backup: ~/.config/qucs/qucs_s.conf.pqwave_backup",
+            )
 
     def _show_qucs_guide(self):
         """Help > Qucs-S User Guide (non-modal)."""
         from PyQt6.QtWidgets import (
-            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+            QDialog,
+            QVBoxLayout,
+            QTextBrowser,
+            QDialogButtonBox,
+            QMessageBox,
         )
         from PyQt6.QtCore import Qt
         from pathlib import Path
 
-        guide_path = Path(__file__).parent.parent.parent / "docs" / "qucs" / "guide.html"
+        guide_path = (
+            Path(__file__).parent.parent.parent / "docs" / "qucs" / "guide.html"
+        )
         if not guide_path.exists():
             QMessageBox.warning(
-                self, "Not Found",
+                self,
+                "Not Found",
                 f"Qucs-S guide not found at:\n{guide_path}",
             )
             return
@@ -1661,7 +1794,8 @@ class MainWindow(QMainWindow):
             html = guide_path.read_text(encoding="utf-8")
         except OSError as e:
             QMessageBox.warning(
-                self, "Error",
+                self,
+                "Error",
                 f"Failed to read Qucs-S guide:\n{e}",
             )
             return
@@ -1691,7 +1825,11 @@ class MainWindow(QMainWindow):
     def _show_kicad_guide(self):
         """Help > KiCad User Guide (non-modal)."""
         from PyQt6.QtWidgets import (
-            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+            QDialog,
+            QVBoxLayout,
+            QTextBrowser,
+            QDialogButtonBox,
+            QMessageBox,
         )
         from PyQt6.QtCore import Qt
         from pathlib import Path
@@ -1701,7 +1839,8 @@ class MainWindow(QMainWindow):
         )
         if not guide_path.exists():
             QMessageBox.warning(
-                self, "Not Found",
+                self,
+                "Not Found",
                 f"KiCad guide not found at:\n{guide_path}",
             )
             return
@@ -1739,6 +1878,7 @@ class MainWindow(QMainWindow):
     def _setup_kicad_control_bar(self):
         """Create and wire the KiCad control bar (idempotent)."""
         from pqwave.bridge.kicad.control_bar import KiCadControlBar
+
         if self.kicad_control_bar is not None:
             return
         self.kicad_control_bar = KiCadControlBar(self._kicad_bridge)
@@ -1750,7 +1890,8 @@ class MainWindow(QMainWindow):
         self.kicad_control_bar.disconnect_clicked.connect(self._on_kicad_disconnect)
         self.kicad_control_bar.annotate_dc_clicked.connect(self._on_kicad_annotate_dc)
         self.kicad_control_bar.clear_annotations_clicked.connect(
-            self._on_kicad_clear_annotations)
+            self._on_kicad_clear_annotations
+        )
 
     def _on_kicad_connect(self, sch_path: str = ""):
         """File > KiCad Bridge > Connect.
@@ -1778,10 +1919,13 @@ class MainWindow(QMainWindow):
                 "[kicad] kicad-cli not found. Install KiCad 8.0+ and ensure\n"
                 "        kicad-cli is in your PATH.\n"
             )
-            QMessageBox.warning(self, "kicad-cli Not Found",
+            QMessageBox.warning(
+                self,
+                "kicad-cli Not Found",
                 "kicad-cli was not found.\n\n"
                 "Install KiCad 8.0+ or set the path in\n"
-                "Settings > External Converter Paths.")
+                "Settings > External Converter Paths.",
+            )
             return
 
         if self._kicad_bridge.connect(sch_path):
@@ -1803,7 +1947,7 @@ class MainWindow(QMainWindow):
         if self._kicad_bridge is None:
             return
 
-        if hasattr(self, '_kicad_ba_timer'):
+        if hasattr(self, "_kicad_ba_timer"):
             self._kicad_ba_timer.stop()
         self._kicad_ba_x = None
         self._kicad_bridge.disconnect()
@@ -1815,11 +1959,15 @@ class MainWindow(QMainWindow):
     def _on_kicad_simulate(self):
         """Run the kiCad simulation pipeline: export → fix → ngspice → load."""
         if self._kicad_bridge is None or not self._kicad_bridge.connected_path:
-            self.chat_panel.append_output("[kicad] Not connected. Use File > KiCad Bridge > Connect first.\n")
+            self.chat_panel.append_output(
+                "[kicad] Not connected. Use File > KiCad Bridge > Connect first.\n"
+            )
             return
 
         sch_path = self._kicad_bridge.connected_path
-        self.chat_panel.append_output(f"[kicad] Simulating {os.path.basename(sch_path)}...\n")
+        self.chat_panel.append_output(
+            f"[kicad] Simulating {os.path.basename(sch_path)}...\n"
+        )
 
         try:
             result = self._kicad_bridge.simulate(sch_path)
@@ -1853,7 +2001,8 @@ class MainWindow(QMainWindow):
         # files in KiCad since the initial connect).
         if not self._kicad_bridge.connect(self._kicad_bridge.connected_path):
             self.chat_panel.append_output(
-                "[kicad] Schematic not accessible — was the file moved or closed?\n")
+                "[kicad] Schematic not accessible — was the file moved or closed?\n"
+            )
             return
 
         # Auto-collect from the last dataset if no voltages provided
@@ -1862,8 +2011,11 @@ class MainWindow(QMainWindow):
 
         if not voltages:
             n_datasets = len(self.state.datasets) if self.state else 0
-            n_vars = len(self.state.datasets[-1].variables) if (
-                self.state and self.state.datasets) else 0
+            n_vars = (
+                len(self.state.datasets[-1].variables)
+                if (self.state and self.state.datasets)
+                else 0
+            )
             self.chat_panel.append_output(
                 f"[kicad] No DC voltage values found.\n"
                 f"[kicad] Datasets loaded: {n_datasets}, "
@@ -1879,7 +2031,7 @@ class MainWindow(QMainWindow):
         if ok:
             self.chat_panel.append_output("[kicad] Annotation complete.\n")
         else:
-            reason = getattr(self._kicad_bridge, '_last_ipc_error', None)
+            reason = getattr(self._kicad_bridge, "_last_ipc_error", None)
             self.chat_panel.append_output(
                 f"[kicad] Annotation failed: {reason or 'IPC API not available'}\n"
                 f"[kicad] Check: KiCad running? IPC API enabled (Preferences > Plugins)?\n"
@@ -1913,6 +2065,7 @@ class MainWindow(QMainWindow):
         """Lazy-init the AI translator on first AI mode use."""
         if self._ai_translator is None:
             from pqwave.llm.translator import AITranslator
+
             self._ai_translator = AITranslator()
         return self._ai_translator
 
@@ -1964,9 +2117,7 @@ class MainWindow(QMainWindow):
                     self.chat_panel.append_output(f"  -> {code}\n")
                 result = self._repl.run_sync(code)
                 if not result.get("ok"):
-                    self.chat_panel.append_output(
-                        f"  Error: {result.get('error')}\n"
-                    )
+                    self.chat_panel.append_output(f"  Error: {result.get('error')}\n")
                 elif "result" in result and result["result"] is not None:
                     self.chat_panel.append_result(result["result"])
             except Exception as e:
@@ -1994,6 +2145,7 @@ class MainWindow(QMainWindow):
             self.chat_panel.output.clear()
         elif cmd == "/help":
             from pqwave.session.api import get_command_registry
+
             registry = get_command_registry()
             lines = ["Available commands:", ""]
             for name, entry in sorted(registry.items()):
@@ -2021,6 +2173,7 @@ class MainWindow(QMainWindow):
                 translator.llm_enabled = on
                 if on:
                     from pqwave.llm.backends import get_active_profile_name, get_profile
+
                     name = get_active_profile_name()
                     profile = get_profile(name) if name else {}
                     model = (profile or {}).get("model", "?")
@@ -2031,6 +2184,7 @@ class MainWindow(QMainWindow):
                     self.chat_panel.append_output("-- LLM backend: OFF\n")
             else:
                 from pqwave.llm.backends import get_active_profile_name, get_profile
+
                 name = get_active_profile_name()
                 profile = get_profile(name) if name else {}
                 model = (profile or {}).get("model", "?")
@@ -2060,9 +2214,7 @@ class MainWindow(QMainWindow):
             self.chat_panel.append_output("-- Testing LLM connection...\n")
             try:
                 resp = translator.test_llm()
-                self.chat_panel.append_output(
-                    f"-- OK: {resp[:200]}\n"
-                )
+                self.chat_panel.append_output(f"-- OK: {resp[:200]}\n")
             except Exception as e:
                 self.chat_panel.append_output(f"-- FAILED: {e}\n")
 
@@ -2070,6 +2222,7 @@ class MainWindow(QMainWindow):
             # Copy user templates to project-level templates.yaml
             import yaml
             from pqwave.llm.templates import TemplateEngine
+
             engine = TemplateEngine()
             user_path = engine._user_path()
             proj_path = engine._project_path()
@@ -2081,8 +2234,7 @@ class MainWindow(QMainWindow):
                 return
             except Exception as e:
                 logger.warning("Failed to read user templates: %s", e, exc_info=True)
-                self.chat_panel.append_output(
-                    f"-- Cannot read user templates: {e}\n")
+                self.chat_panel.append_output(f"-- Cannot read user templates: {e}\n")
                 return
             user_tmpls = user_data.get("templates", [])
             if not user_tmpls:
@@ -2096,7 +2248,8 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     self.chat_panel.append_output(
                         f"-- Project templates file is corrupt: {e}\n"
-                        f"-- Fix or remove {proj_path} first.\n")
+                        f"-- Fix or remove {proj_path} first.\n"
+                    )
                     return
             new_count = 0
             for t in user_tmpls:
@@ -2119,15 +2272,11 @@ class MainWindow(QMainWindow):
                     )
                 else:
                     self._save_learned_template(tmpl["match"], tmpl["code"])
-                    self.chat_panel.append_output(
-                        "-- Remembered.\n"
-                    )
+                    self.chat_panel.append_output("-- Remembered.\n")
             else:
                 templates = translator.remember_all()
                 if not templates:
-                    self.chat_panel.append_output(
-                        "-- Nothing new to remember.\n"
-                    )
+                    self.chat_panel.append_output("-- Nothing new to remember.\n")
                 else:
                     for tmpl in templates:
                         self._save_learned_template(tmpl["match"], tmpl["code"])
@@ -2144,9 +2293,7 @@ class MainWindow(QMainWindow):
                         f"-- Font size: {self.chat_panel._font_size}pt\n"
                     )
                 except ValueError:
-                    self.chat_panel.append_output(
-                        "-- Usage: /font <size>  (8–24)\n"
-                    )
+                    self.chat_panel.append_output("-- Usage: /font <size>  (8–24)\n")
             else:
                 self.chat_panel.append_output(
                     f"-- Font size: {self.chat_panel._font_size}pt\n"
@@ -2159,6 +2306,7 @@ class MainWindow(QMainWindow):
         """Save to user templates. Also save to project templates if in a git repo."""
         import os, yaml
         from pqwave.llm.templates import TemplateEngine
+
         engine = TemplateEngine()
         entry = {"match": pattern, "code": code}
 
@@ -2175,10 +2323,13 @@ class MainWindow(QMainWindow):
     def _is_in_git_repo(path: str) -> bool:
         """Check if *path* is inside a git repository."""
         import subprocess
+
         try:
             subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
-                cwd=path, capture_output=True, check=True,
+                cwd=path,
+                capture_output=True,
+                check=True,
             )
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -2187,6 +2338,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _write_template_yaml(path, entry):
         import os, yaml
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -2194,8 +2346,9 @@ class MainWindow(QMainWindow):
         except FileNotFoundError:
             data = {}
         except Exception as e:
-            logger.warning("Failed to read templates from %s: %s", path, e,
-                           exc_info=True)
+            logger.warning(
+                "Failed to read templates from %s: %s", path, e, exc_info=True
+            )
             return
         if "templates" not in data or not data["templates"]:
             data["templates"] = []
@@ -2218,6 +2371,7 @@ class MainWindow(QMainWindow):
                 netlist_path = latest.path
 
         from pqwave.ui.worst_case_dialog import WorstCaseDialog
+
         dlg = WorstCaseDialog(self, netlist_path=netlist_path)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -2225,8 +2379,8 @@ class MainWindow(QMainWindow):
         components = dlg.get_components()
         if not components:
             QMessageBox.warning(
-                self, "No Components",
-                "Add at least one component with tolerance.")
+                self, "No Components", "Add at least one component with tolerance."
+            )
             return
 
         # Temperature range and analysis type are read for future use
@@ -2237,15 +2391,17 @@ class MainWindow(QMainWindow):
 
         if not netlist_path or not os.path.isfile(netlist_path):
             QMessageBox.warning(
-                self, "Invalid Netlist",
-                "Select a valid SPICE netlist file.")
+                self, "Invalid Netlist", "Select a valid SPICE netlist file."
+            )
             return
 
         with open(netlist_path, "r") as f:
             netlist_text = f.read()
 
         from pqwave.analysis.worst_case import (
-            enumerate_corners, modify_netlist, parse_op_output,
+            enumerate_corners,
+            modify_netlist,
+            parse_op_output,
         )
 
         corners = enumerate_corners(components)
@@ -2253,18 +2409,17 @@ class MainWindow(QMainWindow):
         # If too many corners, warn user
         if len(corners) > 256:
             reply = QMessageBox.question(
-                self, "Many Corners",
+                self,
+                "Many Corners",
                 f"{len(corners)} corners will be generated. Continue?",
-                QMessageBox.StandardButton.Yes
-                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
         # Generate corner netlists and run simulations
         status = self.statusBar()
-        status.showMessage(
-            f"Running {len(corners)} corner simulations...")
+        status.showMessage(f"Running {len(corners)} corner simulations...")
 
         import subprocess
         import tempfile
@@ -2277,8 +2432,7 @@ class MainWindow(QMainWindow):
         try:
             for i, corner in enumerate(corners):
                 modified = modify_netlist(netlist_text, corner)
-                cir_path = os.path.join(work_dir,
-                                        f"corner_{i:04d}.cir")
+                cir_path = os.path.join(work_dir, f"corner_{i:04d}.cir")
                 with open(cir_path, "w") as f:
                     f.write(modified)
 
@@ -2289,16 +2443,17 @@ class MainWindow(QMainWindow):
                     timeout=60,
                     cwd=work_dir,
                 )
-                output_value: float | None = parse_op_output(
-                    proc.stdout)
+                output_value: float | None = parse_op_output(proc.stdout)
 
-                results.append({
-                    "corner": i,
-                    "components": corner.copy(),
-                    "output": output_value,
-                    "stdout": proc.stdout,
-                    "stderr": proc.stderr,
-                })
+                results.append(
+                    {
+                        "corner": i,
+                        "components": corner.copy(),
+                        "output": output_value,
+                        "stdout": proc.stdout,
+                        "stderr": proc.stderr,
+                    }
+                )
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -2312,41 +2467,33 @@ class MainWindow(QMainWindow):
         from PyQt6.QtGui import QColor
 
         result_dlg = QDialog(self)
-        result_dlg.setWindowTitle(
-            f"Worst-Case Results — {len(results)} corners")
+        result_dlg.setWindowTitle(f"Worst-Case Results — {len(results)} corners")
         result_dlg.resize(700, 400)
         result_layout = QVBoxLayout(result_dlg)
 
         table = QTableWidget(len(results), 3)
-        table.setHorizontalHeaderLabels(
-            ["Corner", "Components", "Output"])
+        table.setHorizontalHeaderLabels(["Corner", "Components", "Output"])
         for row, r in enumerate(results):
+            table.setItem(row, 0, QTableWidgetItem(str(r["corner"])))
+            comp_str = ", ".join(f"{k}={v:.4g}" for k, v in r["components"].items())
+            table.setItem(row, 1, QTableWidgetItem(comp_str))
             table.setItem(
-                row, 0, QTableWidgetItem(str(r["corner"])))
-            comp_str = ", ".join(
-                f"{k}={v:.4g}"
-                for k, v in r["components"].items())
-            table.setItem(
-                row, 1, QTableWidgetItem(comp_str))
-            table.setItem(
-                row, 2,
+                row,
+                2,
                 QTableWidgetItem(
-                    f"{r['output']:.6g}"
-                    if r["output"] is not None
-                    else "N/A"))
+                    f"{r['output']:.6g}" if r["output"] is not None else "N/A"
+                ),
+            )
             # Highlight worst min (blue) and worst max (red)
             if r is worst_min:
                 for col in range(3):
-                    table.item(row, col).setBackground(
-                        QColor(0, 0, 180, 80))
+                    table.item(row, col).setBackground(QColor(0, 0, 180, 80))
             if r is worst_max:
                 for col in range(3):
-                    table.item(row, col).setBackground(
-                        QColor(180, 0, 0, 80))
+                    table.item(row, col).setBackground(QColor(180, 0, 0, 80))
         result_layout.addWidget(table)
 
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         btns.accepted.connect(result_dlg.accept)
         result_layout.addWidget(btns)
         result_dlg.exec()
@@ -2354,104 +2501,105 @@ class MainWindow(QMainWindow):
         if worst_min and worst_max:
             status.showMessage(
                 f"Worst-case: min={worst_min['output']:.4g}, "
-                f"max={worst_max['output']:.4g}")
+                f"max={worst_max['output']:.4g}"
+            )
         else:
             status.showMessage("Worst-case analysis complete")
 
     def _create_menu_callbacks(self):
         """Create callback dictionary for menu manager."""
         return {
-            'open_file': self.open_file,
-            'open_new_window': self.open_new_window,
-            'save_current_state': self.save_current_state,
-            'save_project_as': self._save_project_as,
-            'save_as_data_file': self.save_as_data_file,
-            'export_plot_image': self.export_plot_image,
-            'convert_raw_data': self.convert_raw_data,
-            'edit_trace_properties': self.edit_trace_properties,
-            'show_settings': self.show_settings,
-            'toggle_toolbar': self.toggle_toolbar,
-            'toggle_statusbar': self.toggle_statusbar,
-            'toggle_grids': self.toggle_grids,
-            'zoom_in': self.zoom_in,
-            'zoom_out': self.zoom_out,
-            'zoom_to_fit': self.zoom_to_fit,
-            'auto_range_x': self.auto_range_x,
-            'auto_range_y': self.auto_range_y,
-            'enable_zoom_box': self.enable_zoom_box,
-            'zoom_in_toolbar': self.zoom_in,
-            'zoom_out_toolbar': self.zoom_out,
-            'zoom_to_fit_toolbar': self.zoom_to_fit,
-            'auto_range_x_toolbar': self.auto_range_x,
-            'auto_range_y_toolbar': self.auto_range_y,
-            'zoom_box_toolbar': self.enable_zoom_box,
-            'toggle_grids_toolbar': self.toggle_grids,
-            'toggle_cross_hair': self.toggle_cross_hair,
-            'toggle_cross_hair_toolbar': self.toggle_cross_hair,
-            'toggle_x_cursor_a': self._toggle_x_cursor_a,
-            'toggle_x_cursor_b': self._toggle_x_cursor_b,
-            'toggle_y_cursor_A': self._toggle_y_cursor_A,
-            'toggle_y_cursor_B': self._toggle_y_cursor_B,
-            'show_keybindings': self._show_keybindings,
-            'show_functions_help': self._show_functions_help,
-            'show_measures_help': self._show_measures_help,
-            'show_vector_selection_help': self._show_vector_selection_help,
-            'show_repl_help': self._show_repl_help,
-            'show_api_help': self._show_api_help,
-            'show_mc_guide': self._show_mc_guide,
-            'show_lepton_guide': self._show_lepton_guide,
-            'show_xschem_guide': self._show_xschem_guide,
-            'split_horizontal': self._split_panel_horizontal,
-            'split_vertical': self._split_panel_vertical,
-            'close_panel': self._close_active_panel,
-            'compute_trace_stats': self._compute_trace_stats,
-            'compute_power_analysis': self._compute_power_analysis,
-            'histogram': self._show_histogram,
-            'nyquist': self._show_nyquist,
-            'polar': self._show_polar,
-            'smith': self._show_smith,
-            'bode': self._show_bode,
-            'worst_case': self._show_worst_case,
-            'mc_stats': self._on_mc_stats,
-            'mc_histogram': self._on_mc_histogram,
-            'mc_yield': self._on_mc_yield,
-            'mc_scatter': self._on_mc_scatter,
-            'mc_sensitivity': self._on_mc_sensitivity,
-            'mc_worst': self._on_mc_worst,
-            'mc_correlation': self._on_mc_correlation,
-            'toggle_digital_analog': self._toggle_digital_analog,
-            'group_bus': self._group_bus,
-            'eye_diagram': self._show_eye_diagram,
-            'threshold_settings': self._show_threshold_settings,
-            'save_template': self._on_save_template,
-            'load_template': self._on_load_template,
-            'manage_templates': self._on_manage_templates,
-            'close_dataset': self._on_close_dataset,
-            'open_monte_carlo': self._on_open_monte_carlo,
-            'lepton_connect': self._on_lepton_connect,
-            'lepton_simulate': self._on_lepton_simulate,
-            'lepton_disconnect': self._on_lepton_disconnect,
-            'lepton_annotate_dc': lambda: self._on_lepton_annotate_dc(),
-            'lepton_clear_annotations': self._on_lepton_clear_annotations,
-            'lepton_probe_net': self._on_lepton_menu_probe,
-            'lepton_clear': self._on_lepton_menu_clear,
-            'xschem_connect': self._on_xschem_connect,
-            'xschem_simulate': self._on_xschem_simulate,
-            'xschem_disconnect': self._on_xschem_disconnect,
-            'xschem_annotate_dc': self._on_xschem_annotate_dc,
-            'xschem_clear_annotations': self._on_xschem_clear_annotations,
-            'xschem_probe_net': self._on_xschem_probe_net_selected,
-            'xschem_clear': self._on_xschem_clear_probe,
-            'qucs_connect': self._on_qucs_connect,
-            'qucs_disconnect': self._on_qucs_disconnect,
-            'show_qucs_guide': self._show_qucs_guide,
-            'kicad_connect': self._on_kicad_connect,
-            'kicad_disconnect': self._on_kicad_disconnect,
-            'kicad_simulate': self._on_kicad_simulate,
-            'kicad_annotate_dc': self._on_kicad_annotate_dc,
-            'kicad_clear_annotations': self._on_kicad_clear_annotations,
-            'show_kicad_guide': self._show_kicad_guide,
-            'qspice_run_simulation': self._on_qspice_run_simulation,
+            "open_file": self.open_file,
+            "open_new_window": self.open_new_window,
+            "save_current_state": self.save_current_state,
+            "save_project_as": self._save_project_as,
+            "save_as_data_file": self.save_as_data_file,
+            "export_plot_image": self.export_plot_image,
+            "convert_raw_data": self.convert_raw_data,
+            "edit_trace_properties": self.edit_trace_properties,
+            "show_settings": self.show_settings,
+            "toggle_toolbar": self.toggle_toolbar,
+            "toggle_statusbar": self.toggle_statusbar,
+            "toggle_grids": self.toggle_grids,
+            "zoom_in": self.zoom_in,
+            "zoom_out": self.zoom_out,
+            "zoom_to_fit": self.zoom_to_fit,
+            "auto_range_x": self.auto_range_x,
+            "auto_range_y": self.auto_range_y,
+            "enable_zoom_box": self.enable_zoom_box,
+            "zoom_in_toolbar": self.zoom_in,
+            "zoom_out_toolbar": self.zoom_out,
+            "zoom_to_fit_toolbar": self.zoom_to_fit,
+            "auto_range_x_toolbar": self.auto_range_x,
+            "auto_range_y_toolbar": self.auto_range_y,
+            "zoom_box_toolbar": self.enable_zoom_box,
+            "toggle_grids_toolbar": self.toggle_grids,
+            "toggle_cross_hair": self.toggle_cross_hair,
+            "toggle_cross_hair_toolbar": self.toggle_cross_hair,
+            "toggle_x_cursor_a": self._toggle_x_cursor_a,
+            "toggle_x_cursor_b": self._toggle_x_cursor_b,
+            "toggle_y_cursor_A": self._toggle_y_cursor_A,
+            "toggle_y_cursor_B": self._toggle_y_cursor_B,
+            "show_keybindings": self._show_keybindings,
+            "show_functions_help": self._show_functions_help,
+            "show_measures_help": self._show_measures_help,
+            "show_vector_selection_help": self._show_vector_selection_help,
+            "show_repl_help": self._show_repl_help,
+            "show_api_help": self._show_api_help,
+            "show_mc_guide": self._show_mc_guide,
+            "show_lepton_guide": self._show_lepton_guide,
+            "show_xschem_guide": self._show_xschem_guide,
+            "split_horizontal": self._split_panel_horizontal,
+            "split_vertical": self._split_panel_vertical,
+            "close_panel": self._close_active_panel,
+            "compute_trace_stats": self._compute_trace_stats,
+            "compute_power_analysis": self._compute_power_analysis,
+            "histogram": self._show_histogram,
+            "nyquist": self._show_nyquist,
+            "polar": self._show_polar,
+            "smith": self._show_smith,
+            "bode": self._show_bode,
+            "worst_case": self._show_worst_case,
+            "mc_stats": self._on_mc_stats,
+            "mc_histogram": self._on_mc_histogram,
+            "mc_yield": self._on_mc_yield,
+            "mc_scatter": self._on_mc_scatter,
+            "mc_sensitivity": self._on_mc_sensitivity,
+            "mc_worst": self._on_mc_worst,
+            "mc_correlation": self._on_mc_correlation,
+            "toggle_digital_analog": self._toggle_digital_analog,
+            "group_bus": self._group_bus,
+            "eye_diagram": self._show_eye_diagram,
+            "threshold_settings": self._show_threshold_settings,
+            "save_template": self._on_save_template,
+            "load_template": self._on_load_template,
+            "manage_templates": self._on_manage_templates,
+            "close_dataset": self._on_close_dataset,
+            "open_monte_carlo": self._on_open_monte_carlo,
+            "lepton_connect": self._on_lepton_connect,
+            "lepton_simulate": self._on_lepton_simulate,
+            "lepton_disconnect": self._on_lepton_disconnect,
+            "lepton_annotate_dc": lambda: self._on_lepton_annotate_dc(),
+            "lepton_clear_annotations": self._on_lepton_clear_annotations,
+            "lepton_probe_net": self._on_lepton_menu_probe,
+            "lepton_clear": self._on_lepton_menu_clear,
+            "xschem_connect": self._on_xschem_connect,
+            "xschem_simulate": self._on_xschem_simulate,
+            "xschem_disconnect": self._on_xschem_disconnect,
+            "xschem_annotate_dc": self._on_xschem_annotate_dc,
+            "xschem_clear_annotations": self._on_xschem_clear_annotations,
+            "xschem_probe_net": self._on_xschem_probe_net_selected,
+            "xschem_clear": self._on_xschem_clear_probe,
+            "qucs_connect": self._on_qucs_connect,
+            "qucs_disconnect": self._on_qucs_disconnect,
+            "show_qucs_guide": self._show_qucs_guide,
+            "kicad_connect": self._on_kicad_connect,
+            "kicad_disconnect": self._on_kicad_disconnect,
+            "kicad_simulate": self._on_kicad_simulate,
+            "kicad_annotate_dc": self._on_kicad_annotate_dc,
+            "kicad_clear_annotations": self._on_kicad_clear_annotations,
+            "show_kicad_guide": self._show_kicad_guide,
+            "qspice_run_simulation": self._on_qspice_run_simulation,
         }
 
     # --- Delegate properties (route to active panel) ---
@@ -2503,7 +2651,9 @@ class MainWindow(QMainWindow):
         self._backannotation_timer = QTimer()
         self._backannotation_timer.setSingleShot(True)
         self._backannotation_timer.setInterval(100)  # 100ms debounce
-        self._backannotation_timer.timeout.connect(self._send_data_point_update_debounced)
+        self._backannotation_timer.timeout.connect(
+            self._send_data_point_update_debounced
+        )
         self._pending_x_value = None  # X value to send when timer fires
 
         # Xschem back-annotation timer (separate from the data point update above)
@@ -2533,14 +2683,28 @@ class MainWindow(QMainWindow):
             try:
                 self._bound_plot_widget.mouse_moved.disconnect(self._on_mouse_moved)
                 self._bound_plot_widget.mouse_left.disconnect(self._on_mouse_left)
-                self._bound_plot_widget.cursor_xa_changed.disconnect(self._on_cursor_xa_changed)
-                self._bound_plot_widget.cursor_xb_changed.disconnect(self._on_cursor_xb_changed)
-                self._bound_plot_widget.cursor_yA_changed.disconnect(self._on_cursor_yA_changed)
-                self._bound_plot_widget.cursor_yB_changed.disconnect(self._on_cursor_yB_changed)
-                self._bound_plot_widget.cursor_y2_changed.disconnect(self._on_cursor_y2_changed)
-                self._bound_plot_widget.axis_log_mode_changed.disconnect(self._on_axis_log_mode_changed)
+                self._bound_plot_widget.cursor_xa_changed.disconnect(
+                    self._on_cursor_xa_changed
+                )
+                self._bound_plot_widget.cursor_xb_changed.disconnect(
+                    self._on_cursor_xb_changed
+                )
+                self._bound_plot_widget.cursor_yA_changed.disconnect(
+                    self._on_cursor_yA_changed
+                )
+                self._bound_plot_widget.cursor_yB_changed.disconnect(
+                    self._on_cursor_yB_changed
+                )
+                self._bound_plot_widget.cursor_y2_changed.disconnect(
+                    self._on_cursor_y2_changed
+                )
+                self._bound_plot_widget.axis_log_mode_changed.disconnect(
+                    self._on_axis_log_mode_changed
+                )
                 self._bound_plot_widget.mark_clicked.disconnect(self._on_mark_clicked)
-                self._bound_plot_widget.title_changed.disconnect(self._on_plot_title_changed)
+                self._bound_plot_widget.title_changed.disconnect(
+                    self._on_plot_title_changed
+                )
             except (TypeError, RuntimeError):
                 pass
 
@@ -2550,8 +2714,12 @@ class MainWindow(QMainWindow):
                 self._bound_axis_manager.axis_log_mode_changed.disconnect(
                     self._on_axis_log_mode_changed_from_manager
                 )
-                self._bound_axis_manager.axis_range_changed.disconnect(self._on_axis_range_changed)
-                self._bound_axis_manager.axis_label_changed.disconnect(self._on_axis_label_changed)
+                self._bound_axis_manager.axis_range_changed.disconnect(
+                    self._on_axis_range_changed
+                )
+                self._bound_axis_manager.axis_label_changed.disconnect(
+                    self._on_axis_label_changed
+                )
             except (TypeError, RuntimeError):
                 pass
 
@@ -2575,7 +2743,8 @@ class MainWindow(QMainWindow):
         except (TypeError, RuntimeError):
             pass
         panel.trace_manager.trace_context_menu_requested.connect(
-            self._on_trace_context_menu)
+            self._on_trace_context_menu
+        )
 
         # Connect trace removed signal for immediate bridge label cleanup
         try:
@@ -2610,12 +2779,16 @@ class MainWindow(QMainWindow):
 
     def _split_panel_horizontal(self) -> None:
         """Split active panel horizontally (side-by-side)."""
-        self.panel_grid.split_panel(self.panel_grid.active_panel_id, orientation="horizontal")
+        self.panel_grid.split_panel(
+            self.panel_grid.active_panel_id, orientation="horizontal"
+        )
         self._sync_split_x_axes()
 
     def _split_panel_vertical(self) -> None:
         """Split active panel vertically (stacked)."""
-        self.panel_grid.split_panel(self.panel_grid.active_panel_id, orientation="vertical")
+        self.panel_grid.split_panel(
+            self.panel_grid.active_panel_id, orientation="vertical"
+        )
         self._sync_split_x_axes()
 
     def _sync_split_x_axes(self) -> None:
@@ -2639,42 +2812,39 @@ class MainWindow(QMainWindow):
     def _on_save_template(self):
         """Save current panel view as a named template."""
         from PyQt6.QtWidgets import QInputDialog
+
         name, ok = QInputDialog.getText(self, "Save Template", "Template name:")
         if ok and name:
             result = self._session.save_template(name)
             if result.get("success"):
-                self.statusBar().showMessage(
-                    f"Template '{name}' saved", 3000
-                )
+                self.statusBar().showMessage(f"Template '{name}' saved", 3000)
             else:
-                self.statusBar().showMessage(
-                    f"Error: {result.get('error')}", 5000
-                )
+                self.statusBar().showMessage(f"Error: {result.get('error')}", 5000)
 
     def _on_load_template(self):
         """Load a saved view template onto the active panel."""
         from pqwave.ui.template_manager_dialog import TemplateManagerDialog
         from PyQt6.QtWidgets import QDialog
+
         dlg = TemplateManagerDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             name = dlg.selected_name
             if name:
                 result = self._session.load_template(name)
                 if result.get("success"):
-                    applied = result.get('applied_expressions', 0)
-                    skipped = result.get('skipped_expressions', [])
+                    applied = result.get("applied_expressions", 0)
+                    skipped = result.get("skipped_expressions", [])
                     msg = f"Template '{name}' loaded ({applied} traces)"
                     if skipped:
                         msg += f" — {len(skipped)} skipped: {', '.join(skipped[:3])}"
                     self.statusBar().showMessage(msg, 5000)
                 else:
-                    self.statusBar().showMessage(
-                        f"Error: {result.get('error')}", 5000
-                    )
+                    self.statusBar().showMessage(f"Error: {result.get('error')}", 5000)
 
     def _on_manage_templates(self):
         """Open the Template Manager dialog."""
         from pqwave.ui.template_manager_dialog import TemplateManagerDialog
+
         dlg = TemplateManagerDialog(self)
         dlg.exec()
 
@@ -2711,8 +2881,9 @@ class MainWindow(QMainWindow):
         try:
             from pqwave.ui.mc_open_dialog import MCOpenDialog
         except ImportError:
-            QMessageBox.information(self, "Coming Soon",
-                                   "Monte Carlo support is coming soon.")
+            QMessageBox.information(
+                self, "Coming Soon", "Monte Carlo support is coming soon."
+            )
             return
         dialog = MCOpenDialog(self)
         if dialog.exec():
@@ -2723,7 +2894,9 @@ class MainWindow(QMainWindow):
         """Load Monte Carlo data from dialog configuration."""
         from pqwave.models.rawfile import RawFile, detect_naming_pattern
         from pqwave.models.mc_collection import (
-            build_mc_from_stepped, build_mc_from_pattern, build_mc_from_multi_files
+            build_mc_from_stepped,
+            build_mc_from_pattern,
+            build_mc_from_multi_files,
         )
         from pqwave.models.dataset import Dataset
 
@@ -2759,8 +2932,12 @@ class MainWindow(QMainWindow):
             upper = self._main_splitter.widget(0)
             if upper and upper.layout():
                 upper.layout().addWidget(self.mc_control_bar)
-            self.mc_control_bar.display_mode_changed.connect(self._on_mc_display_changed)
-            self.mc_control_bar.envelope_sigma_changed.connect(self._on_mc_sigma_changed)
+            self.mc_control_bar.display_mode_changed.connect(
+                self._on_mc_display_changed
+            )
+            self.mc_control_bar.envelope_sigma_changed.connect(
+                self._on_mc_sigma_changed
+            )
             self.mc_control_bar.nominal_changed.connect(self._on_mc_nominal_changed)
             self.mc_control_bar.run_filter_changed.connect(self._on_mc_filter_changed)
 
@@ -2806,63 +2983,108 @@ class MainWindow(QMainWindow):
     def _connect_wave_receiver_signals(self):
         """Connect wave receiver command handler signals."""
         if self.state.wave_cmd_handler is None:
-            logger.debug("No wave command handler available, skipping wave signal connections")
+            logger.debug(
+                "No wave command handler available, skipping wave signal connections"
+            )
             return
 
         # Connect command handler signals to local slots
-        self.state.wave_cmd_handler.table_set_received.connect(self._handle_xschem_table_set)
-        self.state.wave_cmd_handler.copyvar_received.connect(self._handle_xschem_copyvar)
-        self.state.wave_cmd_handler.open_file_received.connect(self._handle_xschem_open_file)
-        self.state.wave_cmd_handler.add_trace_received.connect(self._handle_xschem_add_trace)
-        self.state.wave_cmd_handler.remove_trace_received.connect(self._handle_xschem_remove_trace)
-        self.state.wave_cmd_handler.get_data_point_received.connect(self._handle_xschem_get_data_point)
-        self.state.wave_cmd_handler.close_window_received.connect(self._handle_xschem_close_window)
-        self.state.wave_cmd_handler.list_windows_received.connect(self._handle_xschem_list_windows)
+        self.state.wave_cmd_handler.table_set_received.connect(
+            self._handle_xschem_table_set
+        )
+        self.state.wave_cmd_handler.copyvar_received.connect(
+            self._handle_xschem_copyvar
+        )
+        self.state.wave_cmd_handler.open_file_received.connect(
+            self._handle_xschem_open_file
+        )
+        self.state.wave_cmd_handler.add_trace_received.connect(
+            self._handle_xschem_add_trace
+        )
+        self.state.wave_cmd_handler.remove_trace_received.connect(
+            self._handle_xschem_remove_trace
+        )
+        self.state.wave_cmd_handler.get_data_point_received.connect(
+            self._handle_xschem_get_data_point
+        )
+        self.state.wave_cmd_handler.close_window_received.connect(
+            self._handle_xschem_close_window
+        )
+        self.state.wave_cmd_handler.list_windows_received.connect(
+            self._handle_xschem_list_windows
+        )
         self.state.wave_cmd_handler.ping_received.connect(self._handle_xschem_ping)
-        self.state.wave_cmd_handler.invalid_command_received.connect(self._handle_xschem_invalid_command)
+        self.state.wave_cmd_handler.invalid_command_received.connect(
+            self._handle_xschem_invalid_command
+        )
 
         logger.debug(f"Connected wave receiver signals for window {self.window_id}")
 
     # Xschem pending commands handling
-    def _queue_xschem_command(self, command_type: str, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _queue_xschem_command(
+        self, command_type: str, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Queue xschem command for processing when raw_file is available."""
-        logger.debug(f"Window {self.window_id} queuing {command_type} command from {client_addr}")
-        self.pending_xschem_commands.append((command_type, args, client_addr, connection_state))
+        logger.debug(
+            f"Window {self.window_id} queuing {command_type} command from {client_addr}"
+        )
+        self.pending_xschem_commands.append(
+            (command_type, args, client_addr, connection_state)
+        )
 
     def _process_pending_xschem_commands(self) -> None:
         """Process any queued xschem commands."""
         if not self.pending_xschem_commands:
             return
-        logger.debug(f"Window {self.window_id} processing {len(self.pending_xschem_commands)} pending commands")
+        logger.debug(
+            f"Window {self.window_id} processing {len(self.pending_xschem_commands)} pending commands"
+        )
         # Process in order
-        for command_type, args, client_addr, connection_state in self.pending_xschem_commands:
-            if command_type == 'copyvar':
+        for (
+            command_type,
+            args,
+            client_addr,
+            connection_state,
+        ) in self.pending_xschem_commands:
+            if command_type == "copyvar":
                 self._handle_xschem_copyvar(
-                    args['var_name'], args['color'], client_addr, connection_state
+                    args["var_name"], args["color"], client_addr, connection_state
                 )
-            elif command_type == 'add_trace':
+            elif command_type == "add_trace":
                 self._handle_xschem_add_trace(
-                    args['var_name'], args['axis'], args['color'], client_addr, connection_state
+                    args["var_name"],
+                    args["axis"],
+                    args["color"],
+                    client_addr,
+                    connection_state,
                 )
-            elif command_type == 'remove_trace':
+            elif command_type == "remove_trace":
                 self._handle_xschem_remove_trace(
-                    args['var_name'], client_addr, connection_state
+                    args["var_name"], client_addr, connection_state
                 )
-            elif command_type == 'get_data_point':
+            elif command_type == "get_data_point":
                 self._handle_xschem_get_data_point(
-                    args['x_value'], client_addr, connection_state
+                    args["x_value"], client_addr, connection_state
                 )
             # Note: table_set and open_file are not queued as they trigger file loading
         # Clear processed commands
         self.pending_xschem_commands.clear()
 
     # Xschem command slot methods
-    def _handle_xschem_table_set(self, raw_file: str, client_addr: str, connection_state: dict):
+    def _handle_xschem_table_set(
+        self, raw_file: str, client_addr: str, connection_state: dict
+    ):
         """Handle xschem table_set command."""
-        logger.info(f"Window {self.window_id} received table_set: {raw_file} from {client_addr}")
+        logger.info(
+            f"Window {self.window_id} received table_set: {raw_file} from {client_addr}"
+        )
         # Check if this command is for this window
-        is_for_this = self._is_command_for_this_window(client_addr, connection_state, raw_file=raw_file)
-        logger.info(f"Window {self.window_id} table_set is_for_this_window: {is_for_this}")
+        is_for_this = self._is_command_for_this_window(
+            client_addr, connection_state, raw_file=raw_file
+        )
+        logger.info(
+            f"Window {self.window_id} table_set is_for_this_window: {is_for_this}"
+        )
         if not is_for_this:
             logger.info(f"Ignoring table_set, not for this window")
             return
@@ -2890,8 +3112,10 @@ class MainWindow(QMainWindow):
         sch_path = getattr(self, "_xschem_connected_path", None)
         if sch_path:
             from pqwave.bridge.xschem.bridge import XschemBridge
+
             netlist_dir = XschemBridge._resolve_netlist_dir(
-                os.path.dirname(os.path.abspath(sch_path)))
+                os.path.dirname(os.path.abspath(sch_path))
+            )
             search_dirs.append(netlist_dir)
             search_dirs.append(os.path.dirname(os.path.abspath(sch_path)))
         if self.raw_file is not None:
@@ -2904,12 +3128,18 @@ class MainWindow(QMainWindow):
                 return candidate
         return raw_file
 
-    def _handle_xschem_copyvar(self, var_name: str, color: str, client_addr: str, connection_state: dict):
+    def _handle_xschem_copyvar(
+        self, var_name: str, color: str, client_addr: str, connection_state: dict
+    ):
         """Handle xschem copyvar command."""
-        logger.info(f"Window {self.window_id} received copyvar: {var_name} color {color} from {client_addr}")
-        current_raw_file = connection_state.get('current_raw_file')
+        logger.info(
+            f"Window {self.window_id} received copyvar: {var_name} color {color} from {client_addr}"
+        )
+        current_raw_file = connection_state.get("current_raw_file")
         logger.info(f"Current raw file from connection_state: {current_raw_file}")
-        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=current_raw_file):
+        if not self._is_command_for_this_window(
+            client_addr, connection_state, raw_file=current_raw_file
+        ):
             logger.info(f"Ignoring copyvar, not for this window")
             return
 
@@ -2925,30 +3155,34 @@ class MainWindow(QMainWindow):
         # If raw file not yet loaded, queue command for later processing
         if self.raw_file is None:
             logger.info(f"Raw file not loaded, queuing copyvar command for {var_name}")
-            self._queue_xschem_command('copyvar', {
-                'var_name': var_name,
-                'color': color,
-                'rgb': rgb,
-                'axis': axis
-            }, client_addr, connection_state)
+            self._queue_xschem_command(
+                "copyvar",
+                {"var_name": var_name, "color": color, "rgb": rgb, "axis": axis},
+                client_addr,
+                connection_state,
+            )
             return
 
         # Get current X variable
         x_var = self._get_current_x_var()
         logger.info(f"Current X variable: {x_var}")
         if x_var is None:
-            logger.error(f"Cannot add trace: no X variable set (raw file loaded but no X variable?)")
+            logger.error(
+                f"Cannot add trace: no X variable set (raw file loaded but no X variable?)"
+            )
             return
 
         # Add trace with error collection
         error_messages = []
-        logger.info(f"Adding trace for variable {var_name} on axis {axis} with color {color}")
+        logger.info(
+            f"Adding trace for variable {var_name} on axis {axis} with color {color}"
+        )
         trace = self.trace_manager.add_trace_from_variable(
             variable_name=var_name,
             x_var_name=x_var,
             y_axis=axis,
             custom_color=rgb,
-            error_out=error_messages
+            error_out=error_messages,
         )
         if trace is None:
             error_msg = f"Failed to add trace for variable: {var_name}"
@@ -2956,12 +3190,20 @@ class MainWindow(QMainWindow):
                 error_msg = f"Failed to add trace: {error_messages[0]}"
             logger.error(error_msg)
         else:
-            logger.info(f"Successfully added trace for {var_name} on axis {axis} color {color}")
+            logger.info(
+                f"Successfully added trace for {var_name} on axis {axis} color {color}"
+            )
 
-    def _handle_xschem_open_file(self, raw_file: str, client_addr: str, connection_state: dict):
+    def _handle_xschem_open_file(
+        self, raw_file: str, client_addr: str, connection_state: dict
+    ):
         """Handle xschem open_file JSON command."""
-        logger.debug(f"Window {self.window_id} received open_file: {raw_file} from {client_addr}")
-        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=raw_file):
+        logger.debug(
+            f"Window {self.window_id} received open_file: {raw_file} from {client_addr}"
+        )
+        if not self._is_command_for_this_window(
+            client_addr, connection_state, raw_file=raw_file
+        ):
             logger.debug(f"Ignoring open_file, not for this window")
             return
         self.state.window_registry.set_window_for_client(client_addr, self.window_id)
@@ -2969,33 +3211,55 @@ class MainWindow(QMainWindow):
         try:
             self._load_raw_file(resolved)
             self._send_xschem_response(
-                client_addr, connection_state,
+                client_addr,
+                connection_state,
                 status="success",
-                data={"loaded": True, "raw_file": resolved, "window_id": self.window_id}
+                data={
+                    "loaded": True,
+                    "raw_file": resolved,
+                    "window_id": self.window_id,
+                },
             )
         except Exception as e:
             logger.error(f"Failed to load raw file {resolved}: {e}")
             self._send_xschem_response(
-                client_addr, connection_state,
+                client_addr,
+                connection_state,
                 status="error",
-                error=f"Failed to load raw file: {e}"
+                error=f"Failed to load raw file: {e}",
             )
 
-    def _handle_xschem_add_trace(self, var_name: str, axis: str, color: str, client_addr: str, connection_state: dict):
+    def _handle_xschem_add_trace(
+        self,
+        var_name: str,
+        axis: str,
+        color: str,
+        client_addr: str,
+        connection_state: dict,
+    ):
         """Handle xschem add_trace JSON command."""
-        logger.debug(f"Window {self.window_id} received add_trace: {var_name} axis {axis} color {color} from {client_addr}")
-        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
+        logger.debug(
+            f"Window {self.window_id} received add_trace: {var_name} axis {axis} color {color} from {client_addr}"
+        )
+        if not self._is_command_for_this_window(
+            client_addr,
+            connection_state,
+            raw_file=connection_state.get("current_raw_file"),
+        ):
             logger.debug(f"Ignoring add_trace, not for this window")
             return
 
         # If raw file not yet loaded, queue command for later processing
         if self.raw_file is None:
-            logger.debug(f"Raw file not loaded, queuing add_trace command for {var_name}")
-            self._queue_xschem_command('add_trace', {
-                'var_name': var_name,
-                'axis': axis,
-                'color': color
-            }, client_addr, connection_state)
+            logger.debug(
+                f"Raw file not loaded, queuing add_trace command for {var_name}"
+            )
+            self._queue_xschem_command(
+                "add_trace",
+                {"var_name": var_name, "axis": axis, "color": color},
+                client_addr,
+                connection_state,
+            )
             return
 
         # Parse color
@@ -3005,11 +3269,11 @@ class MainWindow(QMainWindow):
             rgb = (255, 0, 0)  # Red
 
         # Determine axis assignment
-        if axis == 'auto':
+        if axis == "auto":
             y_axis = self._detect_axis_from_var_name(var_name)
-        elif axis == 'Y1':
+        elif axis == "Y1":
             y_axis = AxisAssignment.Y1
-        elif axis == 'Y2':
+        elif axis == "Y2":
             y_axis = AxisAssignment.Y2
         else:
             logger.warning(f"Invalid axis '{axis}', defaulting to auto detection")
@@ -3020,9 +3284,10 @@ class MainWindow(QMainWindow):
         if x_var is None:
             logger.error(f"Cannot add trace: no X variable set (raw file not loaded?)")
             self._send_xschem_response(
-                client_addr, connection_state,
+                client_addr,
+                connection_state,
                 status="error",
-                error="No X variable set (raw file not loaded)"
+                error="No X variable set (raw file not loaded)",
             )
             return
 
@@ -3033,7 +3298,7 @@ class MainWindow(QMainWindow):
             x_var_name=x_var,
             y_axis=y_axis,
             custom_color=rgb,
-            error_out=error_messages
+            error_out=error_messages,
         )
         if trace is None:
             error_msg = f"Failed to add trace for variable: {var_name}"
@@ -3042,38 +3307,54 @@ class MainWindow(QMainWindow):
                 error_msg = error_messages[0]
             logger.error(error_msg)
             self._send_xschem_response(
-                client_addr, connection_state,
-                status="error",
-                error=error_msg
+                client_addr, connection_state, status="error", error=error_msg
             )
         else:
             logger.info(f"Added trace for {var_name} on axis {y_axis} color {color}")
             self._send_xschem_response(
-                client_addr, connection_state,
+                client_addr,
+                connection_state,
                 status="success",
-                data={"added": True, "var_name": var_name, "axis": str(y_axis), "color": color}
+                data={
+                    "added": True,
+                    "var_name": var_name,
+                    "axis": str(y_axis),
+                    "color": color,
+                },
             )
 
-    def _handle_xschem_remove_trace(self, var_name: str, client_addr: str, connection_state: dict):
+    def _handle_xschem_remove_trace(
+        self, var_name: str, client_addr: str, connection_state: dict
+    ):
         """Handle xschem remove_trace JSON command."""
-        logger.debug(f"Window {self.window_id} received remove_trace: {var_name} from {client_addr}")
-        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
+        logger.debug(
+            f"Window {self.window_id} received remove_trace: {var_name} from {client_addr}"
+        )
+        if not self._is_command_for_this_window(
+            client_addr,
+            connection_state,
+            raw_file=connection_state.get("current_raw_file"),
+        ):
             logger.debug(f"Ignoring remove_trace, not for this window")
             return
 
         # If raw file not yet loaded, queue command for later processing
         if self.raw_file is None:
-            logger.debug(f"Raw file not loaded, queuing remove_trace command for {var_name}")
-            self._queue_xschem_command('remove_trace', {
-                'var_name': var_name
-            }, client_addr, connection_state)
+            logger.debug(
+                f"Raw file not loaded, queuing remove_trace command for {var_name}"
+            )
+            self._queue_xschem_command(
+                "remove_trace", {"var_name": var_name}, client_addr, connection_state
+            )
             return
 
         if self.trace_manager is None:
             logger.error("Cannot remove trace: trace_manager not initialized")
             self._send_xschem_response(
-                client_addr, connection_state,
-                status="error", error="Trace manager not available"
+                client_addr,
+                connection_state,
+                status="error",
+                error="Trace manager not available",
             )
             return
 
@@ -3081,36 +3362,54 @@ class MainWindow(QMainWindow):
         if success:
             logger.info(f"Removed trace for variable '{var_name}'")
             self._send_xschem_response(
-                client_addr, connection_state,
-                status="success", data={"removed": var_name}
+                client_addr,
+                connection_state,
+                status="success",
+                data={"removed": var_name},
             )
         else:
             logger.warning(f"Trace not found for variable '{var_name}'")
             self._send_xschem_response(
-                client_addr, connection_state,
-                status="error", error=f"Trace not found for variable '{var_name}'"
+                client_addr,
+                connection_state,
+                status="error",
+                error=f"Trace not found for variable '{var_name}'",
             )
 
-    def _handle_xschem_get_data_point(self, x_value: float, client_addr: str, connection_state: dict):
+    def _handle_xschem_get_data_point(
+        self, x_value: float, client_addr: str, connection_state: dict
+    ):
         """Handle xschem get_data_point JSON command."""
-        logger.debug(f"Window {self.window_id} received get_data_point: x={x_value} from {client_addr}")
-        if not self._is_command_for_this_window(client_addr, connection_state, raw_file=connection_state.get('current_raw_file')):
+        logger.debug(
+            f"Window {self.window_id} received get_data_point: x={x_value} from {client_addr}"
+        )
+        if not self._is_command_for_this_window(
+            client_addr,
+            connection_state,
+            raw_file=connection_state.get("current_raw_file"),
+        ):
             logger.debug(f"Ignoring get_data_point, not for this window")
             return
 
         # If raw file not yet loaded, queue command for later processing
         if self.raw_file is None:
-            logger.debug(f"Raw file not loaded, queuing get_data_point command for x={x_value}")
-            self._queue_xschem_command('get_data_point', {
-                'x_value': x_value
-            }, client_addr, connection_state)
+            logger.debug(
+                f"Raw file not loaded, queuing get_data_point command for x={x_value}"
+            )
+            self._queue_xschem_command(
+                "get_data_point", {"x_value": x_value}, client_addr, connection_state
+            )
             return
 
         if self.state is None or self.trace_manager is None:
-            logger.error("Cannot query data point: state or trace_manager not initialized")
+            logger.error(
+                "Cannot query data point: state or trace_manager not initialized"
+            )
             self._send_xschem_response(
-                client_addr, connection_state,
-                status="error", error="Application not ready"
+                client_addr,
+                connection_state,
+                status="error",
+                error="Application not ready",
             )
             return
 
@@ -3122,43 +3421,48 @@ class MainWindow(QMainWindow):
         serializable_results = []
         for res in results:
             res_copy = res.copy()
-            y_val = res_copy.get('y_value')
+            y_val = res_copy.get("y_value")
             if isinstance(y_val, complex) or np.iscomplexobj(y_val):
                 # Replace with magnitude/phase representation
-                res_copy['y_value'] = {
-                    'magnitude': float(np.abs(y_val)),
-                    'phase_deg': float(np.angle(y_val, deg=True)),
-                    'real': float(y_val.real),
-                    'imag': float(y_val.imag)
+                res_copy["y_value"] = {
+                    "magnitude": float(np.abs(y_val)),
+                    "phase_deg": float(np.angle(y_val, deg=True)),
+                    "real": float(y_val.real),
+                    "imag": float(y_val.imag),
                 }
             elif isinstance(y_val, (np.floating, np.integer)):
-                res_copy['y_value'] = float(y_val)
+                res_copy["y_value"] = float(y_val)
             # y_nearest may also be complex
-            y_nearest = res_copy.get('y_nearest')
+            y_nearest = res_copy.get("y_nearest")
             if isinstance(y_nearest, complex) or np.iscomplexobj(y_nearest):
-                res_copy['y_nearest'] = {
-                    'magnitude': float(np.abs(y_nearest)),
-                    'phase_deg': float(np.angle(y_nearest, deg=True)),
-                    'real': float(y_nearest.real),
-                    'imag': float(y_nearest.imag)
+                res_copy["y_nearest"] = {
+                    "magnitude": float(np.abs(y_nearest)),
+                    "phase_deg": float(np.angle(y_nearest, deg=True)),
+                    "real": float(y_nearest.real),
+                    "imag": float(y_nearest.imag),
                 }
             elif isinstance(y_nearest, (np.floating, np.integer)):
-                res_copy['y_nearest'] = float(y_nearest)
+                res_copy["y_nearest"] = float(y_nearest)
             # Convert numpy bool to Python bool
-            out_of_range = res_copy.get('out_of_range')
+            out_of_range = res_copy.get("out_of_range")
             if isinstance(out_of_range, np.bool_):
-                res_copy['out_of_range'] = bool(out_of_range)
+                res_copy["out_of_range"] = bool(out_of_range)
             serializable_results.append(res_copy)
 
         self._send_xschem_response(
-            client_addr, connection_state,
+            client_addr,
+            connection_state,
             status="success",
-            data={"x": x_value, "traces": serializable_results}
+            data={"x": x_value, "traces": serializable_results},
         )
 
-    def _handle_xschem_close_window(self, window_id: str, client_addr: str, connection_state: dict):
+    def _handle_xschem_close_window(
+        self, window_id: str, client_addr: str, connection_state: dict
+    ):
         """Handle xschem close_window JSON command."""
-        logger.debug(f"Window {self.window_id} received close_window: window_id={window_id} from {client_addr}")
+        logger.debug(
+            f"Window {self.window_id} received close_window: window_id={window_id} from {client_addr}"
+        )
         # If window_id matches this window, close it
         if window_id == self.window_id:
             self.close()
@@ -3166,62 +3470,64 @@ class MainWindow(QMainWindow):
 
     def _handle_xschem_list_windows(self, client_addr: str, connection_state: dict):
         """Handle xschem list_windows JSON command."""
-        logger.debug(f"Window {self.window_id} received list_windows from {client_addr}")
+        logger.debug(
+            f"Window {self.window_id} received list_windows from {client_addr}"
+        )
         registry = self.state.window_registry
         window_ids = registry.get_all_window_ids()
         windows = []
         for win_id in window_ids:
             win = registry.get_window_by_id(win_id)
             if win is not None:
-                windows.append({
-                    "window_id": win_id,
-                    "raw_file": win.raw_file_path,
-                    "title": win.windowTitle()
-                })
+                windows.append(
+                    {
+                        "window_id": win_id,
+                        "raw_file": win.raw_file_path,
+                        "title": win.windowTitle(),
+                    }
+                )
             else:
                 # Window reference lost (garbage collected)
-                windows.append({
-                    "window_id": win_id,
-                    "raw_file": None,
-                    "title": "(closed)"
-                })
+                windows.append(
+                    {"window_id": win_id, "raw_file": None, "title": "(closed)"}
+                )
         self._send_xschem_response(
-            client_addr, connection_state,
-            status="success",
-            data={"windows": windows}
+            client_addr, connection_state, status="success", data={"windows": windows}
         )
 
     def _handle_xschem_ping(self, client_addr: str, connection_state: dict):
         """Handle xschem ping JSON command."""
         logger.debug(f"Window {self.window_id} received ping from {client_addr}")
         from pqwave import __version__
+
         self._send_xschem_response(
-            client_addr, connection_state,
+            client_addr,
+            connection_state,
             status="success",
-            data={"pong": True, "version": f"pqwave {__version__}"}
+            data={"pong": True, "version": f"pqwave {__version__}"},
         )
 
     def _handle_xschem_invalid_command(self, command_dict: dict, error_message: str):
         """Handle xschem invalid_command signal."""
         logger.warning(f"Invalid command received: {error_message} - {command_dict}")
         # Extract client info from command dict
-        client_addr = command_dict.get('_client_addr', 'unknown')
-        connection_state = command_dict.get('_connection_state', {})
-        command_id = command_dict.get('id')
+        client_addr = command_dict.get("_client_addr", "unknown")
+        connection_state = command_dict.get("_connection_state", {})
+        command_id = command_dict.get("id")
 
         # Only send response for JSON commands (those with an ID)
         if command_id is not None:
-            response = {
-                "status": "error",
-                "error": error_message,
-                "id": command_id
-            }
+            response = {"status": "error", "error": error_message, "id": command_id}
             if self.state.wave_cmd_handler is not None:
                 self.state.wave_cmd_handler.send_response(client_addr, response)
             else:
-                logger.error("Cannot send error response: wave_cmd_handler not available")
+                logger.error(
+                    "Cannot send error response: wave_cmd_handler not available"
+                )
 
-    def _is_command_for_this_window(self, client_addr: str, connection_state: dict, raw_file: Optional[str] = None) -> bool:
+    def _is_command_for_this_window(
+        self, client_addr: str, connection_state: dict, raw_file: Optional[str] = None
+    ) -> bool:
         """
         Determine if a wave command is intended for this window.
 
@@ -3232,11 +3538,15 @@ class MainWindow(QMainWindow):
 
         Returns True if command should be processed by this window.
         """
-        logger.debug(f"_is_command_for_this_window: client={client_addr}, raw_file={raw_file}, window_id={self.window_id}")
+        logger.debug(
+            f"_is_command_for_this_window: client={client_addr}, raw_file={raw_file}, window_id={self.window_id}"
+        )
         registry = self.state.window_registry
         # Check client-window mapping
         assigned_window = registry.get_window_for_client(client_addr)
-        logger.debug(f"  assigned_window: {assigned_window.window_id if assigned_window else None}")
+        logger.debug(
+            f"  assigned_window: {assigned_window.window_id if assigned_window else None}"
+        )
         if assigned_window is not None:
             # Client already assigned to a window
             return assigned_window.window_id == self.window_id
@@ -3249,7 +3559,9 @@ class MainWindow(QMainWindow):
             # If raw_file provided and not mapped, and this window has no raw file loaded,
             # accept the command (this window can load the file)
             if self.raw_file is None:
-                logger.debug(f"  raw_file not mapped, this window has no raw file, accepting")
+                logger.debug(
+                    f"  raw_file not mapped, this window has no raw file, accepting"
+                )
                 return True
 
         # If no mapping exists, check if this is the only window
@@ -3261,9 +3573,14 @@ class MainWindow(QMainWindow):
         return False
 
     # Wave receiver helper methods
-    def _send_xschem_response(self, client_addr: str, connection_state: dict,
-                              status: str = "success", data: Optional[dict] = None,
-                              error: Optional[str] = None) -> bool:
+    def _send_xschem_response(
+        self,
+        client_addr: str,
+        connection_state: dict,
+        status: str = "success",
+        data: Optional[dict] = None,
+        error: Optional[str] = None,
+    ) -> bool:
         """
         Send JSON response to xschem client.
 
@@ -3288,7 +3605,7 @@ class MainWindow(QMainWindow):
             response["error"] = error
 
         # Include command ID if present in connection_state
-        command_id = connection_state.get('command_id')
+        command_id = connection_state.get("command_id")
         if command_id is not None:
             response["id"] = command_id
 
@@ -3329,7 +3646,9 @@ class MainWindow(QMainWindow):
                 continue
 
             x_min, x_max = np.min(x_data), np.max(x_data)
-            out_of_range = bool(x_value < x_min or x_value > x_max)  # convert numpy bool to Python bool
+            out_of_range = bool(
+                x_value < x_min or x_value > x_max
+            )  # convert numpy bool to Python bool
 
             # Nearest neighbor indices
             idx = np.abs(x_data - x_value).argmin()
@@ -3350,10 +3669,10 @@ class MainWindow(QMainWindow):
                     y_interp = y_real + 1j * y_imag
                 else:
                     y_interp = np.interp(x_value, x_data, y_data)
-                interpolation = 'linear'
+                interpolation = "linear"
                 y_value = y_interp
             else:
-                interpolation = 'nearest'
+                interpolation = "nearest"
                 y_value = y_nearest
 
             # Convert numpy scalar to Python native type if not complex
@@ -3364,23 +3683,23 @@ class MainWindow(QMainWindow):
 
             # Build result dict
             result = {
-                'name': trace.name,
-                'var_name': trace.expression,
-                'y_axis': trace.y_axis.value,
-                'color': trace.color,
-                'y_value': y_value,
-                'x_nearest': x_nearest,
-                'y_nearest': y_nearest,
-                'interpolation': interpolation,
-                'out_of_range': out_of_range,
+                "name": trace.name,
+                "var_name": trace.expression,
+                "y_axis": trace.y_axis.value,
+                "color": trace.color,
+                "y_value": y_value,
+                "x_nearest": x_nearest,
+                "y_nearest": y_nearest,
+                "interpolation": interpolation,
+                "out_of_range": out_of_range,
             }
 
             # Add complex data representation if applicable
             if np.iscomplexobj(y_value):
-                result['magnitude'] = float(np.abs(y_value))
-                result['phase_deg'] = float(np.angle(y_value, deg=True))
-                result['real'] = float(y_value.real)
-                result['imag'] = float(y_value.imag)
+                result["magnitude"] = float(np.abs(y_value))
+                result["phase_deg"] = float(np.angle(y_value, deg=True))
+                result["real"] = float(y_value.real)
+                result["imag"] = float(y_value.imag)
 
             results.append(result)
 
@@ -3393,7 +3712,7 @@ class MainWindow(QMainWindow):
         Supports formats: #rgb, #rgba, #rrggbb, #rrggbbaa
         Returns None if invalid.
         """
-        if not color_hex.startswith('#'):
+        if not color_hex.startswith("#"):
             return None
         hex_str = color_hex[1:]
         length = len(hex_str)
@@ -3402,7 +3721,7 @@ class MainWindow(QMainWindow):
         try:
             # Expand shorthand
             if length == 3 or length == 4:
-                hex_str = ''.join([c*2 for c in hex_str])
+                hex_str = "".join([c * 2 for c in hex_str])
                 # Now length 6 or 8
             # Convert to integer
             rgb_int = int(hex_str, 16)
@@ -3434,11 +3753,12 @@ class MainWindow(QMainWindow):
         - Default: Y1
         """
         import re
+
         # Match i(...) or v(...)
-        match = re.match(r'^([iv])\(', var_name)
+        match = re.match(r"^([iv])\(", var_name)
         if match:
             prefix = match.group(1)
-            if prefix == 'i':
+            if prefix == "i":
                 return AxisAssignment.Y2
         return AxisAssignment.Y1
 
@@ -3457,7 +3777,7 @@ class MainWindow(QMainWindow):
         self.trace_manager.set_log_modes(
             x_log=x_config.log_mode,
             y1_log=y1_config.log_mode,
-            y2_log=y2_config.log_mode
+            y2_log=y2_config.log_mode,
         )
 
     # Menu callbacks
@@ -3465,28 +3785,28 @@ class MainWindow(QMainWindow):
     def open_file(self):
         """Open supported files (.raw, .vcd) — appends to current session."""
         filename, _ = QFileDialog.getOpenFileName(
-            self, "Open File", "",
-            "Supported Files (*.raw *.vcd *.json);;All Files (*)"
+            self, "Open File", "", "Supported Files (*.raw *.vcd *.json);;All Files (*)"
         )
         if not filename:
             return
 
         ext = filename.lower()
-        if ext.endswith('.json'):
+        if ext.endswith(".json"):
             if self.state.source_files:
                 # Block .json in non-fresh sessions
                 result = QMessageBox.warning(
-                    self, "Cannot Open Project",
+                    self,
+                    "Cannot Open Project",
                     "State files (.json) can only be opened in a fresh "
                     "session.\n\nOpen in a new window?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 )
                 if result == QMessageBox.StandardButton.Yes:
                     new_window = MainWindow(initial_files=[filename])
                     new_window.show()
                 return
             self._load_project(filename)
-        elif ext.endswith('.vcd'):
+        elif ext.endswith(".vcd"):
             self._load_vcd(filename, vcd_only=(self.raw_file is None))
         else:
             self._load_raw_file(filename)
@@ -3504,8 +3824,7 @@ class MainWindow(QMainWindow):
             vcd = VcdFile(filename)
         except Exception as e:
             QMessageBox.critical(
-                self, "VCD Parse Error",
-                f"Failed to parse VCD file:\n{e}"
+                self, "VCD Parse Error", f"Failed to parse VCD file:\n{e}"
             )
             return
 
@@ -3515,15 +3834,17 @@ class MainWindow(QMainWindow):
         names = vcd.get_signal_names()
         if not names:
             QMessageBox.warning(
-                self, "VCD File",
+                self,
+                "VCD File",
                 f"The VCD file contains no signals.\n\n"
                 f"File: {filename}\n\n"
-                f"The file may be corrupted or in an unsupported format."
+                f"The file may be corrupted or in an unsupported format.",
             )
             return
 
         logger.info(
-            f"Loaded VCD: {filename} ({len(names)} signals, timescale={vcd.timescale:.0e}s)")
+            f"Loaded VCD: {filename} ({len(names)} signals, timescale={vcd.timescale:.0e}s)"
+        )
 
         # Sync VCD signal names into ApplicationState so SessionAPI.signals() sees them
         self.state.vcd_signal_names = sorted(names)
@@ -3533,11 +3854,11 @@ class MainWindow(QMainWindow):
 
         # Track source file
         from pqwave.models.state import SourceFile
+
         abs_path = os.path.abspath(filename)
         existing = [s for s in self.state.source_files if s.path == abs_path]
         if not existing:
-            self.state.source_files.append(SourceFile(
-                path=abs_path, file_type='vcd'))
+            self.state.source_files.append(SourceFile(path=abs_path, file_type="vcd"))
             self._update_save_as_enabled()
 
         # Pure VCD mode (no raw file): default X axis to "time" and
@@ -3553,39 +3874,40 @@ class MainWindow(QMainWindow):
     def _load_project(self, json_path: str) -> None:
         """Load a project file (.json), restoring sources and state."""
         import json as _json
+
         abs_json = os.path.abspath(json_path)
         base_dir = os.path.dirname(abs_json)
 
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = _json.load(f)
         except Exception as e:
             QMessageBox.critical(
-                self, "Project Load Error",
-                f"Failed to read project file:\n{e}"
+                self, "Project Load Error", f"Failed to read project file:\n{e}"
             )
             return
 
         # Load source files first
-        source_files = data.get('source_files', [])
+        source_files = data.get("source_files", [])
         from pqwave.models.state import SourceFile
+
         for sf_data in source_files:
             sf = SourceFile.from_dict(sf_data, base_dir)
             if not os.path.exists(sf.path):
                 logger.warning(f"Source file not found: {sf.path}")
                 QMessageBox.warning(
-                    self, "Missing File",
-                    f"Source file not found:\n{sf.path}\n\nSkipping."
+                    self,
+                    "Missing File",
+                    f"Source file not found:\n{sf.path}\n\nSkipping.",
                 )
                 continue
-            if sf.file_type == 'vcd':
-                self._load_vcd(sf.path,
-                               vcd_only=(self.raw_file is None))
+            if sf.file_type == "vcd":
+                self._load_vcd(sf.path, vcd_only=(self.raw_file is None))
             else:
                 self._load_raw_file(sf.path)
 
         # Restore per-panel state
-        if 'panels' in data:
+        if "panels" in data:
             self._restore_panels_from_dict(data)
 
         self._project_path = abs_json
@@ -3595,33 +3917,41 @@ class MainWindow(QMainWindow):
         """Convert currently loaded raw data to another format."""
         if not self.raw_file or not self.raw_file.datasets:
             QMessageBox.warning(
-                self, "No Data",
-                "No raw data loaded. Open a raw file first before converting."
+                self,
+                "No Data",
+                "No raw data loaded. Open a raw file first before converting.",
             )
             return
 
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, QPushButton
+        from PyQt6.QtWidgets import (
+            QDialog,
+            QVBoxLayout,
+            QHBoxLayout,
+            QLabel,
+            QRadioButton,
+            QPushButton,
+        )
 
         dataset = self.raw_file.datasets[0]  # Use first dataset
-        title = dataset.get('title', 'pqwave conversion')
-        date = dataset.get('date', '')
-        plotname = dataset.get('plotname', '')
-        flags = dataset.get('flags', '')
-        variables = dataset.get('variables', [])
-        data = dataset.get('data', np.array([]))
-        is_ac_or_complex = dataset.get('_is_ac_or_complex', False)
+        title = dataset.get("title", "pqwave conversion")
+        date = dataset.get("date", "")
+        plotname = dataset.get("plotname", "")
+        flags = dataset.get("flags", "")
+        variables = dataset.get("variables", [])
+        data = dataset.get("data", np.array([]))
+        is_ac_or_complex = dataset.get("_is_ac_or_complex", False)
 
         # Detect source format from spicelib's dialect detection
         detected = self.raw_file.detected_format
-        if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
+        if detected in ("ltspice", "qspice", "ngspice", "xyce"):
             src_format = detected
         else:
             # Fallback to extension-based detection
             src_file = self.raw_file.filename.lower()
-            if src_file.endswith('.qraw'):
-                src_format = 'qspice'
+            if src_file.endswith(".qraw"):
+                src_format = "qspice"
             else:
-                src_format = 'ltspice'
+                src_format = "ltspice"
 
         # Show format selection dialog
         dialog = QDialog(self)
@@ -3674,12 +4004,12 @@ class MainWindow(QMainWindow):
             dialog.accept()
 
             # Show save file dialog
-            ext = FORMAT_CONFIG[target_fmt]['extension']
+            ext = FORMAT_CONFIG[target_fmt]["extension"]
             save_path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Save Converted Raw File",
                 "",
-                f"Raw Files (*{ext});;All Files (*)"
+                f"Raw Files (*{ext});;All Files (*)",
             )
 
             if not save_path:
@@ -3698,15 +4028,15 @@ class MainWindow(QMainWindow):
                     is_ac_or_complex=is_ac_or_complex,
                 )
                 QMessageBox.information(
-                    self, "Conversion Successful",
-                    f"Converted to {target_fmt.upper()} format:\n{save_path}"
+                    self,
+                    "Conversion Successful",
+                    f"Converted to {target_fmt.upper()} format:\n{save_path}",
                 )
                 logger.info(f"Raw data converted to {save_path} ({target_fmt})")
             except Exception as e:
                 logger.exception(f"Conversion failed: {e}")
                 QMessageBox.critical(
-                    self, "Conversion Failed",
-                    f"Failed to convert raw data:\n{e}"
+                    self, "Conversion Failed", f"Failed to convert raw data:\n{e}"
                 )
 
         convert_btn.clicked.connect(do_convert)
@@ -3721,8 +4051,9 @@ class MainWindow(QMainWindow):
         """
         if len(self.state.source_files) > 1:
             QMessageBox.warning(
-                self, "Multi-File Session",
-                "Save as data file is only available for single-file sessions."
+                self,
+                "Multi-File Session",
+                "Save as data file is only available for single-file sessions.",
             )
             return
 
@@ -3735,36 +4066,43 @@ class MainWindow(QMainWindow):
         vcd_file = tm.vcd_file
 
         if raw_file is None and vcd_file is None:
-            QMessageBox.warning(
-                self, "No Data",
-                "No data loaded. Open a file first."
-            )
+            QMessageBox.warning(self, "No Data", "No data loaded. Open a file first.")
             return
 
         traces = self.state.traces
         if not traces:
             QMessageBox.warning(
-                self, "No Traces",
-                "No traces to save. Add traces to the plot first."
+                self, "No Traces", "No traces to save. Add traces to the plot first."
             )
             return
 
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, QPushButton
+        from PyQt6.QtWidgets import (
+            QDialog,
+            QVBoxLayout,
+            QHBoxLayout,
+            QLabel,
+            QRadioButton,
+            QPushButton,
+        )
 
-        vcd_only = (raw_file is None and vcd_file is not None)
+        vcd_only = raw_file is None and vcd_file is not None
 
         if raw_file is not None:
             dataset = raw_file.datasets[0]
-            is_ac = dataset.get('_is_ac_or_complex', False)
+            is_ac = dataset.get("_is_ac_or_complex", False)
             detected = raw_file.detected_format
-            if detected in ('ltspice', 'qspice', 'ngspice', 'xyce'):
+            if detected in ("ltspice", "qspice", "ngspice", "xyce"):
                 src_format = detected
             else:
-                src_format = 'qspice' if raw_file.filename.lower().endswith('.qraw') else 'ltspice'
+                src_format = (
+                    "qspice"
+                    if raw_file.filename.lower().endswith(".qraw")
+                    else "ltspice"
+                )
         else:
             dataset = None
             is_ac = False
-            src_format = 'vcd'
+            src_format = "vcd"
 
         # Format selection dialog
         dialog = QDialog(self)
@@ -3772,7 +4110,9 @@ class MainWindow(QMainWindow):
         dialog.setMinimumWidth(350)
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"Extracting {len(traces)} trace(s) from {src_format.upper()}"))
+        layout.addWidget(
+            QLabel(f"Extracting {len(traces)} trace(s) from {src_format.upper()}")
+        )
         layout.addWidget(QLabel("Target format:"))
 
         format_group = []
@@ -3780,10 +4120,10 @@ class MainWindow(QMainWindow):
             label = f"{fmt_key.upper()} ({FORMAT_CONFIG[fmt_key]['extension']})"
             rb = QRadioButton(label)
             if vcd_only:
-                rb.setChecked(fmt_key == 'vcd')
+                rb.setChecked(fmt_key == "vcd")
             else:
                 rb.setChecked(fmt_key == src_format)
-                if fmt_key == 'vcd':
+                if fmt_key == "vcd":
                     rb.setEnabled(False)
                     rb.setToolTip("VCD output is only available for VCD-sourced data.")
             format_group.append((fmt_key, rb))
@@ -3809,17 +4149,16 @@ class MainWindow(QMainWindow):
 
             dialog.accept()
 
-            ext = FORMAT_CONFIG[target_fmt]['extension']
-            filter_label = "VCD Files" if target_fmt == 'vcd' else "Raw Files"
+            ext = FORMAT_CONFIG[target_fmt]["extension"]
+            filter_label = "VCD Files" if target_fmt == "vcd" else "Raw Files"
             save_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Traces As",
-                "", f"{filter_label} (*{ext});;All Files (*)"
+                self, "Save Traces As", "", f"{filter_label} (*{ext});;All Files (*)"
             )
             if not save_path:
                 return
 
             try:
-                if target_fmt == 'vcd':
+                if target_fmt == "vcd":
                     ts = vcd_file.timescale if vcd_file else 1e-9
                     write_vcd_file(save_path, traces, timescale=ts)
                 elif raw_file is not None:
@@ -3829,7 +4168,7 @@ class MainWindow(QMainWindow):
 
                     # FFT traces carry frequency bins as x_data — use those
                     # instead of the original file's sweep variable (time)
-                    if any(t.expression.lower().startswith('fft(') for t in traces):
+                    if any(t.expression.lower().startswith("fft(") for t in traces):
                         x_var = "frequency"
                     elif x_var:
                         try:
@@ -3837,7 +4176,9 @@ class MainWindow(QMainWindow):
                                 x_var, self.state.current_dataset_idx
                             )
                         except Exception as e:
-                            logger.warning("Failed to get X variable data for '%s': %s", x_var, e)
+                            logger.warning(
+                                "Failed to get X variable data for '%s': %s", x_var, e
+                            )
                             x_var = None  # fall back to default X
 
                     extract_traces_to_raw(
@@ -3855,22 +4196,23 @@ class MainWindow(QMainWindow):
                     x_var = self.state.current_x_var
                     x_var_data = None
                     if x_var and not any(
-                        t.expression.lower().startswith('fft(') for t in traces
+                        t.expression.lower().startswith("fft(") for t in traces
                     ):
                         x_var_data = traces[0].x_data
                     self._save_vcd_traces_as_raw(
-                        save_path, traces, target_fmt, x_var, x_var_data)
+                        save_path, traces, target_fmt, x_var, x_var_data
+                    )
 
                 QMessageBox.information(
-                    self, "Save Successful",
-                    f"Saved {len(traces)} trace(s) as {target_fmt.upper()}:\n{save_path}"
+                    self,
+                    "Save Successful",
+                    f"Saved {len(traces)} trace(s) as {target_fmt.upper()}:\n{save_path}",
                 )
                 logger.info(f"Traces saved to {save_path} ({target_fmt})")
             except Exception as e:
                 logger.exception(f"Save traces failed: {e}")
                 QMessageBox.critical(
-                    self, "Save Failed",
-                    f"Failed to save traces:\n{e}"
+                    self, "Save Failed", f"Failed to save traces:\n{e}"
                 )
 
         save_btn.clicked.connect(do_save)
@@ -3887,38 +4229,50 @@ class MainWindow(QMainWindow):
 
         from PyQt6.QtWidgets import QFileDialog
         import re
+
         path, sel_filter = QFileDialog.getSaveFileName(
-            self, "Export Plot to Image", "",
-            "PNG (*.png);;JPEG (*.jpg *.jpeg);;SVG (*.svg);;BMP (*.bmp);;TIFF (*.tiff)")
+            self,
+            "Export Plot to Image",
+            "",
+            "PNG (*.png);;JPEG (*.jpg *.jpeg);;SVG (*.svg);;BMP (*.bmp);;TIFF (*.tiff)",
+        )
         if not path:
             return
 
         # Auto-append extension from the selected filter if missing
-        ext_map = {'svg': '.svg', 'png': '.png', 'jpg': '.jpg',
-                   'jpeg': '.jpg', 'bmp': '.bmp', 'tiff': '.tiff'}
+        ext_map = {
+            "svg": ".svg",
+            "png": ".png",
+            "jpg": ".jpg",
+            "jpeg": ".jpg",
+            "bmp": ".bmp",
+            "tiff": ".tiff",
+        }
         has_ext = any(path.lower().endswith(ext) for ext in ext_map)
         if not has_ext:
-            m = re.search(r'\*\.(\w+)', sel_filter)
+            m = re.search(r"\*\.(\w+)", sel_filter)
             if m:
-                path += '.' + m.group(1)
+                path += "." + m.group(1)
 
         try:
-            if path.lower().endswith('.svg'):
+            if path.lower().endswith(".svg"):
                 from pyqtgraph.exporters import SVGExporter
+
                 exp = SVGExporter(plot_item)
                 exp.export(path)
             else:
                 from pyqtgraph.exporters import ImageExporter
+
                 exp = ImageExporter(plot_item)
                 exp.export(path)
             logger.info(f"Plot exported to {path}")
         except Exception as e:
             logger.exception("Export failed")
-            QMessageBox.critical(
-                self, "Export Failed",
-                f"Failed to export plot:\n{e}")
+            QMessageBox.critical(self, "Export Failed", f"Failed to export plot:\n{e}")
 
-    def _save_vcd_traces_as_raw(self, path, traces, target_format, x_var_name, x_var_data):
+    def _save_vcd_traces_as_raw(
+        self, path, traces, target_format, x_var_name, x_var_data
+    ):
         """Write VCD-only traces to a raw-format file via write_raw_file."""
         import numpy as np
 
@@ -3940,16 +4294,20 @@ class MainWindow(QMainWindow):
 
         variables = []
         for t in traces:
-            variables.append({'name': t.expression, 'type': 'voltage', 'index': len(variables)})
+            variables.append(
+                {"name": t.expression, "type": "voltage", "index": len(variables)}
+            )
         if x_var_name:
-            variables.append({'name': x_var_name, 'type': 'time', 'index': len(variables)})
+            variables.append(
+                {"name": x_var_name, "type": "time", "index": len(variables)}
+            )
 
         write_raw_file(
             output_path=path,
-            title='pqwave VCD extraction',
-            date='',
-            plotname='Transient Analysis',
-            flags='real',
+            title="pqwave VCD extraction",
+            date="",
+            plotname="Transient Analysis",
+            flags="real",
             variables=variables,
             data=data,
             target_format=target_format,
@@ -3958,9 +4316,20 @@ class MainWindow(QMainWindow):
 
     def edit_trace_properties(self):
         """Edit trace properties (alias, color, line width)"""
-        logger.debug(f"edit_trace_properties called, traces count: {len(self.trace_manager.traces)}")
+        logger.debug(
+            f"edit_trace_properties called, traces count: {len(self.trace_manager.traces)}"
+        )
         from PyQt6.QtCore import Qt
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QLineEdit, QPushButton, QHBoxLayout, QLabel, QComboBox
+        from PyQt6.QtWidgets import (
+            QDialog,
+            QVBoxLayout,
+            QListWidget,
+            QLineEdit,
+            QPushButton,
+            QHBoxLayout,
+            QLabel,
+            QComboBox,
+        )
 
         # Get traces from trace manager
         traces = self.trace_manager.traces
@@ -4004,7 +4373,7 @@ class MainWindow(QMainWindow):
             ("Cyan", (0, 255, 255)),
             ("Orange", (255, 165, 0)),
             ("Purple", (128, 0, 128)),
-            ("Brown", (165, 42, 42))
+            ("Brown", (165, 42, 42)),
         ]
         for color_name, color_value in colors:
             dialog.color_combo.addItem(color_name, color_value)
@@ -4037,15 +4406,16 @@ class MainWindow(QMainWindow):
 
         # Connect list selection change to update all fields
         list_widget.currentRowChanged.connect(
-            lambda row, lw=list_widget: self._update_trace_properties(row, lw))
+            lambda row, lw=list_widget: self._update_trace_properties(row, lw)
+        )
 
         # Create buttons
         button_layout = QHBoxLayout()
         apply_btn = QPushButton("Apply")
         # clicked signal passes a bool; absorb it as _ so lw stays the list_widget
         apply_btn.clicked.connect(
-            lambda _, lw=list_widget: self._apply_trace_properties(
-                lw.currentRow(), lw))
+            lambda _, lw=list_widget: self._apply_trace_properties(lw.currentRow(), lw)
+        )
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(dialog.close)
         button_layout.addWidget(apply_btn)
@@ -4074,8 +4444,12 @@ class MainWindow(QMainWindow):
             dialog.alias_edit.setText(var)
 
             # Update color combo
-            current_color = plot_item.opts['pen'].color()
-            current_rgb = (current_color.red(), current_color.green(), current_color.blue())
+            current_color = plot_item.opts["pen"].color()
+            current_rgb = (
+                current_color.red(),
+                current_color.green(),
+                current_color.blue(),
+            )
 
             # Find matching color in combo
             color_index = 0  # Default to "Default (auto)"
@@ -4087,7 +4461,7 @@ class MainWindow(QMainWindow):
             dialog.color_combo.setCurrentIndex(color_index)
 
             # Update line width combo
-            current_width = plot_item.opts['pen'].width()
+            current_width = plot_item.opts["pen"].width()
             width_index = 0  # Default to 1
             for i in range(dialog.width_combo.count()):
                 width_value = dialog.width_combo.itemData(i)
@@ -4103,8 +4477,8 @@ class MainWindow(QMainWindow):
                 if t.name == var:
                     trace_obj = t
                     break
-            if trace_obj and trace_obj.trace_type in ('digital', 'bus'):
-                h = trace_obj.metadata.get('digital_height', 1.0)
+            if trace_obj and trace_obj.trace_type in ("digital", "bus"):
+                h = trace_obj.metadata.get("digital_height", 1.0)
                 for i in range(dialog.height_combo.count()):
                     if abs(dialog.height_combo.itemData(i) - h) < 0.01:
                         dialog.height_combo.setCurrentIndex(i)
@@ -4133,7 +4507,7 @@ class MainWindow(QMainWindow):
             # Update alias if provided
             if new_alias and new_alias != var:
                 # Update plot item name (legend)
-                plot_item.opts['name'] = new_alias
+                plot_item.opts["name"] = new_alias
                 # Update Trace object name if found
                 if trace_obj:
                     trace_obj.name = new_alias
@@ -4142,17 +4516,16 @@ class MainWindow(QMainWindow):
 
             # Bus traces have a second (bottom) line that must mirror
             # the primary line's colour and width.
-            bus_bot = (trace_obj.metadata.get('_bus_bot_item')
-                       if trace_obj else None)
+            bus_bot = trace_obj.metadata.get("_bus_bot_item") if trace_obj else None
 
             if new_color is not None:
                 qcolor = QColor(*new_color)
-                pen = plot_item.opts['pen']
+                pen = plot_item.opts["pen"]
                 new_pen = pg.mkPen(color=qcolor, width=pen.width())
-                if hasattr(plot_item, 'setPen'):
+                if hasattr(plot_item, "setPen"):
                     plot_item.setPen(new_pen)
                 else:
-                    plot_item.opts['pen'] = new_pen
+                    plot_item.opts["pen"] = new_pen
                     plot_item.update()
                 if bus_bot is not None:
                     bus_bot.setPen(new_pen)
@@ -4160,12 +4533,12 @@ class MainWindow(QMainWindow):
                     trace_obj.color = new_color
 
             if new_width:
-                pen = plot_item.opts['pen']
+                pen = plot_item.opts["pen"]
                 new_pen = pg.mkPen(color=pen.color(), width=new_width)
-                if hasattr(plot_item, 'setPen'):
+                if hasattr(plot_item, "setPen"):
                     plot_item.setPen(new_pen)
                 else:
-                    plot_item.opts['pen'] = new_pen
+                    plot_item.opts["pen"] = new_pen
                     plot_item.update()
                 if bus_bot is not None:
                     bus_bot.setPen(new_pen)
@@ -4173,18 +4546,26 @@ class MainWindow(QMainWindow):
                     trace_obj.line_width = new_width
 
             # Apply trace height (digital/bus only) — triggers full redraw
-            if (trace_obj and trace_obj.trace_type in ('digital', 'bus')
-                    and new_height is not None):
-                old_h = trace_obj.metadata.get('digital_height', 1.0)
+            if (
+                trace_obj
+                and trace_obj.trace_type in ("digital", "bus")
+                and new_height is not None
+            ):
+                old_h = trace_obj.metadata.get("digital_height", 1.0)
                 if abs(new_height - old_h) > 0.01:
-                    trace_obj.metadata['digital_height'] = new_height
+                    trace_obj.metadata["digital_height"] = new_height
                     self.trace_manager.recreate_all_digital()
 
             self.trace_manager._refresh_legend()
 
-    def _set_trace_properties(self, name: str, height: float = None,
-                               width: int = None, color: tuple = None,
-                               alias: str = None) -> bool:
+    def _set_trace_properties(
+        self,
+        name: str,
+        height: float = None,
+        width: int = None,
+        color: tuple = None,
+        alias: str = None,
+    ) -> bool:
         """Set trace properties by name. Returns True if trace was found."""
         tm = self.trace_manager
         if tm is None:
@@ -4200,31 +4581,36 @@ class MainWindow(QMainWindow):
             trace_obj = next((t for t in self.state.traces if t.name == name), None)
             if trace_obj is None:
                 return False
-            row = next((i for i, (v, _, _) in enumerate(tm.traces)
-                        if v == trace_obj.expression), None)
+            row = next(
+                (
+                    i
+                    for i, (v, _, _) in enumerate(tm.traces)
+                    if v == trace_obj.expression
+                ),
+                None,
+            )
             if row is None:
                 return False
         var, plot_item, y_axis = tm.traces[row]
 
         if trace_obj is None:
             trace_obj = next((t for t in self.state.traces if t.name == var), None)
-        bus_bot = (trace_obj.metadata.get('_bus_bot_item')
-                   if trace_obj else None)
+        bus_bot = trace_obj.metadata.get("_bus_bot_item") if trace_obj else None
 
         if alias is not None and alias != var:
-            plot_item.opts['name'] = alias
+            plot_item.opts["name"] = alias
             # Keep original expression in tm.traces for name-based lookups
             if trace_obj:
                 trace_obj.name = alias
 
         if color is not None:
             qcolor = QColor(*color)
-            pen = plot_item.opts['pen']
+            pen = plot_item.opts["pen"]
             new_pen = pg.mkPen(color=qcolor, width=pen.width())
-            if hasattr(plot_item, 'setPen'):
+            if hasattr(plot_item, "setPen"):
                 plot_item.setPen(new_pen)
             else:
-                plot_item.opts['pen'] = new_pen
+                plot_item.opts["pen"] = new_pen
                 plot_item.update()
             if bus_bot is not None:
                 bus_bot.setPen(new_pen)
@@ -4234,23 +4620,26 @@ class MainWindow(QMainWindow):
         # Apply width BEFORE height (height may trigger recreate_all_digital
         # which reads trace_obj.line_width)
         if width is not None:
-            pen = plot_item.opts['pen']
+            pen = plot_item.opts["pen"]
             new_pen = pg.mkPen(color=pen.color(), width=width)
-            if hasattr(plot_item, 'setPen'):
+            if hasattr(plot_item, "setPen"):
                 plot_item.setPen(new_pen)
             else:
-                plot_item.opts['pen'] = new_pen
+                plot_item.opts["pen"] = new_pen
                 plot_item.update()
             if bus_bot is not None:
                 bus_bot.setPen(new_pen)
             if trace_obj:
                 trace_obj.line_width = width
 
-        if (height is not None and trace_obj
-                and trace_obj.trace_type in ('digital', 'bus')):
-            old_h = trace_obj.metadata.get('digital_height', 1.0)
+        if (
+            height is not None
+            and trace_obj
+            and trace_obj.trace_type in ("digital", "bus")
+        ):
+            old_h = trace_obj.metadata.get("digital_height", 1.0)
             if abs(height - old_h) > 0.01:
-                trace_obj.metadata['digital_height'] = height
+                trace_obj.metadata["digital_height"] = height
                 tm.recreate_all_digital()
 
         tm._refresh_legend()
@@ -4259,17 +4648,23 @@ class MainWindow(QMainWindow):
     def show_settings(self):
         """Show application settings widget."""
         # Create settings widget if it doesn't exist or was closed
-        if not hasattr(self, '_settings_widget') or self._settings_widget is None:
+        if not hasattr(self, "_settings_widget") or self._settings_widget is None:
             self._settings_widget = SettingsWidget(
                 axis_manager=self.axis_manager,
                 application_state=self.state,
-                parent=self
+                parent=self,
             )
             # Connect signals
-            self._settings_widget.viewbox_theme_changed.connect(self._on_viewbox_theme_changed)
+            self._settings_widget.viewbox_theme_changed.connect(
+                self._on_viewbox_theme_changed
+            )
             self._settings_widget.font_changed.connect(self._on_font_changed)
-            self._settings_widget.eye_diagram_changed.connect(self._on_eye_diagram_settings_changed)
-            self._settings_widget.destroyed.connect(lambda: setattr(self, '_settings_widget', None))
+            self._settings_widget.eye_diagram_changed.connect(
+                self._on_eye_diagram_settings_changed
+            )
+            self._settings_widget.destroyed.connect(
+                lambda: setattr(self, "_settings_widget", None)
+            )
 
         # Show and raise the widget
         self._settings_widget.show()
@@ -4297,7 +4692,7 @@ class MainWindow(QMainWindow):
     def _apply_repl_settings(self) -> None:
         """Apply REPL font and color settings to the chat panel."""
         rf = self.state.repl_font
-        if hasattr(self, 'chat_panel'):
+        if hasattr(self, "chat_panel"):
             self.chat_panel.apply_settings(
                 font_family=rf.family,
                 font_size=rf.size or 11,
@@ -4388,8 +4783,10 @@ class MainWindow(QMainWindow):
 
         # Synchronize menu and toolbar actions
         if self.menu_manager:
-            self.menu_manager.actions['zoom_box'].setChecked(self.zoom_box_enabled)
-            self.menu_manager.actions['zoom_box_toolbar'].setChecked(self.zoom_box_enabled)
+            self.menu_manager.actions["zoom_box"].setChecked(self.zoom_box_enabled)
+            self.menu_manager.actions["zoom_box_toolbar"].setChecked(
+                self.zoom_box_enabled
+            )
 
     # Cross-hair cursor and marks
 
@@ -4428,7 +4825,7 @@ class MainWindow(QMainWindow):
             if self._kicad_bridge and self._kicad_bridge.connected_path:
                 x_range = self.plot_widget.plotItem.vb.viewRange()[0]
                 x_linear = sum(x_range) / 2
-                if self.plot_widget.get_axis_log_mode('X'):
+                if self.plot_widget.get_axis_log_mode("X"):
                     x_linear = self.plot_widget._log_to_linear(x_linear)
                 self._kicad_ba_x = x_linear
                 self._kicad_ba_timer.start()
@@ -4509,9 +4906,10 @@ class MainWindow(QMainWindow):
         """Show context menu when right-clicking the plot area."""
         from PyQt6.QtWidgets import QMenu
         from PyQt6.QtGui import QCursor
+
         # Suppress if a trace context menu just closed (avoids spurious
         # re-trigger from plot-item removal during ungroup/expand).
-        if getattr(self, '_suppress_plot_menu_until', 0) > time.monotonic():
+        if getattr(self, "_suppress_plot_menu_until", 0) > time.monotonic():
             return
         menu = QMenu(self)
         menu.addAction("Export Plot to Image...", self.export_plot_image)
@@ -4565,26 +4963,31 @@ class MainWindow(QMainWindow):
                 for trace in panel.traces:
                     if old_name in (trace.name or ""):
                         QMessageBox.warning(
-                            self, "Rename Failed",
+                            self,
+                            "Rename Failed",
                             f"Cannot rename: active trace '{trace.name}' "
                             f"on panel '{panel_id}' references "
-                            f"'{old_name}'. Remove the trace first.")
+                            f"'{old_name}'. Remove the trace first.",
+                        )
                         return
                     if old_name in (trace.expression or ""):
                         QMessageBox.warning(
-                            self, "Rename Failed",
+                            self,
+                            "Rename Failed",
                             f"Cannot rename: active trace expression "
                             f"'{trace.expression}' references "
-                            f"'{old_name}'. Remove the trace first.")
+                            f"'{old_name}'. Remove the trace first.",
+                        )
                         return
 
             # Use the session API for the rename (includes active trace check)
             result = self.session_api.execute(
-                f"rename_vector({dataset_idx}, '{old_name}', '{new_name}')")
+                f"rename_vector({dataset_idx}, '{old_name}', '{new_name}')"
+            )
             if not result.get("ok"):
                 QMessageBox.warning(
-                    self, "Rename Failed",
-                    result.get("error", "Unknown error"))
+                    self, "Rename Failed", result.get("error", "Unknown error")
+                )
                 return
 
             # Update UI
@@ -4593,8 +4996,7 @@ class MainWindow(QMainWindow):
             self._update_variable_combo()
             # Also refresh the vector combo's groups (variable list popup)
             if self.control_panel.vector_combo:
-                self.control_panel.vector_combo.set_groups(
-                    self._get_variable_groups())
+                self.control_panel.vector_combo.set_groups(self._get_variable_groups())
 
         def cancel_rename():
             editor.deleteLater()
@@ -4628,56 +5030,62 @@ class MainWindow(QMainWindow):
         # Find the trace to determine its type
         tm = panel.trace_manager
         trace = next((t for t in tm.state_traces if t.name == trace_name), None)
-        ttype = trace.trace_type if trace else 'analog'
+        ttype = trace.trace_type if trace else "analog"
         trace_idx = tm.state_traces.index(trace) if trace else -1
 
-        if ttype == 'analog':
+        if ttype == "analog":
             a = menu.addAction("Mark as Digital...")
             a.triggered.connect(
                 lambda _, idx=trace_idx, _tm=tm: _tm.type_manager.toggle(
-                    _tm.state_traces[idx], idx))
+                    _tm.state_traces[idx], idx
+                )
+            )
             menu.addSeparator()
             a = menu.addAction("Eye Diagram")
             a.triggered.connect(self._show_eye_diagram)
-        elif ttype == 'digital':
+        elif ttype == "digital":
             a = menu.addAction("Show as Analog")
             a.triggered.connect(
                 lambda _, idx=trace_idx, _tm=tm: _tm.type_manager.toggle(
-                    _tm.state_traces[idx], idx))
+                    _tm.state_traces[idx], idx
+                )
+            )
             a = menu.addAction("Threshold Settings...")
             a.triggered.connect(self._show_threshold_settings)
             a = menu.addAction("Group Into Bus")
-            a.triggered.connect(
-                lambda _, _tm=tm: _tm.group_selected_as_bus())
+            a.triggered.connect(lambda _, _tm=tm: _tm.group_selected_as_bus())
             menu.addSeparator()
             a = menu.addAction("Eye Diagram")
             a.triggered.connect(self._show_eye_diagram)
-        elif ttype == 'bus':
+        elif ttype == "bus":
             fmt_menu = menu.addMenu("Display Format")
-            for fmt in ('hex', 'bin', 'dec'):
+            for fmt in ("hex", "bin", "dec"):
                 a = fmt_menu.addAction(fmt)
                 a.triggered.connect(
-                    lambda _, f=fmt: self._set_bus_display_format(
-                        trace_name, f))
+                    lambda _, f=fmt: self._set_bus_display_format(trace_name, f)
+                )
             menu.addSeparator()
-            expanded = trace.metadata.get('bus_expanded', False) if trace else False
+            expanded = trace.metadata.get("bus_expanded", False) if trace else False
             a = menu.addAction("Collapse Members" if expanded else "Expand Members")
-            a.triggered.connect(
-                lambda _, _tm=tm: _tm.toggle_bus_expand(trace_name))
+            a.triggered.connect(lambda _, _tm=tm: _tm.toggle_bus_expand(trace_name))
             a = menu.addAction("Ungroup Bus")
-            a.triggered.connect(
-                lambda _, _tm=tm: _tm.ungroup_bus(trace_name))
+            a.triggered.connect(lambda _, _tm=tm: _tm.ungroup_bus(trace_name))
 
         # Lepton-EDA cross-probe (lazy-creates client on first use)
         menu.addSeparator()
         a = menu.addAction("Probe in Lepton-EDA")
-        a.triggered.connect(lambda _: self._lepton_probe_active_trace(force_reconnect=True))
+        a.triggered.connect(
+            lambda _: self._lepton_probe_active_trace(force_reconnect=True)
+        )
 
         # Xschem cross-probe (lazy-creates client on first use)
         menu.addSeparator()
         a = menu.addAction("Probe in Xschem")
         a.triggered.connect(
-            lambda _, _trace=trace: self._xschem_probe_trace(_trace, force_reconnect=True))
+            lambda _, _trace=trace: self._xschem_probe_trace(
+                _trace, force_reconnect=True
+            )
+        )
 
         # Common action for all trace types
         menu.addSeparator()
@@ -4698,9 +5106,8 @@ class MainWindow(QMainWindow):
             return
         trace = next((t for t in self.state.traces if t.name == trace_name), None)
         if trace is not None:
-            trace.metadata['bus_display_format'] = fmt
-            panel.trace_manager.recreate_trace_plot_item(
-                self.state.traces.index(trace))
+            trace.metadata["bus_display_format"] = fmt
+            panel.trace_manager.recreate_trace_plot_item(self.state.traces.index(trace))
 
     def _on_mark_clicked(self, x_vb, y1_vb, x_linear, y1_linear, y2_linear):
         """Handle mark placement from plot widget click.
@@ -4754,8 +5161,12 @@ class MainWindow(QMainWindow):
                     var_names = self.raw_file.get_variable_names(0)
                     if var_names:
                         self.state.current_x_var = var_names[0]
-                        logger.info(f"Auto-set X variable to: {self.state.current_x_var}")
-                        self.axis_manager.set_axis_label(AxisId.X, self.state.current_x_var)
+                        logger.info(
+                            f"Auto-set X variable to: {self.state.current_x_var}"
+                        )
+                        self.axis_manager.set_axis_label(
+                            AxisId.X, self.state.current_x_var
+                        )
                 # On append, keep current_dataset_idx unchanged and do not
                 # reset X variable — the user chose their context deliberately.
 
@@ -4785,19 +5196,21 @@ class MainWindow(QMainWindow):
 
             # Track source file
             from pqwave.models.state import SourceFile
+
             abs_path = os.path.abspath(filename)
             existing = [s for s in self.state.source_files if s.path == abs_path]
             if not existing:
-                self.state.source_files.append(SourceFile(
-                    path=abs_path, file_type='raw'))
+                self.state.source_files.append(
+                    SourceFile(path=abs_path, file_type="raw")
+                )
                 self._update_save_as_enabled()
 
             # Step hint for multi-run files opened flat
-            if hasattr(self.raw_file, 'step_count') and self.raw_file.step_count > 1:
+            if hasattr(self.raw_file, "step_count") and self.raw_file.step_count > 1:
                 self.statusBar().showMessage(
                     f"{self.raw_file.step_count} simulation steps detected — "
                     f"File > Open Monte Carlo... for statistical analysis",
-                    8000
+                    8000,
                 )
 
             # Process any pending xschem commands that arrived before file was loaded
@@ -4809,9 +5222,15 @@ class MainWindow(QMainWindow):
             logger.exception(f"Error opening file: {filename}")
             error_msg = str(e)
             if "Invalid RAW file" in error_msg:
-                self._show_error("Invalid RAW file", f"Invalid RAW file format: {filename}\n\n{error_msg}")
+                self._show_error(
+                    "Invalid RAW file",
+                    f"Invalid RAW file format: {filename}\n\n{error_msg}",
+                )
             else:
-                self._show_error("Error opening file", f"Error opening file: {filename}\n\n{error_msg}")
+                self._show_error(
+                    "Error opening file",
+                    f"Error opening file: {filename}\n\n{error_msg}",
+                )
 
     def _update_window_registry_raw_file(self, raw_file_path):
         """Update window registry mapping for this window's raw file."""
@@ -4820,7 +5239,7 @@ class MainWindow(QMainWindow):
         self.state.window_registry.register_window(
             window_id=self.window_id,
             window_instance=self,
-            raw_file_path=self.raw_file_path
+            raw_file_path=self.raw_file_path,
         )
 
     def _load_initial_files(self):
@@ -4830,9 +5249,9 @@ class MainWindow(QMainWindow):
         if self.initial_files:
             for f in self.initial_files:
                 ext = f.lower()
-                if ext.endswith('.json'):
+                if ext.endswith(".json"):
                     self._load_project(f)
-                elif ext.endswith('.vcd'):
+                elif ext.endswith(".vcd"):
                     self._load_vcd(f, vcd_only=(self.raw_file is None))
                 else:
                     self._load_raw_file(f)
@@ -4850,7 +5269,7 @@ class MainWindow(QMainWindow):
         if self.raw_file:
             datasets = []
             for i, dataset in enumerate(self.raw_file.datasets):
-                plotname = dataset.get('plotname', f'Dataset {i+1}')
+                plotname = dataset.get("plotname", f"Dataset {i+1}")
                 datasets.append(f"Dataset {i+1}: {plotname}")
             self.control_panel.set_datasets(datasets)
 
@@ -4866,8 +5285,7 @@ class MainWindow(QMainWindow):
 
         # Raw file vectors
         if self.raw_file and self.state.current_dataset_idx is not None:
-            raw_vars = self.raw_file.get_variable_names(
-                self.state.current_dataset_idx)
+            raw_vars = self.raw_file.get_variable_names(self.state.current_dataset_idx)
             if raw_vars:
                 label = os.path.basename(self.raw_file.filename)
                 groups[label] = list(raw_vars)
@@ -4894,8 +5312,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            var_names = self.raw_file.get_variable_names(
-                self.state.current_dataset_idx)
+            var_names = self.raw_file.get_variable_names(self.state.current_dataset_idx)
         except Exception:
             logger.warning("Failed to get variable names for tree", exc_info=True)
             return
@@ -4920,7 +5337,9 @@ class MainWindow(QMainWindow):
         if self.raw_file and self.raw_file.datasets:
             total_datasets = len(self.raw_file.datasets)
             current_dataset = self.state.current_dataset_idx + 1
-            self.menu_manager.update_dataset_label(f"{current_dataset}/{total_datasets}")
+            self.menu_manager.update_dataset_label(
+                f"{current_dataset}/{total_datasets}"
+            )
         else:
             self.menu_manager.update_dataset_label("-")
 
@@ -4972,7 +5391,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _cursor_in_parens(text: str, pos: int) -> bool:
         """Check if cursor position is inside any parenthesized group."""
-        return text[:pos].count('(') > text[:pos].count(')')
+        return text[:pos].count("(") > text[:pos].count(")")
 
     @pyqtSlot(object)
     def _on_function_selected(self, info):
@@ -5007,14 +5426,17 @@ class MainWindow(QMainWindow):
         """Evaluate measurement expression or script and show results."""
         expr = self.control_panel.get_measure_expression().strip()
         if not expr:
-            QMessageBox.warning(self, "No Measurement",
-                                "Enter a measurement expression or load a script file first.")
+            QMessageBox.warning(
+                self,
+                "No Measurement",
+                "Enter a measurement expression or load a script file first.",
+            )
             return
 
         # File path detection: treat as script file if path exists on disk
         if os.path.isfile(expr):
             self._run_measure_script(expr)
-        elif re.match(r'^\.?meas\s', expr, re.IGNORECASE):
+        elif re.match(r"^\.?meas\s", expr, re.IGNORECASE):
             self._run_measure_script_text(expr)
         else:
             self._run_single_measure(expr)
@@ -5034,7 +5456,7 @@ class MainWindow(QMainWindow):
         """Parse and execute a .meas-style script file."""
         self._ensure_measure_results()
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 script_text = f.read()
         except OSError as e:
             QMessageBox.warning(self, "File Error", f"Cannot read script file:\n{e}")
@@ -5072,12 +5494,16 @@ class MainWindow(QMainWindow):
     def _on_from_script(self):
         """Open a file dialog to select a .meas-style script file."""
         if self.raw_file is None:
-            QMessageBox.warning(self, "No Data", "Please open a SPICE output file first.")
+            QMessageBox.warning(
+                self, "No Data", "Please open a SPICE output file first."
+            )
             return
 
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Select Measurement Script", "",
-            "Text Files (*.txt *.meas *.spice *.sp *.cir);;All Files (*)"
+            self,
+            "Select Measurement Script",
+            "",
+            "Text Files (*.txt *.meas *.spice *.sp *.cir);;All Files (*)",
         )
         if not filepath:
             return
@@ -5089,7 +5515,9 @@ class MainWindow(QMainWindow):
         """Handle add trace to axis button click."""
         expression = self.control_panel.trace_expr.text().strip()
         if not expression:
-            QMessageBox.warning(self, "No Expression", "Please enter an expression first.")
+            QMessageBox.warning(
+                self, "No Expression", "Please enter an expression first."
+            )
             return
 
         # Strip [VCD] prefix from all variable names in the expression.
@@ -5102,8 +5530,12 @@ class MainWindow(QMainWindow):
             # For simplicity, treat whole expression as variable name
             x_var = expression.strip()
             # Validate it's a single variable (no spaces)
-            if ' ' in x_var:
-                QMessageBox.warning(self, "Invalid X-axis", "X-axis can only have one variable/expression.")
+            if " " in x_var:
+                QMessageBox.warning(
+                    self,
+                    "Invalid X-axis",
+                    "X-axis can only have one variable/expression.",
+                )
                 return
 
             # Store X-axis variable
@@ -5114,13 +5546,16 @@ class MainWindow(QMainWindow):
 
             # Update all existing traces with the new X variable data
             if self.raw_file and self.state.current_dataset_idx is not None:
-                x_data = self.raw_file.get_variable_data(x_var, self.state.current_dataset_idx)
+                x_data = self.raw_file.get_variable_data(
+                    x_var, self.state.current_dataset_idx
+                )
                 if x_data is not None:
                     self.axis_manager.auto_range_x_from_data(x_data, x_var)
                 else:
                     QMessageBox.warning(
-                        self, "Variable Not Found",
-                        f"Variable '{x_var}' not found in the current dataset."
+                        self,
+                        "Variable Not Found",
+                        f"Variable '{x_var}' not found in the current dataset.",
                     )
                     return
 
@@ -5135,21 +5570,24 @@ class MainWindow(QMainWindow):
             # Y1/Y2 buttons add traces
             # VCD-only mode: no X variable needed (VCD timestamps serve as X)
             panel = self.panel_grid.get_active_panel()
-            vcd_only = (not self.raw_file and panel
-                        and panel.trace_manager.vcd_file is not None)
+            vcd_only = (
+                not self.raw_file and panel and panel.trace_manager.vcd_file is not None
+            )
             if vcd_only:
                 x_var = "time"  # placeholder, _add_vcd_trace ignores it
             else:
                 x_var = self._get_current_x_var()
                 if not x_var:
-                    QMessageBox.warning(self, "No X-axis", "Please select an X-axis variable.")
+                    QMessageBox.warning(
+                        self, "No X-axis", "Please select an X-axis variable."
+                    )
                     return
 
             # Map axis string to AxisAssignment.
             # Digital (VCD) traces always go to Y1 — a single stacking
             # axis avoids confusing the user with multiple Y scales.
             if axis == "Y2" and panel and panel.trace_manager.vcd_file:
-                stripped = expression.strip('\'"').strip()
+                stripped = expression.strip("'\"").strip()
                 if panel.trace_manager.vcd_file.get_signal(stripped):
                     axis = "Y1"
 
@@ -5168,31 +5606,33 @@ class MainWindow(QMainWindow):
                     )
                     if new_panel:
                         new_panel.domain = "frequency"
-                        new_panel.axis_manager.set_axis_label(AxisId.X, "Frequency [Hz]")
+                        new_panel.axis_manager.set_axis_label(
+                            AxisId.X, "Frequency [Hz]"
+                        )
                         target_trace_manager = new_panel.trace_manager
                         logger.info(
                             f"Created FFT panel {new_panel.panel_id} for: {expression}"
                         )
                     else:
                         QMessageBox.warning(
-                            self, "Cannot Create FFT Panel",
-                            "Maximum panel limit reached. Close a panel before adding FFT traces."
+                            self,
+                            "Cannot Create FFT Panel",
+                            "Maximum panel limit reached. Close a panel before adding FFT traces.",
                         )
                         return
 
             # Add trace
             error_out = []
-            trace = target_trace_manager.add_trace(expression, x_var, y_axis, error_out=error_out)
+            trace = target_trace_manager.add_trace(
+                expression, x_var, y_axis, error_out=error_out
+            )
             if trace:
                 logger.info(f"Added trace: {trace.name} to {y_axis.value}")
                 # Clear expression after successful addition
                 self.control_panel.trace_expr.clear()
             else:
                 detail = error_out[0] if error_out else "Unknown error"
-                QMessageBox.warning(
-                    self, "Error",
-                    f"Failed to add trace: {detail}"
-                )
+                QMessageBox.warning(self, "Error", f"Failed to add trace: {detail}")
         else:
             logger.warning(f"Unknown axis: {axis}")
 
@@ -5224,7 +5664,7 @@ class MainWindow(QMainWindow):
         """Handle X1 cursor position change — triggers back-annotation + status update."""
         # Convert ViewBox coordinate to linear space if X axis is in log mode
         x_linear = value
-        if self.plot_widget.get_axis_log_mode('X'):
+        if self.plot_widget.get_axis_log_mode("X"):
             x_linear = self.plot_widget._log_to_linear(value)
 
         # Store X value and start debounce timer for back-annotation
@@ -5248,7 +5688,7 @@ class MainWindow(QMainWindow):
             self._kicad_ba_timer.start()
 
         self._update_cursor_status()
-        self._sync_x_cursor_to_same_domain_panels('XA', value)
+        self._sync_x_cursor_to_same_domain_panels("XA", value)
 
     @pyqtSlot(float)
     def _on_cursor_xb_changed(self, value):
@@ -5257,7 +5697,7 @@ class MainWindow(QMainWindow):
 
         # Convert ViewBox coordinate to linear space if X axis is in log mode
         x_linear = value
-        if self.plot_widget.get_axis_log_mode('X'):
+        if self.plot_widget.get_axis_log_mode("X"):
             x_linear = self.plot_widget._log_to_linear(value)
 
         # Store and start debounce timer for xschem back-annotation.
@@ -5269,7 +5709,7 @@ class MainWindow(QMainWindow):
             self._kicad_ba_x = x_linear
             self._kicad_ba_timer.start()
 
-        self._sync_x_cursor_to_same_domain_panels('XB', value)
+        self._sync_x_cursor_to_same_domain_panels("XB", value)
 
     @pyqtSlot(float)
     def _on_cursor_yA_changed(self, value):
@@ -5286,7 +5726,9 @@ class MainWindow(QMainWindow):
         """Handle Y2 cursor position change (Y2-axis-specific cursor)."""
         pass
 
-    def _sync_x_cursor_to_same_domain_panels(self, cursor_type: str, value: float) -> None:
+    def _sync_x_cursor_to_same_domain_panels(
+        self, cursor_type: str, value: float
+    ) -> None:
         """Sync XA/XB cursor position to all same-domain panels.
 
         Uses silent setters (blockSignals) to avoid infinite signal loops.
@@ -5306,9 +5748,9 @@ class MainWindow(QMainWindow):
                     continue
                 if panel.domain != active_domain:
                     continue
-                if cursor_type == 'XA':
+                if cursor_type == "XA":
                     panel.plot_widget.set_xa_cursor_position(value)
-                elif cursor_type == 'XB':
+                elif cursor_type == "XB":
                     panel.plot_widget.set_xb_cursor_position(value)
         finally:
             self._cursor_sync_in_progress = False
@@ -5333,18 +5775,18 @@ class MainWindow(QMainWindow):
             state = ApplicationState()
             mode = state.impedance_format
             cf = {}
-            ya = positions.get('yA')
+            ya = positions.get("yA")
             if ya is not None:
-                cf['yA'] = format_complex(complex(ya, 0), '', mode)
-            yb = positions.get('yB')
+                cf["yA"] = format_complex(complex(ya, 0), "", mode)
+            yb = positions.get("yB")
             if yb is not None:
-                cf['yB'] = format_complex(complex(yb, 0), '', mode)
-            dy1 = deltas.get('dy1')
+                cf["yB"] = format_complex(complex(yb, 0), "", mode)
+            dy1 = deltas.get("dy1")
             if dy1 is not None:
-                cf['dy1'] = format_complex(complex(dy1, 0), '', mode)
-            dy2 = deltas.get('dy2')
+                cf["dy1"] = format_complex(complex(dy1, 0), "", mode)
+            dy2 = deltas.get("dy2")
             if dy2 is not None:
-                cf['dy2'] = format_complex(complex(dy2, 0), '', mode)
+                cf["dy2"] = format_complex(complex(dy2, 0), "", mode)
             complex_formats = cf if cf else None
         if self.menu_manager:
             self.menu_manager.update_cursor_status(positions, deltas, complex_formats)
@@ -5353,16 +5795,20 @@ class MainWindow(QMainWindow):
     def _update_legend_cursor_values(self) -> None:
         """Update trace legend with Y values at visible X cursor positions."""
         positions = self.plot_widget.get_cursor_positions()
-        xa = positions.get('xa')
-        xb = positions.get('xb')
+        xa = positions.get("xa")
+        xb = positions.get("xb")
 
         # Convert viewbox coordinates to linear space for data interpolation
-        xa_lin = (self.plot_widget._log_to_linear(xa)
-                  if xa is not None and self.plot_widget._x_log_mode
-                  else xa)
-        xb_lin = (self.plot_widget._log_to_linear(xb)
-                  if xb is not None and self.plot_widget._x_log_mode
-                  else xb)
+        xa_lin = (
+            self.plot_widget._log_to_linear(xa)
+            if xa is not None and self.plot_widget._x_log_mode
+            else xa
+        )
+        xb_lin = (
+            self.plot_widget._log_to_linear(xb)
+            if xb is not None and self.plot_widget._x_log_mode
+            else xb
+        )
 
         self.trace_manager.update_legend_cursor_values(xa_lin, xb_lin)
 
@@ -5472,7 +5918,9 @@ class MainWindow(QMainWindow):
         # Get all clients associated with this window
         registry = self.state.window_registry
         clients = registry.get_clients_for_window(self.window_id)
-        logger.debug(f"Found {len(clients)} clients for window {self.window_id}: {clients}")
+        logger.debug(
+            f"Found {len(clients)} clients for window {self.window_id}: {clients}"
+        )
         if not clients:
             logger.debug("No clients found for this window")
             return
@@ -5481,32 +5929,32 @@ class MainWindow(QMainWindow):
         serializable_results = []
         for res in results:
             res_copy = res.copy()
-            y_val = res_copy.get('y_value')
+            y_val = res_copy.get("y_value")
             if isinstance(y_val, complex) or np.iscomplexobj(y_val):
                 # Replace with magnitude/phase representation
-                res_copy['y_value'] = {
-                    'magnitude': float(np.abs(y_val)),
-                    'phase_deg': float(np.angle(y_val, deg=True)),
-                    'real': float(y_val.real),
-                    'imag': float(y_val.imag)
+                res_copy["y_value"] = {
+                    "magnitude": float(np.abs(y_val)),
+                    "phase_deg": float(np.angle(y_val, deg=True)),
+                    "real": float(y_val.real),
+                    "imag": float(y_val.imag),
                 }
             elif isinstance(y_val, (np.floating, np.integer)):
-                res_copy['y_value'] = float(y_val)
+                res_copy["y_value"] = float(y_val)
             # y_nearest may also be complex
-            y_nearest = res_copy.get('y_nearest')
+            y_nearest = res_copy.get("y_nearest")
             if isinstance(y_nearest, complex) or np.iscomplexobj(y_nearest):
-                res_copy['y_nearest'] = {
-                    'magnitude': float(np.abs(y_nearest)),
-                    'phase_deg': float(np.angle(y_nearest, deg=True)),
-                    'real': float(y_nearest.real),
-                    'imag': float(y_nearest.imag)
+                res_copy["y_nearest"] = {
+                    "magnitude": float(np.abs(y_nearest)),
+                    "phase_deg": float(np.angle(y_nearest, deg=True)),
+                    "real": float(y_nearest.real),
+                    "imag": float(y_nearest.imag),
                 }
             elif isinstance(y_nearest, (np.floating, np.integer)):
-                res_copy['y_nearest'] = float(y_nearest)
+                res_copy["y_nearest"] = float(y_nearest)
             # Convert numpy bool to Python bool
-            out_of_range = res_copy.get('out_of_range')
+            out_of_range = res_copy.get("out_of_range")
             if isinstance(out_of_range, np.bool_):
-                res_copy['out_of_range'] = bool(out_of_range)
+                res_copy["out_of_range"] = bool(out_of_range)
             serializable_results.append(res_copy)
 
         # Send update to each client
@@ -5514,23 +5962,22 @@ class MainWindow(QMainWindow):
             # Create update message (similar to get_data_point response but with different command)
             update_msg = {
                 "command": "data_point_update",
-                "data": {
-                    "x": x_value,
-                    "traces": serializable_results
-                },
-                "timestamp": time.time() if 'time' in sys.modules else 0
+                "data": {"x": x_value, "traces": serializable_results},
+                "timestamp": time.time() if "time" in sys.modules else 0,
             }
 
             # Send via command handler with "json " prefix (xschem expects this format)
             # Get wave receiver from command handler
             wave_receiver = self.state.wave_cmd_handler.wave_receiver
             if wave_receiver is None:
-                logger.warning(f"Cannot send data_point_update: wave receiver not available")
+                logger.warning(
+                    f"Cannot send data_point_update: wave receiver not available"
+                )
                 continue
 
             # Parse client address string
             try:
-                ip_str, port_str = client_addr.split(':')
+                ip_str, port_str = client_addr.split(":")
                 client_addr_tuple = (ip_str, int(port_str))
             except (ValueError, TypeError):
                 logger.error(f"Invalid client address format: {client_addr}")
@@ -5549,8 +5996,10 @@ class MainWindow(QMainWindow):
             try:
                 json_str = json.dumps(update_msg)
                 line = f"json {json_str}"
-                logger.debug(f"Sending data_point_update to {client_addr}: {line[:100]}...")
-                client_socket.sendall((line + '\n').encode('utf-8'))
+                logger.debug(
+                    f"Sending data_point_update to {client_addr}: {line[:100]}..."
+                )
+                client_socket.sendall((line + "\n").encode("utf-8"))
                 logger.debug(f"Sent data_point_update to {client_addr}: x={x_value}")
             except (socket.error, TypeError) as e:
                 logger.error(f"Failed to send data_point_update to {client_addr}: {e}")
@@ -5571,7 +6020,7 @@ class MainWindow(QMainWindow):
         # Auto-range the affected axis so the view adjusts to the
         # log10-transformed data range (otherwise the ViewBox keeps
         # its previous linear range, clustering all data at x=0).
-        axis_map = {'bottom': AxisId.X, 'left': AxisId.Y1, 'right': AxisId.Y2}
+        axis_map = {"bottom": AxisId.X, "left": AxisId.Y1, "right": AxisId.Y2}
         axis_id = axis_map.get(orientation)
         if axis_id is not None:
             self.axis_manager.auto_range_axis(axis_id)
@@ -5632,6 +6081,7 @@ class MainWindow(QMainWindow):
             # Try evaluating as an expression (e.g., v(ac_p)-v(ac_n))
             try:
                 from pqwave.models.expression import ExprEvaluator
+
                 evaluator = ExprEvaluator(self.raw_file, self.state.current_dataset_idx)
                 y_data = evaluator.evaluate(name)
             except Exception:
@@ -5643,9 +6093,13 @@ class MainWindow(QMainWindow):
         x_var = self._get_current_x_var()
         x_data = None
         if x_var:
-            x_data = self.raw_file.get_variable_data(x_var, self.state.current_dataset_idx)
+            x_data = self.raw_file.get_variable_data(
+                x_var, self.state.current_dataset_idx
+            )
         if x_data is None:
-            x_data = self.raw_file.get_variable_data("time", self.state.current_dataset_idx)
+            x_data = self.raw_file.get_variable_data(
+                "time", self.state.current_dataset_idx
+            )
         if x_data is None:
             x_data = np.arange(len(y_data))
 
@@ -5685,20 +6139,20 @@ class MainWindow(QMainWindow):
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         try:
             data = {
-                'viewbox_theme': self.state.viewbox_theme.value,
-                'title_font': self.state.title_font.to_dict(),
-                'label_font': self.state.label_font.to_dict(),
-                'tick_font': self.state.tick_font.to_dict(),
-                'ui_font': self.state.ui_font.to_dict(),
-                'repl_font': self.state.repl_font.to_dict(),
-                'repl_bg': self.state.repl_bg,
-                'toolbar_visible': self.state.toolbar_visible,
-                'status_bar_visible': self.state.status_bar_visible,
-                'chat_panel_visible': self.state.chat_panel_visible,
-                'tool_paths': dict(self.state.tool_paths),
-                'impedance_format': self.state.impedance_format,
+                "viewbox_theme": self.state.viewbox_theme.value,
+                "title_font": self.state.title_font.to_dict(),
+                "label_font": self.state.label_font.to_dict(),
+                "tick_font": self.state.tick_font.to_dict(),
+                "ui_font": self.state.ui_font.to_dict(),
+                "repl_font": self.state.repl_font.to_dict(),
+                "repl_bg": self.state.repl_bg,
+                "toolbar_visible": self.state.toolbar_visible,
+                "status_bar_visible": self.state.status_bar_visible,
+                "chat_panel_visible": self.state.chat_panel_visible,
+                "tool_paths": dict(self.state.tool_paths),
+                "impedance_format": self.state.impedance_format,
             }
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             logger.warning("Failed to save global preferences to %s: %s", filepath, e)
@@ -5709,7 +6163,7 @@ class MainWindow(QMainWindow):
         if not os.path.exists(filepath):
             return
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:
             logger.warning("Failed to load global preferences from %s: %s", filepath, e)
@@ -5720,7 +6174,7 @@ class MainWindow(QMainWindow):
             return
 
         # Viewbox theme
-        theme_str = data.get('viewbox_theme', 'dark')
+        theme_str = data.get("viewbox_theme", "dark")
         try:
             self.state.viewbox_theme = ViewboxTheme(theme_str)
             self.plot_widget.set_viewbox_theme(self.state.viewbox_theme)
@@ -5728,41 +6182,41 @@ class MainWindow(QMainWindow):
             logger.warning("Invalid viewbox theme in preferences: %s", e)
 
         # Impedance display format
-        imp_fmt = data.get('impedance_format', 'polar')
-        if imp_fmt in ('polar', 'rectangular'):
+        imp_fmt = data.get("impedance_format", "polar")
+        if imp_fmt in ("polar", "rectangular"):
             self.state.impedance_format = imp_fmt
         else:
-            self.state.impedance_format = 'polar'
+            self.state.impedance_format = "polar"
         # Sync menu radio button with restored state
         if self.menu_manager:
             self.menu_manager.set_impedance_format_checked(imp_fmt)
 
         # Font configs
-        self.state.title_font = FontConfig.from_dict(data.get('title_font', {}))
-        self.state.label_font = FontConfig.from_dict(data.get('label_font', {}))
-        self.state.tick_font = FontConfig.from_dict(data.get('tick_font', {}))
-        self.state.ui_font = FontConfig.from_dict(data.get('ui_font', {}))
-        self.state.repl_font = FontConfig.from_dict(data.get('repl_font', {}))
-        self.state.repl_bg = data.get('repl_bg', '')
-        saved_paths = data.get('tool_paths', {})
+        self.state.title_font = FontConfig.from_dict(data.get("title_font", {}))
+        self.state.label_font = FontConfig.from_dict(data.get("label_font", {}))
+        self.state.tick_font = FontConfig.from_dict(data.get("tick_font", {}))
+        self.state.ui_font = FontConfig.from_dict(data.get("ui_font", {}))
+        self.state.repl_font = FontConfig.from_dict(data.get("repl_font", {}))
+        self.state.repl_bg = data.get("repl_bg", "")
+        saved_paths = data.get("tool_paths", {})
         if isinstance(saved_paths, dict):
-            for key in ('fst2vcd', 'ghwdump', 'ngspice'):
-                val = saved_paths.get(key, '')
+            for key in ("fst2vcd", "ghwdump", "ngspice"):
+                val = saved_paths.get(key, "")
                 if isinstance(val, str) and val.strip():
                     self.state.tool_paths[key] = val.strip()
                 else:
-                    self.state.tool_paths[key] = ''
+                    self.state.tool_paths[key] = ""
         self.plot_widget.apply_fonts(self.state)
         self._apply_ui_font()
         self._apply_repl_settings()
 
         # UI toggles
-        self.state.toolbar_visible = data.get('toolbar_visible', True)
-        self.state.status_bar_visible = data.get('status_bar_visible', True)
-        self.state.chat_panel_visible = data.get('chat_panel_visible', False)
+        self.state.toolbar_visible = data.get("toolbar_visible", True)
+        self.state.status_bar_visible = data.get("status_bar_visible", True)
+        self.state.chat_panel_visible = data.get("chat_panel_visible", False)
         self.set_toolbar_visible(self.state.toolbar_visible)
         self.set_statusbar_visible(self.state.status_bar_visible)
-        if self.state.chat_panel_visible and hasattr(self, 'chat_panel'):
+        if self.state.chat_panel_visible and hasattr(self, "chat_panel"):
             self.chat_panel.setVisible(True)
 
     def _restore_panels_from_dict(self, data: dict) -> None:
@@ -5772,9 +6226,9 @@ class MainWindow(QMainWindow):
         since runtime UUIDs differ from saved UUIDs across sessions.
         """
         self._restoring_state = True
-        saved_panels = data.get('panels', {})
-        saved_order = data.get('panel_order', [])
-        saved_active = data.get('active_panel_id', '')
+        saved_panels = data.get("panels", {})
+        saved_order = data.get("panel_order", [])
+        saved_active = data.get("active_panel_id", "")
 
         if not saved_order:
             self._restoring_state = False
@@ -5785,7 +6239,7 @@ class MainWindow(QMainWindow):
         saved_to_current: dict[int, str] = {}
 
         # Ensure panel count matches: create extras if needed
-        saved_layout = data.get('panel_layout', [])
+        saved_layout = data.get("panel_layout", [])
         while len(current_order) < len(saved_order):
             last_pid = current_order[-1] if current_order else None
             if last_pid is None:
@@ -5814,21 +6268,22 @@ class MainWindow(QMainWindow):
                 pdata = saved_panels.get(saved_pid, {})
                 ps = self.state.panels.get(current_order[i])
                 if ps and pdata:
-                    if 'axis_configs' in pdata:
-                        for key, ax_data in pdata['axis_configs'].items():
+                    if "axis_configs" in pdata:
+                        for key, ax_data in pdata["axis_configs"].items():
                             try:
                                 axis_id = AxisId(key)
                                 ps.axis_configs[axis_id] = AxisConfig.from_dict(ax_data)
                             except ValueError:
                                 continue
-                    if 'current_x_var' in pdata:
-                        ps.current_x_var = pdata['current_x_var']
-                    if 'domain' in pdata:
-                        ps.domain = pdata['domain']
-                    if 'is_eye_diagram' in pdata:
-                        ps.is_eye_diagram = pdata['is_eye_diagram']
+                    if "current_x_var" in pdata:
+                        ps.current_x_var = pdata["current_x_var"]
+                    if "domain" in pdata:
+                        ps.domain = pdata["domain"]
+                    if "is_eye_diagram" in pdata:
+                        ps.is_eye_diagram = pdata["is_eye_diagram"]
                         ps.eye_diagram_trace_name = pdata.get(
-                            'eye_diagram_trace_name', '')
+                            "eye_diagram_trace_name", ""
+                        )
 
         # Restore active panel by position
         if saved_active and saved_active in saved_order:
@@ -5842,7 +6297,10 @@ class MainWindow(QMainWindow):
                 if panel is not None:
                     panel.set_active(True)
 
-        if not self.state.active_panel_id or self.state.active_panel_id not in self.state.panels:
+        if (
+            not self.state.active_panel_id
+            or self.state.active_panel_id not in self.state.panels
+        ):
             self.state.active_panel_id = self.panel_grid.active_panel_id
 
         # Apply axis configs, log modes, and traces to every panel
@@ -5866,17 +6324,17 @@ class MainWindow(QMainWindow):
             self._update_trace_manager_log_modes()
 
             # Eye diagram panels: skip trace plotting; render eye instead.
-            if pdata.get('is_eye_diagram'):
-                trace_name = pdata.get('eye_diagram_trace_name', '')
+            if pdata.get("is_eye_diagram"):
+                trace_name = pdata.get("eye_diagram_trace_name", "")
                 y_data = self._load_eye_trace_data(trace_name)
                 if y_data is not None:
                     panel.axis_manager.set_axis_log_mode(AxisId.X, False)
                     panel.axis_manager.set_axis_log_mode(AxisId.Y1, False)
                     self._render_eye_diagram(panel, y_data, trace_name)
             else:
-                x_var = pdata.get('current_x_var', 'time')
+                x_var = pdata.get("current_x_var", "time")
                 self.state.current_x_var = x_var
-                self._restore_traces_from_data(pdata.get('traces', []), x_var)
+                self._restore_traces_from_data(pdata.get("traces", []), x_var)
 
         # Restore the active panel for subsequent title/grid/legend setup
         if _prev_active_id and _prev_active_id in self.state.panels:
@@ -5884,12 +6342,12 @@ class MainWindow(QMainWindow):
             self.panel_grid.set_active_panel_id(_prev_active_id)
 
         # Restore plot title and toggles
-        title = data.get('plot_title', '')
+        title = data.get("plot_title", "")
         if title:
             self.state.plot_title = title
             self.plot_widget.set_plot_title(title)
-        self.state.grid_visible = data.get('grid_visible', True)
-        self.state.legend_visible = data.get('legend_visible', True)
+        self.state.grid_visible = data.get("grid_visible", True)
+        self.state.legend_visible = data.get("legend_visible", True)
         self.axis_manager.set_grid_visible(self.state.grid_visible)
         self.menu_manager.set_grids_visible(self.state.grid_visible)
         self.set_legend_visible(self.state.legend_visible)
@@ -5900,13 +6358,13 @@ class MainWindow(QMainWindow):
         """Re-create traces from saved data and restore visual properties."""
         failed_expressions = []
         for t_data in saved_traces:
-            expression = t_data.get('expression', '')
+            expression = t_data.get("expression", "")
             if not expression:
                 continue
 
-            y_axis_str = t_data.get('y_axis', 'Y1')
-            y_axis = AxisAssignment.Y1 if y_axis_str == 'Y1' else AxisAssignment.Y2
-            color = tuple(t_data.get('color', (0, 0, 255)))
+            y_axis_str = t_data.get("y_axis", "Y1")
+            y_axis = AxisAssignment.Y1 if y_axis_str == "Y1" else AxisAssignment.Y2
+            color = tuple(t_data.get("color", (0, 0, 255)))
 
             error_out = []
             trace = self.trace_manager.add_trace(
@@ -5927,19 +6385,21 @@ class MainWindow(QMainWindow):
                 joined += f"\n... and {len(failed_expressions) - 10} more"
             logger.warning(
                 "Failed to restore %d trace(s) during project load:\n%s",
-                len(failed_expressions), joined)
+                len(failed_expressions),
+                joined,
+            )
 
         # Apply saved visual properties (name alias, line width, visibility)
         for saved_t in saved_traces:
-            expr = saved_t.get('expression', '')
+            expr = saved_t.get("expression", "")
             if not expr:
                 continue
             for st in self.state.traces:
                 if st.expression == expr:
-                    st.name = saved_t.get('name', expr)
-                    st.line_width = saved_t.get('line_width', 1.0)
-                    st.visible = saved_t.get('visible', True)
-                    st.selected = saved_t.get('selected', False)
+                    st.name = saved_t.get("name", expr)
+                    st.line_width = saved_t.get("line_width", 1.0)
+                    st.visible = saved_t.get("visible", True)
+                    st.selected = saved_t.get("selected", False)
                     break
 
         # Update plot-item pens and names to match state traces
@@ -5948,7 +6408,7 @@ class MainWindow(QMainWindow):
                 st = self.state.traces[i]
                 pen = pg.mkPen(color=st.color, width=st.line_width)
                 plot_item.setPen(pen)
-                plot_item.opts['name'] = st.name
+                plot_item.opts["name"] = st.name
 
         # Refresh legend with updated names
         self.trace_manager._refresh_legend()
@@ -5956,8 +6416,8 @@ class MainWindow(QMainWindow):
     def _restore_flat_state_from_dict(self, data: dict) -> None:
         """Restore state from old flat format (backward compat)."""
         # Apply axis configs before adding traces (log mode must be correct)
-        if 'axis_configs' in data:
-            for key, ax_data in data['axis_configs'].items():
+        if "axis_configs" in data:
+            for key, ax_data in data["axis_configs"].items():
                 try:
                     axis_id = AxisId(key)
                     self.state.axis_configs[axis_id] = AxisConfig.from_dict(ax_data)
@@ -5969,24 +6429,24 @@ class MainWindow(QMainWindow):
         self._update_trace_manager_log_modes()
 
         # Apply plot title
-        title = data.get('plot_title', '')
+        title = data.get("plot_title", "")
         if title:
             self.state.plot_title = title
             self.plot_widget.set_plot_title(title)
 
         # Apply UI toggles
-        self.state.grid_visible = data.get('grid_visible', True)
-        self.state.legend_visible = data.get('legend_visible', True)
+        self.state.grid_visible = data.get("grid_visible", True)
+        self.state.legend_visible = data.get("legend_visible", True)
         self.axis_manager.set_grid_visible(self.state.grid_visible)
         self.menu_manager.set_grids_visible(self.state.grid_visible)
         self.set_legend_visible(self.state.legend_visible)
 
         # Set current X variable
-        self.state.current_x_var = data.get('current_x_var', self.state.current_x_var)
+        self.state.current_x_var = data.get("current_x_var", self.state.current_x_var)
 
         # Re-create traces from saved expressions
         x_var = self.state.current_x_var
-        self._restore_traces_from_data(data.get('traces', []), x_var)
+        self._restore_traces_from_data(data.get("traces", []), x_var)
 
     def save_current_state(self) -> None:
         """Save project to JSON (Ctrl+S / File > Save Project).
@@ -6001,12 +6461,11 @@ class MainWindow(QMainWindow):
     def _save_project_as(self) -> None:
         """File > Save Project As — always prompts for path."""
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Project As", "",
-            "Project Files (*.json);;All Files (*)"
+            self, "Save Project As", "", "Project Files (*.json);;All Files (*)"
         )
         if path:
-            if not path.endswith('.json'):
-                path += '.json'
+            if not path.endswith(".json"):
+                path += ".json"
             self._project_path = path
             self._save_project(path)
 
@@ -6022,35 +6481,35 @@ class MainWindow(QMainWindow):
                 sf.relative_path = sf.path
 
         data = self.state.to_per_file_dict()
-        data['source_files'] = [sf.to_dict() for sf in self.state.source_files]
-        data['version'] = 2
-        data['panel_layout'] = self.panel_grid.get_layout_splits()
+        data["source_files"] = [sf.to_dict() for sf in self.state.source_files]
+        data["version"] = 2
+        data["panel_layout"] = self.panel_grid.get_layout_splits()
 
         try:
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, default=str)
             logger.info(f"Project saved to {path}")
         except Exception as e:
-            QMessageBox.critical(
-                self, "Save Error",
-                f"Failed to save project:\n{e}"
-            )
+            QMessageBox.critical(self, "Save Error", f"Failed to save project:\n{e}")
 
     def closeEvent(self, event):
         """Handle window close event."""
         # Clear cursor back-annotation stamps in xschem
-        if (hasattr(self, "_xschem_cross_probe")
-                and self._xschem_cross_probe is not None):
+        if (
+            hasattr(self, "_xschem_cross_probe")
+            and self._xschem_cross_probe is not None
+        ):
             self._xschem_cross_probe.clear_stamps()
         # Clear cursor back-annotation labels in lepton
-        if (hasattr(self, "_lepton_cross_probe")
-                and self._lepton_cross_probe is not None
-                and self._lepton_cross_probe.is_connected()):
+        if (
+            hasattr(self, "_lepton_cross_probe")
+            and self._lepton_cross_probe is not None
+            and self._lepton_cross_probe.is_connected()
+        ):
             self._lepton_cross_probe.send_command("$CLEAR:ANNOTATIONS")
             self._lepton_cross_probe.disconnect()
         # Clear KiCad cursor back-annotation texts
-        if (hasattr(self, "_kicad_bridge")
-                and self._kicad_bridge is not None):
+        if hasattr(self, "_kicad_bridge") and self._kicad_bridge is not None:
             self._kicad_ba_timer.stop()
             self._kicad_bridge.clear_cursor_annotations(forget_positions=True)
         self._save_global_prefs()
@@ -6081,13 +6540,21 @@ class MainWindow(QMainWindow):
 
         # ---- single-key toggles (only when plot area has focus) ----
         toggle_map = {
-            'toggle_xa_cursor':  lambda: self._toggle_x_cursor_a(not self.plot_widget.cursor_xa_visible),
-            'toggle_xb_cursor':  lambda: self._toggle_x_cursor_b(not self.plot_widget.cursor_xb_visible),
-            'toggle_ya_cursor':  lambda: self._toggle_y_cursor_A(not self.plot_widget.cursor_yA_visible),
-            'toggle_yb_cursor':  lambda: self._toggle_y_cursor_B(not self.plot_widget.cursor_yB_visible),
-            'toggle_cross_hair': lambda: self.toggle_cross_hair(),
-            'toggle_zoom_box':   lambda: self.enable_zoom_box(),
-            'zoom_to_fit_alt':   lambda: self.zoom_to_fit(),
+            "toggle_xa_cursor": lambda: self._toggle_x_cursor_a(
+                not self.plot_widget.cursor_xa_visible
+            ),
+            "toggle_xb_cursor": lambda: self._toggle_x_cursor_b(
+                not self.plot_widget.cursor_xb_visible
+            ),
+            "toggle_ya_cursor": lambda: self._toggle_y_cursor_A(
+                not self.plot_widget.cursor_yA_visible
+            ),
+            "toggle_yb_cursor": lambda: self._toggle_y_cursor_B(
+                not self.plot_widget.cursor_yB_visible
+            ),
+            "toggle_cross_hair": lambda: self.toggle_cross_hair(),
+            "toggle_zoom_box": lambda: self.enable_zoom_box(),
+            "zoom_to_fit_alt": lambda: self.zoom_to_fit(),
         }
 
         for action_name, callback in toggle_map.items():
@@ -6102,10 +6569,10 @@ class MainWindow(QMainWindow):
 
         # ---- arrow keys for cursor movement (plot-contextual) ----
         arrow_map = {
-            'move_x_cursor_left':  lambda: pw.move_selected_cursor('left'),
-            'move_x_cursor_right': lambda: pw.move_selected_cursor('right'),
-            'move_y_cursor_up':    lambda: pw.move_selected_cursor('up'),
-            'move_y_cursor_down':  lambda: pw.move_selected_cursor('down'),
+            "move_x_cursor_left": lambda: pw.move_selected_cursor("left"),
+            "move_x_cursor_right": lambda: pw.move_selected_cursor("right"),
+            "move_y_cursor_up": lambda: pw.move_selected_cursor("up"),
+            "move_y_cursor_down": lambda: pw.move_selected_cursor("down"),
         }
         for action_name, callback in arrow_map.items():
             ks = seq(action_name)
@@ -6116,9 +6583,9 @@ class MainWindow(QMainWindow):
 
         # ---- log-mode toggles (global, no menu action) ----
         log_map = {
-            'log_x':  lambda: self._toggle_log_axis(AxisId.X),
-            'log_y1': lambda: self._toggle_log_axis(AxisId.Y1),
-            'log_y2': lambda: self._toggle_log_axis(AxisId.Y2),
+            "log_x": lambda: self._toggle_log_axis(AxisId.X),
+            "log_y1": lambda: self._toggle_log_axis(AxisId.Y1),
+            "log_y2": lambda: self._toggle_log_axis(AxisId.Y2),
         }
         for action_name, callback in log_map.items():
             ks = seq(action_name)
@@ -6127,17 +6594,17 @@ class MainWindow(QMainWindow):
                 sc.activated.connect(callback)
 
         # ---- chat panel toggle (global) ----
-        ks = seq('toggle_chat_panel')
-        if ks and hasattr(self, 'chat_panel'):
+        ks = seq("toggle_chat_panel")
+        if ks and hasattr(self, "chat_panel"):
             sc = QShortcut(QKeySequence(ks), self)
             sc.activated.connect(self.chat_panel.toggle)
 
         # ---- digital signal operations (global) ----
         digital_map = {
-            'toggle_digital_analog': self._toggle_digital_analog,
-            'group_bus':             self._group_bus,
-            'eye_diagram':           self._show_eye_diagram,
-            'threshold_settings':    self._show_threshold_settings,
+            "toggle_digital_analog": self._toggle_digital_analog,
+            "group_bus": self._group_bus,
+            "eye_diagram": self._show_eye_diagram,
+            "threshold_settings": self._show_threshold_settings,
         }
         for action_name, callback in digital_map.items():
             ks = seq(action_name)
@@ -6147,9 +6614,9 @@ class MainWindow(QMainWindow):
 
         # ---- trace operations (plot-contextual) ----
         trace_map = {
-            'remove_trace':      self._remove_selected_trace,
-            'add_all_signals':   self._add_all_signals,
-            'remove_all_traces': self._remove_all_traces,
+            "remove_trace": self._remove_selected_trace,
+            "add_all_signals": self._add_all_signals,
+            "remove_all_traces": self._remove_all_traces,
         }
         for action_name, callback in trace_map.items():
             ks = seq(action_name)
@@ -6170,11 +6637,9 @@ class MainWindow(QMainWindow):
             result = self._repl._session.add_all()
             shown = result.get("shown", [])
             if shown:
-                self.chat_panel.append_output(
-                    f"Added {len(shown)} signal(s)\n")
+                self.chat_panel.append_output(f"Added {len(shown)} signal(s)\n")
             else:
-                self.chat_panel.append_output(
-                    "No signals to add (file loaded?)\n")
+                self.chat_panel.append_output("No signals to add (file loaded?)\n")
 
     def _remove_all_traces(self) -> None:
         """Remove all traces from the active panel."""
@@ -6190,14 +6655,14 @@ class MainWindow(QMainWindow):
         if axis_id in (AxisId.Y1, AxisId.Y2) and not config.log_mode:
             axis_str = axis_id.value
             if any(
-                t.expression.lower().startswith('fft(')
-                and t.y_axis.value == axis_str
+                t.expression.lower().startswith("fft(") and t.y_axis.value == axis_str
                 for t in self.state.traces
             ):
                 QMessageBox.information(
-                    self, "Log Y Not Available",
+                    self,
+                    "Log Y Not Available",
                     "FFT traces are already in dB (log scale). "
-                    "Log Y mode is not applicable."
+                    "Log Y mode is not applicable.",
                 )
                 return
 
@@ -6206,6 +6671,7 @@ class MainWindow(QMainWindow):
     def _show_keybindings(self) -> None:
         """Open the Keybindings help dialog (non-modal)."""
         from PyQt6.QtCore import Qt
+
         bindings = self.keybinding_manager.get_all_bindings()
         config_path = self.keybinding_manager._config_path()
         dialog = KeyBindingsDialog(bindings, config_path, self)
@@ -6216,6 +6682,7 @@ class MainWindow(QMainWindow):
     def _show_functions_help(self) -> None:
         """Open the Functions Reference help dialog (non-modal)."""
         from PyQt6.QtCore import Qt
+
         dialog = FunctionsHelpDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setModal(False)
@@ -6224,6 +6691,7 @@ class MainWindow(QMainWindow):
     def _show_measures_help(self) -> None:
         """Open the Measures Reference help dialog (non-modal)."""
         from PyQt6.QtCore import Qt
+
         dialog = MeasuresHelpDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setModal(False)
@@ -6233,6 +6701,7 @@ class MainWindow(QMainWindow):
         """Open a help dialog explaining the vector selection widget (non-modal)."""
         from PyQt6.QtWidgets import QMessageBox
         from PyQt6.QtCore import Qt
+
         msg = (
             "The Vectors selector lets you pick signals from all loaded files.\n\n"
             "  • Check a box to mark a vector for insertion.\n"
@@ -6245,8 +6714,13 @@ class MainWindow(QMainWindow):
             "Checked vectors appear in the Add Trace expression field\n"
             "separated by spaces and can be edited before adding."
         )
-        box = QMessageBox(QMessageBox.Icon.Information, "Help — Select Vectors", msg,
-                          QMessageBox.StandardButton.Ok, self)
+        box = QMessageBox(
+            QMessageBox.Icon.Information,
+            "Help — Select Vectors",
+            msg,
+            QMessageBox.StandardButton.Ok,
+            self,
+        )
         box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         box.setModal(False)
         box.show()
@@ -6255,6 +6729,7 @@ class MainWindow(QMainWindow):
         """Show REPL usage help (non-modal)."""
         from PyQt6.QtCore import Qt
         from pqwave.ui.repl_help_dialog import ReplHelpDialog
+
         dialog = ReplHelpDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setModal(False)
@@ -6264,6 +6739,7 @@ class MainWindow(QMainWindow):
         """Show API command reference (non-modal)."""
         from PyQt6.QtCore import Qt
         from pqwave.ui.api_help_dialog import ApiHelpDialog
+
         dialog = ApiHelpDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setModal(False)
@@ -6272,15 +6748,23 @@ class MainWindow(QMainWindow):
     def _show_mc_guide(self) -> None:
         """Show the Monte Carlo user guide (non-modal)."""
         from PyQt6.QtWidgets import (
-            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+            QDialog,
+            QVBoxLayout,
+            QTextBrowser,
+            QDialogButtonBox,
+            QMessageBox,
         )
         from PyQt6.QtCore import Qt
 
         from pathlib import Path
-        guide_path = Path(__file__).parent.parent.parent / "docs" / "monte_carlo" / "guide.html"
+
+        guide_path = (
+            Path(__file__).parent.parent.parent / "docs" / "monte_carlo" / "guide.html"
+        )
         if not guide_path.exists():
             QMessageBox.warning(
-                self, "Not Found",
+                self,
+                "Not Found",
                 f"Monte Carlo guide not found at:\n{guide_path}",
             )
             return
@@ -6289,7 +6773,8 @@ class MainWindow(QMainWindow):
             html = guide_path.read_text(encoding="utf-8")
         except OSError as e:
             QMessageBox.warning(
-                self, "Error",
+                self,
+                "Error",
                 f"Failed to read Monte Carlo guide:\n{e}",
             )
             return
@@ -6322,15 +6807,23 @@ class MainWindow(QMainWindow):
     def _show_lepton_guide(self) -> None:
         """Show the Lepton-EDA integration user guide (non-modal)."""
         from PyQt6.QtWidgets import (
-            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+            QDialog,
+            QVBoxLayout,
+            QTextBrowser,
+            QDialogButtonBox,
+            QMessageBox,
         )
         from PyQt6.QtCore import Qt
 
         from pathlib import Path
-        guide_path = Path(__file__).parent.parent.parent / "docs" / "lepton" / "guide.html"
+
+        guide_path = (
+            Path(__file__).parent.parent.parent / "docs" / "lepton" / "guide.html"
+        )
         if not guide_path.exists():
             QMessageBox.warning(
-                self, "Not Found",
+                self,
+                "Not Found",
                 f"Lepton-EDA guide not found at:\n{guide_path}",
             )
             return
@@ -6339,7 +6832,8 @@ class MainWindow(QMainWindow):
             html = guide_path.read_text(encoding="utf-8")
         except OSError as e:
             QMessageBox.warning(
-                self, "Error",
+                self,
+                "Error",
                 f"Failed to read Lepton-EDA guide:\n{e}",
             )
             return
@@ -6369,15 +6863,23 @@ class MainWindow(QMainWindow):
     def _show_xschem_guide(self) -> None:
         """Show the Xschem Bridge user guide (non-modal)."""
         from PyQt6.QtWidgets import (
-            QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QMessageBox,
+            QDialog,
+            QVBoxLayout,
+            QTextBrowser,
+            QDialogButtonBox,
+            QMessageBox,
         )
         from PyQt6.QtCore import Qt
 
         from pathlib import Path
-        guide_path = Path(__file__).parent.parent.parent / "docs" / "xschem" / "guide.html"
+
+        guide_path = (
+            Path(__file__).parent.parent.parent / "docs" / "xschem" / "guide.html"
+        )
         if not guide_path.exists():
             QMessageBox.warning(
-                self, "Not Found",
+                self,
+                "Not Found",
                 f"Xschem guide not found at:\n{guide_path}",
             )
             return
@@ -6386,7 +6888,8 @@ class MainWindow(QMainWindow):
             html = guide_path.read_text(encoding="utf-8")
         except OSError as e:
             QMessageBox.warning(
-                self, "Error",
+                self,
+                "Error",
                 f"Failed to read Xschem guide:\n{e}",
             )
             return
@@ -6418,7 +6921,7 @@ class MainWindow(QMainWindow):
         """Return the best fuzzy match for *expr* among *signals*, or None."""
         if not signals:
             return None
-        q = expr.strip().strip('"\'').lower()
+        q = expr.strip().strip("\"'").lower()
         # 1. Case-insensitive exact match
         for s in signals:
             if s.lower() == q:
@@ -6435,9 +6938,14 @@ class MainWindow(QMainWindow):
 
     def _show_scrollable_help(self, title: str, text: str) -> None:
         """Show help text in a scrollable dialog."""
-        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QPlainTextEdit,
-                                      QDialogButtonBox)
+        from PyQt6.QtWidgets import (
+            QDialog,
+            QVBoxLayout,
+            QPlainTextEdit,
+            QDialogButtonBox,
+        )
         from PyQt6.QtGui import QFont
+
         dlg = QDialog(self)
         dlg.setWindowTitle(title)
         dlg.resize(650, 550)
@@ -6468,8 +6976,7 @@ class MainWindow(QMainWindow):
         selected = tm.get_selected_traces()
         if not selected:
             if not tm.traces:
-                QMessageBox.information(self, "No Traces",
-                                        "No traces plotted.")
+                QMessageBox.information(self, "No Traces", "No traces plotted.")
                 return
             selected = [(i, t) for i, t in enumerate(tm.state.traces)]
         tm._show_stats_for_traces(selected)
@@ -6483,21 +6990,26 @@ class MainWindow(QMainWindow):
         selected = tm.get_selected_traces()
         if len(selected) != 2:
             QMessageBox.warning(
-                self, "Select Two Traces",
+                self,
+                "Select Two Traces",
                 "Select one voltage and one current trace "
-                "via Ctrl+click in the legend, then try again."
+                "via Ctrl+click in the legend, then try again.",
             )
             return
         v_trace = selected[0][1]
         i_trace = selected[1][1]
         xmin, xmax = panel.plot_widget.plotItem.vb.viewRange()[0]
         if tm.x_log:
-            xmin, xmax = 10.0 ** xmin, 10.0 ** xmax
+            xmin, xmax = 10.0**xmin, 10.0**xmax
         dlg = PowerAnalysisDialog(self)
         dlg.set_data(
-            v_trace.name, i_trace.name,
-            v_trace.y_data, i_trace.y_data, v_trace.x_data,
-            xmin, xmax,
+            v_trace.name,
+            i_trace.name,
+            v_trace.y_data,
+            i_trace.y_data,
+            v_trace.x_data,
+            xmin,
+            xmax,
         )
         dlg.show()
 
@@ -6512,6 +7024,7 @@ class MainWindow(QMainWindow):
             return
 
         from pqwave.ui.histogram_dialog import HistogramDialog
+
         dlg = HistogramDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -6526,26 +7039,36 @@ class MainWindow(QMainWindow):
         y_data = trace.y_data if trace.y_data is not None else np.array([])
 
         # Filter to visible X-range if no explicit range given
-        if config.range is None and trace.x_data is not None and len(trace.x_data) == len(y_data):
+        if (
+            config.range is None
+            and trace.x_data is not None
+            and len(trace.x_data) == len(y_data)
+        ):
             x_range = panel.plot_widget.getViewBox().viewRange()[0]
             mask = (trace.x_data >= x_range[0]) & (trace.x_data <= x_range[1])
             y_data = y_data[mask]
 
         from pqwave.analysis.histogram import compute_histogram
+
         result = compute_histogram(
-            y_data, bins=config.bins, range=config.range, norm=config.norm,
+            y_data,
+            bins=config.bins,
+            range=config.range,
+            norm=config.norm,
         )
 
         new_panel = self.panel_grid.split_panel(
-            self.panel_grid.active_panel_id, orientation="vertical")
+            self.panel_grid.active_panel_id, orientation="vertical"
+        )
         if new_panel is None:
             return
 
         import pyqtgraph as pg
-        width = (np.diff(result["edges"])[0]
-                 if len(result["edges"]) > 1 else 1.0)
+
+        width = np.diff(result["edges"])[0] if len(result["edges"]) > 1 else 1.0
         bar_item = pg.BarGraphItem(
-            x=result["centers"], height=result["counts"],
+            x=result["centers"],
+            height=result["counts"],
             width=width,
             brush=(100, 149, 237, 180),
         )
@@ -6565,9 +7088,11 @@ class MainWindow(QMainWindow):
         var_names = self.raw_file.get_variable_names(dataset_idx)
 
         from pqwave.analysis.nyquist import detect_nyquist_vectors
+
         auto_pair = detect_nyquist_vectors(var_names)
 
         from pqwave.ui.nyquist_vector_dialog import NyquistVectorDialog
+
         dlg = NyquistVectorDialog(var_names, self, auto_pair=auto_pair)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -6577,21 +7102,22 @@ class MainWindow(QMainWindow):
         real_data = self.raw_file.get_variable_data(real_var, dataset_idx)
         imag_data = self.raw_file.get_variable_data(imag_var, dataset_idx)
         if real_data is None or imag_data is None:
-            QMessageBox.warning(self, "Data Error",
-                                "Could not read vector data.")
+            QMessageBox.warning(self, "Data Error", "Could not read vector data.")
             return
 
         from pqwave.analysis.nyquist import compute_nyquist_trace
+
         result = compute_nyquist_trace(real=real_data, imag=imag_data)
 
         if self.panel_grid.panel_count >= 4:
             QMessageBox.information(
-                self, "Max Panels",
-                "Maximum 4 panels reached. Close a panel first.")
+                self, "Max Panels", "Maximum 4 panels reached. Close a panel first."
+            )
             return
 
         new_panel = self.panel_grid.split_panel(
-            self.panel_grid.active_panel_id, orientation="vertical")
+            self.panel_grid.active_panel_id, orientation="vertical"
+        )
         if new_panel is None:
             return
 
@@ -6600,7 +7126,8 @@ class MainWindow(QMainWindow):
         pw = new_panel.plot_widget
 
         curve = pg.PlotCurveItem(
-            result["x"], result["y"],
+            result["x"],
+            result["y"],
             pen=pg.mkPen("cyan", width=1),
             skipFiniteCheck=True,
         )
@@ -6623,9 +7150,11 @@ class MainWindow(QMainWindow):
         var_names = self.raw_file.get_variable_names(dataset_idx)
 
         from pqwave.analysis.polar import detect_polar_vectors
+
         auto_pair = detect_polar_vectors(var_names)
 
         from pqwave.ui.polar_dialog import PolarVectorDialog
+
         dlg = PolarVectorDialog(var_names, self, auto_pair=auto_pair)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -6634,21 +7163,22 @@ class MainWindow(QMainWindow):
         mag_data = self.raw_file.get_variable_data(mag_var, dataset_idx)
         phase_data = self.raw_file.get_variable_data(phase_var, dataset_idx)
         if mag_data is None or phase_data is None:
-            QMessageBox.warning(self, "Data Error",
-                                "Could not read vector data.")
+            QMessageBox.warning(self, "Data Error", "Could not read vector data.")
             return
 
         from pqwave.analysis.polar import compute_polar_trace
+
         result = compute_polar_trace(mag=mag_data, phase=phase_data)
 
         if self.panel_grid.panel_count >= 4:
             QMessageBox.information(
-                self, "Max Panels",
-                "Maximum 4 panels reached. Close a panel first.")
+                self, "Max Panels", "Maximum 4 panels reached. Close a panel first."
+            )
             return
 
         new_panel = self.panel_grid.split_panel(
-            self.panel_grid.active_panel_id, orientation="vertical")
+            self.panel_grid.active_panel_id, orientation="vertical"
+        )
         if new_panel is None:
             return
 
@@ -6661,7 +7191,8 @@ class MainWindow(QMainWindow):
         render_polar_grid(pw, n_rings=5, n_radials=12)
 
         curve = pg.PlotCurveItem(
-            result["x"], result["y"],
+            result["x"],
+            result["y"],
             pen=pg.mkPen("cyan", width=1),
             skipFiniteCheck=True,
         )
@@ -6693,8 +7224,7 @@ class MainWindow(QMainWindow):
         z0 = dlg.reference_impedance()
         z_data = self.raw_file.get_variable_data(var_name, dataset_idx)
         if z_data is None:
-            QMessageBox.warning(self, "Data Error",
-                                "Could not read vector data.")
+            QMessageBox.warning(self, "Data Error", "Could not read vector data.")
             return
 
         from pqwave.analysis.smith import (
@@ -6702,17 +7232,19 @@ class MainWindow(QMainWindow):
             smith_grid_circles,
             clamp_gamma,
         )
+
         gamma = compute_reflection_coefficient(z_data.astype(np.complex128), z0)
         gamma = clamp_gamma(gamma)
 
         if self.panel_grid.panel_count >= 4:
             QMessageBox.information(
-                self, "Max Panels",
-                "Maximum 4 panels reached. Close a panel first.")
+                self, "Max Panels", "Maximum 4 panels reached. Close a panel first."
+            )
             return
 
         new_panel = self.panel_grid.split_panel(
-            self.panel_grid.active_panel_id, orientation="vertical")
+            self.panel_grid.active_panel_id, orientation="vertical"
+        )
         if new_panel is None:
             return
 
@@ -6738,9 +7270,7 @@ class MainWindow(QMainWindow):
             path = QPainterPath()
             path.addEllipse(cx - radius, cy - radius, 2 * radius, 2 * radius)
             item = QGraphicsPathItem(path)
-            item.setPen(
-                QPen(QColor(60, 60, 60), 1, pg.QtCore.Qt.PenStyle.DashLine)
-            )
+            item.setPen(QPen(QColor(60, 60, 60), 1, pg.QtCore.Qt.PenStyle.DashLine))
             pw.addItem(item)
 
         # Plot trace
@@ -6751,6 +7281,41 @@ class MainWindow(QMainWindow):
             skipFiniteCheck=True,
         )
         pw.addItem(curve)
+
+        # Create cursor readout label anchored to the Smith panel
+        cursor_label = pg.TextItem("", anchor=(0, 1), color=(200, 200, 200))
+        cursor_label.setPos(-1.15, 1.15)
+        pw.addItem(cursor_label)
+
+        # Store z0 and cursor_label on the panel for access in signal handler
+        new_panel._smith_z0 = z0
+        new_panel._smith_cursor_label = cursor_label
+
+        # Connect cursor signal
+        def _on_smith_cursor_xa_changed(value):
+            """Update Smith cursor readout: Gamma, z, Z."""
+            if not hasattr(new_panel, "_smith_z0"):
+                return
+            # value is Re(Gamma) at cursor X position
+            # Find the nearest trace point
+            gamma_re = value
+            distances = np.abs(gamma.real - gamma_re)
+            idx = np.argmin(distances)
+            gamma_pt = gamma[idx]
+            gamma_mag = np.abs(gamma_pt)
+            gamma_phase = np.angle(gamma_pt, deg=True)
+            # Gamma -> z: z = (1+Gamma) / (1-Gamma)
+            zn = (1 + gamma_pt) / (1 - gamma_pt)
+            z_denorm = zn * z0
+            readout = (
+                f"Γ = {gamma_mag:.3f} ∠ {gamma_phase:.1f}°\n"
+                f"z = {zn.real:.3f} + j{zn.imag:.3f}\n"
+                f"Z = {z_denorm.real:.1f} + j{z_denorm.imag:.1f} Ω"
+            )
+            cursor_label.setText(readout)
+
+        pw.cursor_xa_changed.connect(_on_smith_cursor_xa_changed)
+
         pw.set_axis_label("X", "Re(Gamma)")
         pw.set_axis_label("Y1", "Im(Gamma)")
         pw.getViewBox().setAspectLocked(True, ratio=1.0)
@@ -6771,9 +7336,11 @@ class MainWindow(QMainWindow):
         var_names = self.raw_file.get_variable_names(dataset_idx)
 
         from pqwave.analysis.bode import detect_bode_vectors
+
         auto_pair = detect_bode_vectors(var_names)
 
         from pqwave.ui.bode_dialog import BodeDialog
+
         dlg = BodeDialog(var_names, self, auto_pair=auto_pair)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -6783,8 +7350,7 @@ class MainWindow(QMainWindow):
         mag_data = self.raw_file.get_variable_data(mag_var, dataset_idx)
         phase_data = self.raw_file.get_variable_data(phase_var, dataset_idx)
         if mag_data is None or phase_data is None:
-            QMessageBox.warning(self, "Data Error",
-                                "Could not read vector data.")
+            QMessageBox.warning(self, "Data Error", "Could not read vector data.")
             return
 
         freq_data = None
@@ -6792,8 +7358,8 @@ class MainWindow(QMainWindow):
             freq_data = self.raw_file.get_variable_data(freq_var, dataset_idx)
 
         from pqwave.analysis.bode import compute_bode
-        result = compute_bode(mag_db=mag_data, phase_deg=phase_data,
-                              freq=freq_data)
+
+        result = compute_bode(mag_db=mag_data, phase_deg=phase_data, freq=freq_data)
 
         gain_db = result["gain_db"]
         phase_deg = result["phase_deg"]
@@ -6807,7 +7373,8 @@ class MainWindow(QMainWindow):
             return
 
         phase_panel = self.panel_grid.split_panel(
-            gain_panel.panel_id, orientation="vertical")
+            gain_panel.panel_id, orientation="vertical"
+        )
         if phase_panel is None:
             return
 
@@ -6816,7 +7383,8 @@ class MainWindow(QMainWindow):
         # --- Gain panel (top) ---
         gain_pw = gain_panel.plot_widget
         gain_curve = pg.PlotCurveItem(
-            freq, gain_db,
+            freq,
+            gain_db,
             pen=pg.mkPen("cyan", width=1),
             skipFiniteCheck=True,
         )
@@ -6829,7 +7397,8 @@ class MainWindow(QMainWindow):
         # --- Phase panel (bottom) ---
         phase_pw = phase_panel.plot_widget
         phase_curve = pg.PlotCurveItem(
-            freq, phase_deg,
+            freq,
+            phase_deg,
             pen=pg.mkPen("cyan", width=1),
             skipFiniteCheck=True,
         )
@@ -6842,13 +7411,17 @@ class MainWindow(QMainWindow):
         # Force initial X-axis sync, then keep synced on future zoom/pan
         phase_pw.plotItem.setXRange(*gain_pw.plotItem.vb.viewRange()[0], padding=0)
         gain_pw.plotItem.vb.sigXRangeChanged.connect(
-            lambda: phase_pw.plotItem.setXRange(*gain_pw.plotItem.vb.viewRange()[0], padding=0))
+            lambda: phase_pw.plotItem.setXRange(
+                *gain_pw.plotItem.vb.viewRange()[0], padding=0
+            )
+        )
 
     def _on_mc_stats(self):
         """Handle MC Statistics menu action."""
         if not self.state.mc_collection:
             return
         from pqwave.analysis.multi_run import compute_cross_run_stats
+
         mc = self.state.mc_collection
         panel = self.panel_grid.get_active_panel()
         if panel is None:
@@ -6864,6 +7437,7 @@ class MainWindow(QMainWindow):
             return
         stats = compute_cross_run_stats(data)
         from pqwave.ui.trace_analysis_dialog import TraceAnalysisDialog
+
         dialog = TraceAnalysisDialog(self)
         metrics = {
             "Mean (μ)": f"{float(np.mean(stats['mean'])):.4g}",
@@ -6878,6 +7452,7 @@ class MainWindow(QMainWindow):
     def _on_mc_histogram(self):
         """Handle MC Histogram menu action."""
         from pqwave.ui.mc_histogram_dialog import MCHistogramDialog
+
         if not self.state.mc_collection:
             return
         dialog = MCHistogramDialog(self)
@@ -6887,13 +7462,20 @@ class MainWindow(QMainWindow):
             if data is None:
                 return
             from pqwave.analysis.multi_run import compute_run_measurements
+
             values = compute_run_measurements(data, config["measure"])
-            self._show_mc_histogram_plot(config["signal"], config["measure"], values,
-                                          bins=config["bins"], range=config["range"])
+            self._show_mc_histogram_plot(
+                config["signal"],
+                config["measure"],
+                values,
+                bins=config["bins"],
+                range=config["range"],
+            )
 
     def _on_mc_yield(self):
         """Handle MC Yield menu action."""
         from pqwave.ui.mc_yield_dialog import MCYieldDialog
+
         if not self.state.mc_collection:
             return
         dialog = MCYieldDialog(self)
@@ -6903,12 +7485,16 @@ class MainWindow(QMainWindow):
             if data is None:
                 return
             from pqwave.analysis.multi_run import compute_yield
-            result = compute_yield(data, config["low"], config["high"], config["measure"])
+
+            result = compute_yield(
+                data, config["low"], config["high"], config["measure"]
+            )
             self._show_yield_result(config["signal"], config, result)
 
     def _on_mc_scatter(self):
         """Handle MC Scatter menu action."""
         from pqwave.ui.mc_scatter_dialog import MCScatterDialog
+
         if not self.state.mc_collection:
             return
         dialog = MCScatterDialog(self, self.state.mc_collection.parameters)
@@ -6918,16 +7504,19 @@ class MainWindow(QMainWindow):
             if data is None:
                 return
             from pqwave.analysis.multi_run import compute_run_measurements
+
             measurements = compute_run_measurements(data, config["measure"])
             param_values_full = self.state.mc_collection.parameters.get(config["param"])
             if param_values_full is None:
                 self.statusBar().showMessage(
-                    f"Parameter '{config['param']}' not annotated", 3000)
+                    f"Parameter '{config['param']}' not annotated", 3000
+                )
                 return
             # Filter param_values to match active_runs (measurements already filtered)
             active = self.state.mc_collection.active_runs
-            param_values = [param_values_full[i] for i in active
-                            if i < len(param_values_full)]
+            param_values = [
+                param_values_full[i] for i in active if i < len(param_values_full)
+            ]
             # Ensure lengths match (truncate longer array)
             n = min(len(measurements), len(param_values))
             self._show_scatter_plot(config, measurements[:n], param_values[:n])
@@ -6935,7 +7524,9 @@ class MainWindow(QMainWindow):
     def _on_mc_sensitivity(self):
         """Handle MC Sensitivity menu action."""
         if not self.state.mc_collection or not self.state.mc_collection.has_parameters:
-            self.statusBar().showMessage("No parameters annotated for sensitivity analysis", 3000)
+            self.statusBar().showMessage(
+                "No parameters annotated for sensitivity analysis", 3000
+            )
             return
         panel = self.panel_grid.get_active_panel()
         if panel is None:
@@ -6948,11 +7539,16 @@ class MainWindow(QMainWindow):
         data = self._get_mc_signal_data(signal_name)
         if data is None:
             return
-        from pqwave.analysis.multi_run import compute_run_measurements, compute_sensitivity
+        from pqwave.analysis.multi_run import (
+            compute_run_measurements,
+            compute_sensitivity,
+        )
+
         measurements = compute_run_measurements(data, "max")
-        sensitivity = compute_sensitivity(measurements, {
-            k: np.array(v) for k, v in self.state.mc_collection.parameters.items()
-        })
+        sensitivity = compute_sensitivity(
+            measurements,
+            {k: np.array(v) for k, v in self.state.mc_collection.parameters.items()},
+        )
         self._show_sensitivity_result(signal_name, sensitivity)
 
     def _on_mc_worst(self):
@@ -6968,6 +7564,7 @@ class MainWindow(QMainWindow):
         if data is None:
             return
         from pqwave.analysis.multi_run import compute_worst_cases
+
         mc = self.state.mc_collection
         worst = compute_worst_cases(data, mc.nominal_index, n=5)
         self._show_worst_cases_result(signal_name, worst, mc)
@@ -6975,12 +7572,14 @@ class MainWindow(QMainWindow):
     def _on_mc_correlation(self):
         """Open the MC Correlation Tools dialog."""
         from pqwave.ui.correlation_editor import CorrelationMatrixEditor
+
         dialog = CorrelationMatrixEditor(self, mc_collection=self.state.mc_collection)
         dialog.exec()
 
     def _get_mc_signal_data(self, signal_name: str):
         """Get 2D data array (n_runs, n_points) for an MC signal group."""
         import numpy as np
+
         mc = self.state.mc_collection
         if mc is None or mc.active_count == 0:
             return None
@@ -6992,7 +7591,7 @@ class MainWindow(QMainWindow):
                 ds = self.state.datasets[ds_idx]
                 var = ds.get_variable(signal_name)
                 if var is not None:
-                    y = var.y_data if hasattr(var, 'y_data') else np.array(var.data)
+                    y = var.y_data if hasattr(var, "y_data") else np.array(var.data)
                     run_data.append(y)
         if not run_data:
             return None
@@ -7000,13 +7599,14 @@ class MainWindow(QMainWindow):
         n_points = max(len(y) for y in run_data)
         data = np.zeros((len(run_data), n_points))
         for i, y in enumerate(run_data):
-            data[i, :len(y)] = y
+            data[i, : len(y)] = y
         return data
 
     def _show_mc_histogram_plot(self, signal, measure, values, bins=50, range=None):
         """Show histogram of MC measurement values."""
         from pqwave.analysis.histogram import compute_histogram
         import numpy as np
+
         if range and range[0] == range[1]:
             range = None
         hist = compute_histogram(values, bins=bins, norm="count", range=range)
@@ -7018,8 +7618,13 @@ class MainWindow(QMainWindow):
         if panel is None:
             return
         from pyqtgraph import BarGraphItem
-        bar = BarGraphItem(x=hist["centers"], height=hist["counts"],
-                           width=widths, brush=(100, 150, 255, 150))
+
+        bar = BarGraphItem(
+            x=hist["centers"],
+            height=hist["counts"],
+            width=widths,
+            brush=(100, 150, 255, 150),
+        )
         panel.plot_widget.addItem(bar)
         panel.plot_widget.set_axis_label("X", f"{measure}({signal})")
         panel.plot_widget.set_axis_label("Y1", "Count")
@@ -7031,11 +7636,15 @@ class MainWindow(QMainWindow):
             avg_yield = float(np.mean(result))
             self.statusBar().showMessage(
                 f"Yield ({signal}): avg {avg_yield:.1f}% — "
-                f"range [{config['low']:.2g}, {config['high']:.2g}]", 8000)
+                f"range [{config['low']:.2g}, {config['high']:.2g}]",
+                8000,
+            )
         else:
             self.statusBar().showMessage(
                 f"Yield ({signal}): {result:.1f}% — "
-                f"range [{config['low']:.2g}, {config['high']:.2g}]", 8000)
+                f"range [{config['low']:.2g}, {config['high']:.2g}]",
+                8000,
+            )
 
     def _show_scatter_plot(self, config, measurements, param_values):
         """Show scatter plot of measurement vs parameter."""
@@ -7045,19 +7654,31 @@ class MainWindow(QMainWindow):
         if panel is None:
             return
         from pyqtgraph import PlotCurveItem
-        curve = PlotCurveItem(param_values, measurements, pen=None,
-                               symbol='o', symbolSize=8, symbolBrush=(255, 80, 80))
+
+        curve = PlotCurveItem(
+            param_values,
+            measurements,
+            pen=None,
+            symbol="o",
+            symbolSize=8,
+            symbolBrush=(255, 80, 80),
+        )
         panel.plot_widget.addItem(curve)
         panel.plot_widget.set_axis_label("X", config["param"])
-        panel.plot_widget.set_axis_label("Y1", f"{config['measure']}({config['signal']})")
+        panel.plot_widget.set_axis_label(
+            "Y1", f"{config['measure']}({config['signal']})"
+        )
         panel.plot_widget.autoRange()
 
     def _show_sensitivity_result(self, signal, sensitivity):
         """Show sensitivity ranking in a simple message box."""
         lines = [f"Sensitivity of max({signal}):", ""]
         for item in sensitivity:
-            lines.append(f"  {item['param']}: r = {item['r']:.4f} (p = {item['p']:.4f})")
+            lines.append(
+                f"  {item['param']}: r = {item['r']:.4f} (p = {item['p']:.4f})"
+            )
         from PyQt6.QtWidgets import QMessageBox
+
         QMessageBox.information(self, "MC Sensitivity", "\n".join(lines))
 
     def _show_worst_cases_result(self, signal, worst, mc):
@@ -7072,6 +7693,7 @@ class MainWindow(QMainWindow):
             if param_str:
                 lines.append(f"    params: {param_str}")
         from PyQt6.QtWidgets import QMessageBox
+
         QMessageBox.information(self, "MC Worst Cases", "\n".join(lines))
 
     def _toggle_digital_analog(self) -> None:
@@ -7094,20 +7716,23 @@ class MainWindow(QMainWindow):
         selected = panel.trace_manager.get_selected_traces()
         if not selected:
             QMessageBox.information(
-                self, "No Trace Selected",
-                "Select a trace first (left-click its legend), then use the Eye Diagram shortcut.")
+                self,
+                "No Trace Selected",
+                "Select a trace first (left-click its legend), then use the Eye Diagram shortcut.",
+            )
             return
         _idx, trace = selected[0]
 
         if self.panel_grid.panel_count >= PanelGrid.MAX_PANELS:
             QMessageBox.information(
-                self, "Max Panels",
-                "Maximum 4 panels reached. Close a panel first.")
+                self, "Max Panels", "Maximum 4 panels reached. Close a panel first."
+            )
             return
 
         # Split the active panel horizontally (bypass _sync_split_x_axes)
         new_panel = self.panel_grid.split_panel(
-            self.panel_grid.active_panel_id, orientation="horizontal")
+            self.panel_grid.active_panel_id, orientation="horizontal"
+        )
         if new_panel is None:
             return
 
@@ -7149,8 +7774,14 @@ class MainWindow(QMainWindow):
             if eye_cfg.mode == "overlay":
                 render_overlay(pw, y_data, eye_cfg.window_size, eye_cfg.offset)
             else:
-                render_persistence(pw, y_data, eye_cfg.window_size,
-                                   eye_cfg.offset, eye_cfg.fuzz, ybounds)
+                render_persistence(
+                    pw,
+                    y_data,
+                    eye_cfg.window_size,
+                    eye_cfg.offset,
+                    eye_cfg.fuzz,
+                    ybounds,
+                )
         except Exception:
             logger.exception("Failed to render eye diagram")
             return False
@@ -7165,15 +7796,16 @@ class MainWindow(QMainWindow):
         pstate = self.state.panels.get(panel.panel_id)
         if pstate is not None:
             pstate.axis_configs[AxisId.X].label = (
-                'Sample' if eye_cfg.mode == 'overlay' else 'UI')
-            pstate.axis_configs[AxisId.Y1].label = 'Amplitude'
+                "Sample" if eye_cfg.mode == "overlay" else "UI"
+            )
+            pstate.axis_configs[AxisId.Y1].label = "Amplitude"
         return True
 
     def _on_eye_diagram_settings_changed(self) -> None:
         """Re-render the eye diagram when settings change in the Settings dialog."""
-        y_data = getattr(self, '_eye_diagram_y_data', None)
-        panel_id = getattr(self, '_eye_diagram_panel_id', None)
-        trace_name = getattr(self, '_eye_diagram_trace_name', '')
+        y_data = getattr(self, "_eye_diagram_y_data", None)
+        panel_id = getattr(self, "_eye_diagram_panel_id", None)
+        trace_name = getattr(self, "_eye_diagram_trace_name", "")
         if y_data is None or panel_id is None:
             return
         panel = self.panel_grid.get_panel(panel_id)
