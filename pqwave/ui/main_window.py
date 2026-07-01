@@ -2385,8 +2385,11 @@ class MainWindow(QMainWindow):
 
         # Temperature range and analysis type are read for future use
         # (tempco adjustment, analysis-type-aware simulation).
-        _ = dlg.get_temperature_range()
-        _ = dlg.get_analysis_type()
+        temp_range = dlg.get_temperature_range()
+        analysis_type = dlg.get_analysis_type()
+        # TODO: wire analysis_type selector — currently only .op parsing
+        #       is implemented. For .ac / .tran, use different output parsing.
+        # TODO: CSV/waveform export from spec (plot worst-case waveforms).
         netlist_path = dlg.get_netlist_path()
 
         if not netlist_path or not os.path.isfile(netlist_path):
@@ -2394,6 +2397,25 @@ class MainWindow(QMainWindow):
                 self, "Invalid Netlist", "Select a valid SPICE netlist file."
             )
             return
+
+        # Apply tempco to nominal values before corner enumeration
+        t_min, t_max, t_nom = temp_range
+        for refdes, comp in components.items():
+            if comp.get("tempco", 0.0) != 0.0:
+                # Use midpoint of temperature range for tempco adjustment
+                t_actual = (t_min + t_max) / 2.0
+                from pqwave.analysis.worst_case import apply_tempco
+
+                comp["nominal"] = apply_tempco(
+                    comp["nominal"], comp["tempco"], t_actual, t_nom
+                )
+
+        # If N > 8, suggest sensitivity pre-filter (requires sensitivity data)
+        if len(components) > 8:
+            # TODO: wire sensitivity pre-filter — would need to run a
+            #       small-signal sensitivity simulation first, then call
+            #       rank_by_sensitivity() to select top-8 components.
+            pass
 
         with open(netlist_path, "r") as f:
             netlist_text = f.read()
@@ -4981,12 +5003,16 @@ class MainWindow(QMainWindow):
                         return
 
             # Use the session API for the rename (includes active trace check)
-            result = self.session_api.execute(
-                f"rename_vector({dataset_idx}, '{old_name}', '{new_name}')"
+            from pqwave.session.api import _cmd_rename_vector
+
+            result = _cmd_rename_vector(
+                self.session_api, dataset_idx, old_name, new_name
             )
-            if not result.get("ok"):
+            if result.get("status") != "ok":
                 QMessageBox.warning(
-                    self, "Rename Failed", result.get("error", "Unknown error")
+                    self,
+                    "Rename Failed",
+                    result.get("message", "Unknown error"),
                 )
                 return
 
@@ -7190,13 +7216,49 @@ class MainWindow(QMainWindow):
 
         render_polar_grid(pw, n_rings=5, n_radials=12)
 
-        curve = pg.PlotCurveItem(
+        # Use PlotDataItem per CLAUDE.md performance rules
+        curve = pg.PlotDataItem(
             result["x"],
             result["y"],
+            symbol=None,
             pen=pg.mkPen("cyan", width=1),
             skipFiniteCheck=True,
         )
         pw.addItem(curve)
+
+        # Create cursor readout label anchored to the polar panel
+        cursor_label = pg.TextItem("", anchor=(0, 1), color=(200, 200, 200))
+        cursor_label.setPos(-1.15, 1.15)
+        pw.addItem(cursor_label)
+        new_panel._polar_cursor_label = cursor_label
+
+        # Connect cursor signal
+        x_data = result["x"]
+        y_data = result["y"]
+
+        def _on_polar_cursor_xa_changed(value):
+            """Update polar cursor readout with polar + Cartesian."""
+            if not hasattr(new_panel, "_polar_cursor_label"):
+                return
+            # Find the nearest trace point
+            distances = np.abs(x_data - value)
+            idx = np.argmin(distances)
+            px = x_data[idx]
+            py = y_data[idx]
+            mag = np.sqrt(px * px + py * py)
+            phase_deg = np.degrees(np.arctan2(py, px))
+            # Cartesian sign formatting
+            imag_str = (
+                f" + j{py:.3f}" if py >= 0 else f" - j{abs(py):.3f}"
+            )
+            readout = (
+                f"mag = {mag:.3f}  phase = {phase_deg:.1f}°\n"
+                f"z = {px:.3f}{imag_str}"
+            )
+            cursor_label.setText(readout)
+
+        pw.cursor_xa_changed.connect(_on_polar_cursor_xa_changed)
+
         pw.set_axis_label("X", "Real (mag.cos(theta))")
         pw.set_axis_label("Y1", "Imag (mag.sin(theta))")
         pw.getViewBox().setAspectLocked(True, ratio=1.0)
@@ -7266,17 +7328,23 @@ class MainWindow(QMainWindow):
             item.setPen(grid_pen)
             pw.addItem(item)
 
+        # Unit-circle boundary for clipping X-arcs
+        unit_circle = QPainterPath()
+        unit_circle.addEllipse(-1, -1, 2, 2)
+
         for x_str, (cx, cy, radius) in grid["x_arcs"].items():
             path = QPainterPath()
             path.addEllipse(cx - radius, cy - radius, 2 * radius, 2 * radius)
-            item = QGraphicsPathItem(path)
+            clipped = path.intersected(unit_circle)
+            item = QGraphicsPathItem(clipped)
             item.setPen(QPen(QColor(60, 60, 60), 1, pg.QtCore.Qt.PenStyle.DashLine))
             pw.addItem(item)
 
-        # Plot trace
-        curve = pg.PlotCurveItem(
+        # Plot trace — use PlotDataItem per CLAUDE.md performance rules
+        curve = pg.PlotDataItem(
             gamma.real,
             gamma.imag,
+            symbol=None,
             pen=pg.mkPen("cyan", width=1),
             skipFiniteCheck=True,
         )
@@ -7307,10 +7375,15 @@ class MainWindow(QMainWindow):
             # Gamma -> z: z = (1+Gamma) / (1-Gamma)
             zn = (1 + gamma_pt) / (1 - gamma_pt)
             z_denorm = zn * z0
+            # Properly format imaginary sign instead of hardcoding '+ j'
+            zn_imag = zn.imag
+            zd_imag = z_denorm.imag
+            zn_imag_str = f" + j{zn_imag:.3f}" if zn_imag >= 0 else f" - j{abs(zn_imag):.3f}"
+            zd_imag_str = f" + j{zd_imag:.1f}" if zd_imag >= 0 else f" - j{abs(zd_imag):.1f}"
             readout = (
                 f"Γ = {gamma_mag:.3f} ∠ {gamma_phase:.1f}°\n"
-                f"z = {zn.real:.3f} + j{zn.imag:.3f}\n"
-                f"Z = {z_denorm.real:.1f} + j{z_denorm.imag:.1f} Ω"
+                f"z = {zn.real:.3f}{zn_imag_str}\n"
+                f"Z = {z_denorm.real:.1f}{zd_imag_str} Ω"
             )
             cursor_label.setText(readout)
 

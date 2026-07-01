@@ -2,6 +2,7 @@
 
 Follows the same pattern as pqwave.analysis.nyquist.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -45,19 +46,26 @@ def detect_polar_vectors(var_names: list[str]) -> tuple[str, str] | None:
         ``(mag_var, phase_var)`` tuple or ``None``.
     """
     mag_candidates = [
-        v for v in var_names
+        v
+        for v in var_names
         if v.endswith("_mag") or "mag(" in v.lower() or v.endswith("_magnitude")
     ]
     phase_candidates = [
-        v for v in var_names
-        if v.endswith("_phase") or "phase(" in v.lower()
+        v for v in var_names if v.endswith("_phase") or "phase(" in v.lower()
     ]
 
     for mag in mag_candidates:
-        base = mag.replace("_magnitude", "").replace("_mag", "")
+        base = mag
+        # Strip known suffixes — use rsplit to avoid corrupting partial matches
+        for suffix in ("_magnitude", "_mag"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
         base = base.replace("mag(", "").rstrip(")")
         for phase in phase_candidates:
-            phase_base = phase.replace("_phase", "").replace("phase(", "").rstrip(")")
+            phase_base = phase
+            if phase_base.endswith("_phase"):
+                phase_base = phase_base[: -len("_phase")]
+            phase_base = phase_base.replace("phase(", "").rstrip(")")
             if base == phase_base:
                 return (mag, phase)
 

@@ -3,14 +3,13 @@
 Provides format_complex() for displaying complex values in polar (|Z|∠θ)
 or rectangular (R+jX) format with SI prefixes.
 """
+
 from __future__ import annotations
 
 import math
 
 
-def format_complex(
-    value: complex, unit: str = "", mode: str = "polar"
-) -> str:
+def format_complex(value: complex, unit: str = "", mode: str = "polar") -> str:
     """Format a complex number for display.
 
     Args:
@@ -59,22 +58,24 @@ def _format_with_prefix(value: float, unit: str) -> str:
     sign = "-" if value < 0 else ""
 
     if abs_val >= 1e12:
-        return f"{sign}{abs_val/1e12:.3g} T{unit}"
+        result = f"{sign}{abs_val/1e12:.3g} T{unit}"
     elif abs_val >= 1e9:
-        return f"{sign}{abs_val/1e9:.3g} G{unit}"
+        result = f"{sign}{abs_val/1e9:.3g} G{unit}"
     elif abs_val >= 1e6:
-        return f"{sign}{abs_val/1e6:.3g} M{unit}"
+        result = f"{sign}{abs_val/1e6:.3g} M{unit}"
     elif abs_val >= 1e3:
-        return f"{sign}{abs_val/1e3:.3g} k{unit}"
+        result = f"{sign}{abs_val/1e3:.3g} k{unit}"
     elif abs_val >= 1.0:
-        return f"{sign}{abs_val:.3g} {unit}".strip() if unit else f"{sign}{abs_val:.3g}"
+        result = f"{sign}{abs_val:.3g} {unit}" if unit else f"{sign}{abs_val:.3g}"
     elif abs_val >= 1e-3:
-        return f"{sign}{abs_val*1e3:.3g} m{unit}"
+        result = f"{sign}{abs_val*1e3:.3g} m{unit}"
     elif abs_val >= 1e-6:
-        return f"{sign}{abs_val*1e6:.3g} µ{unit}"
+        result = f"{sign}{abs_val*1e6:.3g} µ{unit}"
     elif abs_val >= 1e-9:
-        return f"{sign}{abs_val*1e9:.3g} n{unit}"
+        result = f"{sign}{abs_val*1e9:.3g} n{unit}"
     elif abs_val >= 1e-12:
-        return f"{sign}{abs_val*1e12:.3g} p{unit}"
+        result = f"{sign}{abs_val*1e12:.3g} p{unit}"
     else:
-        return f"{sign}{abs_val:.3g} {unit}".strip() if unit else f"{sign}{abs_val:.3g}"
+        result = f"{sign}{abs_val:.3g} {unit}" if unit else f"{sign}{abs_val:.3g}"
+
+    return result.rstrip()

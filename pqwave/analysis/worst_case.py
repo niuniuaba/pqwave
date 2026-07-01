@@ -2,6 +2,7 @@
 
 Pure-numpy where applicable; no Qt dependencies.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -55,9 +56,7 @@ def apply_tempco(
     return nominal * (1.0 + tempco * (t_actual - t_nom))
 
 
-def rank_by_sensitivity(
-    sensitivities: dict[str, float], top_n: int = 8
-) -> list[str]:
+def rank_by_sensitivity(sensitivities: dict[str, float], top_n: int = 8) -> list[str]:
     """Rank components by absolute sensitivity (highest first).
 
     Args:
@@ -67,9 +66,7 @@ def rank_by_sensitivity(
     Returns:
         List of refdes sorted by decreasing sensitivity.
     """
-    sorted_items = sorted(
-        sensitivities.items(), key=lambda x: abs(x[1]), reverse=True
-    )
+    sorted_items = sorted(sensitivities.items(), key=lambda x: abs(x[1]), reverse=True)
     return [refdes for refdes, _ in sorted_items[:top_n]]
 
 
@@ -92,7 +89,7 @@ def modify_netlist(netlist: str, corner: dict[str, float]) -> str:
         for refdes, value in corner.items():
             # Match: <refdes> <node1> <node2> <value> [optional rest]
             pattern = re.compile(
-                rf'^({re.escape(refdes)})\s+(\S+)\s+(\S+)\s+(\S+)',
+                rf"^({re.escape(refdes)})\s+(\S+)\s+(\S+)\s+(\S+)",
                 re.IGNORECASE,
             )
             match = pattern.match(line.strip())
@@ -120,7 +117,8 @@ def parse_op_output(stdout: str, target: str | None = None) -> float | None:
         Float value or None if no match found.
     """
     pattern = re.compile(
-        r'([vi])\((\S+)\)\s*=\s*([-+]?\d+\.?\d*(?:[eE][-+]?\d+)?)'
+        r"([vi])\((\S+)\)\s*=\s*([-+]?\d+\.?\d*(?:[eE][-+]?\d+)?)",
+        flags=re.MULTILINE,
     )
     for match in pattern.finditer(stdout):
         vtype = match.group(1)
