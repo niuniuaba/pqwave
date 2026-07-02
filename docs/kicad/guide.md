@@ -17,7 +17,6 @@ pqwave integrates with KiCad Eeschema through a connect-and-simulate workflow. T
 - [IPC API Setup (KiCad 10+)](#ipc-api-setup-kicad-10)
 - [Example Overview](#example-overview)
 - [Example 1: Full-Wave Bridge Rectifier](#example-1-full-wave-bridge-rectifier)
-- [Example 2: Nonlinear C-V Characterization](#example-2-nonlinear-c-v-characterization)
 - [Example 3: BJT Pin Fix Verification](#example-3-bjt-pin-fix-verification)
 - [Standalone Scripting Example](#standalone-scripting-example)
 
@@ -181,7 +180,6 @@ Every tutorial starts from a `.kicad_sch` file in `docs/kicad/examples/`. Open i
 | Example | Schematic File | Circuit | Analysis | Demonstrates |
 |---------|---------------|---------|----------|-------------|
 | Bridge Rectifier | `bridge.kicad_sch` | Full-wave bridge + filter cap | Transient 40 ms, 100 Hz input | Diode pin fix, basic pipeline |
-| C-V Characterization | `cdg.kicad_sch` | Nonlinear Cgd model, B-sources, .PARAM/.FUNC | DC sweep × AC via .control loop | Slash fix, .control placement, B-source expressions, multi-run sweep |
 | BJT Amplifier | `bjt_amplifier.kicad_sch` | Two-stage BJT amplifier | Transient 10 ms | BJT pin fix, multi-signal analysis |
 
 **Prerequisites:**
@@ -271,7 +269,7 @@ The KiCad control bar shows the connection state:
 
 A simple circuit with a common but silently-breaking KiCad export bug. The pipeline catches and fixes diode pin ordering, turning a wrong negative output into the correct rectified waveform.
 
-**Start here:** Open `docs/kicad/examples/bridge.kicad_sch` in KiCad Eeschema.
+**Start here:** Open `docs/kicad/examples/bridge/bridge.kicad_sch` in KiCad Eeschema.
 
 **Circuit:**
 - V1: 100 V, 100 Hz sinusoidal AC source
@@ -318,77 +316,6 @@ The signal browser lists: `v(ac_p)`, `v(ac_n)`, `v(r1)`, `v(r2)`, `i(v1)`, `time
 
 > **Without the post-processor:** v(r1) would read ~−98 V — all four diodes are reversed in KiCad's export, so the bridge produces a negative output. The waveform _looks_ correct (same ripple, same magnitude) but has the wrong sign. Users debugging this in KiCad's built-in simulator would see inverted results and not know why.
 
----
-
-### Example 2: Nonlinear C-V Characterization
-
-A realistic semiconductor characterization case: sweep the DC bias across a nonlinear Cgd capacitance model, run an AC analysis at each bias point, and extract the C-V curve. Demonstrates the netlist post-processor handling a complex case with all four fix categories active simultaneously.
-
-**Start here:** Open `docs/kicad/examples/cdg.kicad_sch` in KiCad Eeschema.
-
-**Circuit:**
-- Vd1g1: DC bias source, swept 0–500 V in 1 V steps via `.control` loop
-- B_Edg1, B_Edg2: Behavioral voltage sources implementing a nonlinear capacitance model
-- Cdg1, Cdg2: Capacitors representing Cgd components
-- 14 `.PARAM` definitions + a `.FUNC` defining the Q-V relationship
-- `.control` block: `while` loop performing `alter` → `ac` → measure → `destroy` at 501 bias points
-
-**Key fixes active:**
-1. **Node slashes** — all 8+ node references (`/d1`, `/ox`, `/ox2`) stripped
-2. **`.control` placement** — moved from before `.PARAM` block to before `.end`
-3. **B-source expressions** — `V={V(d1)}` references fixed to match de-slashed node names
-
-#### Step 1: Open and Inspect the Netlist Fixes
-
-1. In pqwave: **File > KiCad Bridge > Connect**.
-2. Select **`docs/kicad/examples/cdg.kicad_sch`** (if this example exists).
-3. Click **Simulate Now**.
-
-**Or via API:**
-```python
-api.kicad_connect("docs/kicad/examples/cdg.kicad_sch")
-result = api.kicad_simulate()
-
-# See everything the post-processor fixed
-for fix in api.kicad_fix_info(result["netlist"]):
-    print(f"  {fix['type']}: {fix['detail']}")
-```
-
-**Expected output:**
-```
-[kicad] Stripped '/' from 3 node names: /d1→d1, /ox→ox, /ox2→ox2
-[kicad] Moved .control block from line 2 to line 38 (before .end)
-[kicad] B-source B_Edg1: fixed 2 V() references to match de-slashed nodes
-[kicad] B-source B_Edg2: fixed 1 V() reference to match de-slashed nodes
-[kicad] Simulation complete: 2 signals loaded, 501 sweep points
-```
-
-#### Step 2: Browse the C-V Sweep
-
-1. The `.control` loop sweeps Vd1g1 from 0 to 500 V and records `ac_data[index]` — the small-signal admittance at each bias.
-2. Double-click **ac_data** to plot. The signal browser shows 501 data points.
-3. The curve shows the nonlinear Cgd(V) characteristic: flat at low bias, transitioning through a knee, then linear at high bias.
-
-> **Under the hood:** The `.control` block runs `ac lin 1 250k 250k` at each DC bias point, measures `Vd1g1#branch` (the AC current through the voltage source), and stores the complex admittance. This is a standard technique for C-V extraction from SPICE simulations — the `.control` scripting language makes it possible to automate what would otherwise require 501 separate simulation runs.
-
-#### Step 3: Extract the C-V Parameters
-
-1. Place **cursor A** at the low-bias plateau (~0–50 V region).
-2. Place **cursor B** at a high-bias point (~200 V).
-3. Use **Analyze > Expression** to compute the capacitance ratio:
-
-```
-mag(ac_data[cursorB]) / mag(ac_data[cursorA])
-```
-
-**Expected output:**
-- Low-bias capacitance (Cdg1 + Cdg2): ~82 pF (constant)
-- C-V curve shows the transition where Cdg1 becomes nonlinear at ~50 V
-- High-bias capacitance approaches Cdg2 alone (~82 pF at a=15.9)
-
-> **Without the post-processor:** The B-sources `V={V(d1)}` would reference node `d1` while the actual netlist node is `/d1`. ngspice silently reads 0 V for the nonexistent `d1` node. Every B-source expression evaluates to zero. The ac_data vector would contain nothing but zeros across all 501 bias points — a completely flat line indistinguishable from a wiring error.
-
----
 
 ### Example 3: BJT Pin Fix Verification
 

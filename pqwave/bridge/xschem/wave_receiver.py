@@ -41,7 +41,7 @@ class WaveReceiver(QObject):
     command_received = pyqtSignal(dict)  # command dict
     connection_opened = pyqtSignal(str)  # client address
     connection_closed = pyqtSignal(str)  # client address
-    server_started = pyqtSignal(int)     # port number
+    server_started = pyqtSignal(int)  # port number
     server_stopped = pyqtSignal()
 
     def __init__(self, port: int = 2026):
@@ -79,15 +79,13 @@ class WaveReceiver(QObject):
         try:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(('localhost', self.port))
+            self.server_socket.bind(("localhost", self.port))
             self.server_socket.listen(5)
             self.server_socket.settimeout(1.0)  # Non-blocking with timeout
 
             self.running = True
             self.server_thread = threading.Thread(
-                target=self._server_loop,
-                daemon=True,
-                name=f"WaveReceiver-{self.port}"
+                target=self._server_loop, daemon=True, name=f"WaveReceiver-{self.port}"
             )
             self.server_thread.start()
 
@@ -149,15 +147,15 @@ class WaveReceiver(QObject):
                     target=self._handle_client,
                     args=(client_socket, client_addr),
                     daemon=True,
-                    name=f"WaveClient-{client_addr[0]}:{client_addr[1]}"
+                    name=f"WaveClient-{client_addr[0]}:{client_addr[1]}",
                 )
 
                 # Store under lock for thread safety with stop()
                 with self._lock:
                     self.clients[client_addr] = client_socket
                     self.connection_state[client_addr] = {
-                        'current_raw_file': None,
-                        'window_id': None
+                        "current_raw_file": None,
+                        "window_id": None,
                     }
                     self.client_threads[client_addr] = client_thread
                 client_thread.start()
@@ -174,7 +172,9 @@ class WaveReceiver(QObject):
 
         logger.debug("Server loop exiting")
 
-    def _handle_client(self, client_socket: socket.socket, client_addr: Tuple[str, int]) -> None:
+    def _handle_client(
+        self, client_socket: socket.socket, client_addr: Tuple[str, int]
+    ) -> None:
         """
         Handle communication with a single client.
 
@@ -200,17 +200,17 @@ class WaveReceiver(QObject):
                         break
 
                     # Decode and process command(s)
-                    text = data.decode('utf-8', errors='ignore').strip()
+                    text = data.decode("utf-8", errors="ignore").strip()
                     if not text:
                         continue
 
                     # Split by newlines (multiple commands possible)
-                    lines = text.split('\n')
+                    lines = text.split("\n")
                     for raw_line in lines:
                         line = raw_line.strip()
                         if line:
                             # Echo back the line to satisfy handshake (only for non-JSON commands)
-                            if not line.startswith('json '):
+                            if not line.startswith("json "):
                                 self._send_line(client_socket, line)
                             self._process_command(line, client_addr)
 
@@ -250,80 +250,93 @@ class WaveReceiver(QObject):
             command_text: Raw command text
             client_addr: Client address for state tracking
         """
-        # Get connection state
-        state = self.connection_state.get(client_addr, {})
+        # Get connection state under lock — _process_command runs on
+        # per-client handler threads while stop() clears connection_state
+        # from the main thread.
+        with self._lock:
+            state = dict(self.connection_state.get(client_addr, {}))
 
         # Check if command is JSON (starts with 'json ')
-        if command_text.startswith('json '):
+        if command_text.startswith("json "):
             json_text = command_text[5:].strip()
             try:
                 command_dict = json.loads(json_text)
                 if isinstance(command_dict, dict):
                     # Add client address to command for routing
-                    command_dict['_client_addr'] = f"{client_addr[0]}:{client_addr[1]}"
-                    command_dict['_connection_state'] = state
+                    command_dict["_client_addr"] = f"{client_addr[0]}:{client_addr[1]}"
+                    command_dict["_connection_state"] = state
                     logger.debug(f"JSON command from {client_addr}: {command_dict}")
                     self.command_received.emit(command_dict)
                 else:
-                    logger.warning(f"Invalid JSON command format from {client_addr}: {json_text}")
+                    logger.warning(
+                        f"Invalid JSON command format from {client_addr}: {json_text}"
+                    )
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse JSON command from {client_addr}: {e}")
             return
 
         # Check for gaw-style commands
-        if command_text.startswith('table_set '):
+        if command_text.startswith("table_set "):
             # Format: table_set filename.raw
             logger.debug(f"Processing table_set command: {command_text}")
-            parts = command_text.split(' ', 1)
+            parts = command_text.split(" ", 1)
             logger.debug(f"Table_set parts: {parts}")
             if len(parts) == 2:
                 raw_file = parts[1].strip()
-                state['current_raw_file'] = raw_file
+                state["current_raw_file"] = raw_file
                 logger.info(f"Table set for {client_addr}: {raw_file}")
 
                 # Emit as command
                 command_dict = {
-                    'command': 'table_set',
-                    'args': {'raw_file': raw_file},
-                    '_client_addr': f"{client_addr[0]}:{client_addr[1]}",
-                    '_connection_state': state
+                    "command": "table_set",
+                    "args": {"raw_file": raw_file},
+                    "_client_addr": f"{client_addr[0]}:{client_addr[1]}",
+                    "_connection_state": state,
                 }
                 self.command_received.emit(command_dict)
             else:
-                logger.warning(f"Invalid table_set command from {client_addr}: {command_text}")
+                logger.warning(
+                    f"Invalid table_set command from {client_addr}: {command_text}"
+                )
             return
 
-        if command_text.startswith('copyvar '):
+        if command_text.startswith("copyvar "):
             # Format: copyvar v(node) sel #color
             # Example: copyvar v(out) sel #ff0000
             logger.debug(f"Processing copyvar command: {command_text}")
-            parts = command_text.split(' ', 3)
+            parts = command_text.split(" ", 3)
             logger.debug(f"Copyvar parts: {parts}")
-            if len(parts) >= 4 and parts[2] == 'sel':
+            if len(parts) >= 4 and parts[2] == "sel":
                 var_name = parts[1].strip()
                 color = parts[3].strip()
 
                 # Validate color format
-                if not color.startswith('#') or len(color) not in [4, 5, 7, 9]:
-                    logger.warning(f"Invalid color format in copyvar command from {client_addr}: {color}")
-                    color = '#ff0000'  # Default to red
+                if not color.startswith("#") or len(color) not in [4, 5, 7, 9]:
+                    logger.warning(
+                        f"Invalid color format in copyvar command from {client_addr}: {color}"
+                    )
+                    color = "#ff0000"  # Default to red
 
-                logger.info(f"Copyvar command from {client_addr}: {var_name} color {color}")
+                logger.info(
+                    f"Copyvar command from {client_addr}: {var_name} color {color}"
+                )
 
                 # Emit as command
                 command_dict = {
-                    'command': 'copyvar',
-                    'args': {
-                        'var_name': var_name,
-                        'color': color,
-                        'raw_file': state.get('current_raw_file')
+                    "command": "copyvar",
+                    "args": {
+                        "var_name": var_name,
+                        "color": color,
+                        "raw_file": state.get("current_raw_file"),
                     },
-                    '_client_addr': f"{client_addr[0]}:{client_addr[1]}",
-                    '_connection_state': state
+                    "_client_addr": f"{client_addr[0]}:{client_addr[1]}",
+                    "_connection_state": state,
                 }
                 self.command_received.emit(command_dict)
             else:
-                logger.warning(f"Invalid copyvar command from {client_addr}: {command_text}")
+                logger.warning(
+                    f"Invalid copyvar command from {client_addr}: {command_text}"
+                )
             return
 
         # Unknown command
@@ -332,7 +345,7 @@ class WaveReceiver(QObject):
     def _send_line(self, client_socket: socket.socket, line: str) -> None:
         """Send a line back to the client (echo)."""
         try:
-            client_socket.sendall((line + '\n').encode('utf-8'))
+            client_socket.sendall((line + "\n").encode("utf-8"))
         except socket.error as e:
             logger.warning(f"Failed to send echo line to client: {e}")
             raise  # Re-raise to let outer handler break the connection
@@ -350,7 +363,7 @@ class WaveReceiver(QObject):
         """
         # Parse client address string
         try:
-            ip_str, port_str = client_addr_str.split(':')
+            ip_str, port_str = client_addr_str.split(":")
             client_addr = (ip_str, int(port_str))
         except (ValueError, TypeError):
             logger.error(f"Invalid client address format: {client_addr_str}")
@@ -366,7 +379,7 @@ class WaveReceiver(QObject):
         # Send JSON response
         try:
             json_str = json.dumps(response)
-            client_socket.sendall((json_str + '\n').encode('utf-8'))
+            client_socket.sendall((json_str + "\n").encode("utf-8"))
             return True
         except (socket.error, TypeError) as e:
             logger.error(f"Failed to send response to {client_addr_str}: {e}")
@@ -391,15 +404,29 @@ class WaveCommandHandler(QObject):
     """
 
     # Command-specific signals
-    table_set_received = pyqtSignal(str, str, dict)  # raw_file, client_addr, connection_state
-    copyvar_received = pyqtSignal(str, str, str, dict)  # var_name, color, client_addr, connection_state
+    table_set_received = pyqtSignal(
+        str, str, dict
+    )  # raw_file, client_addr, connection_state
+    copyvar_received = pyqtSignal(
+        str, str, str, dict
+    )  # var_name, color, client_addr, connection_state
 
     # JSON command signals
-    open_file_received = pyqtSignal(str, str, dict)  # raw_file, client_addr, connection_state
-    add_trace_received = pyqtSignal(str, str, str, str, dict)  # var_name, axis, color, client_addr, connection_state
-    remove_trace_received = pyqtSignal(str, str, dict)  # var_name, client_addr, connection_state
-    get_data_point_received = pyqtSignal(float, str, dict)  # x_value, client_addr, connection_state
-    close_window_received = pyqtSignal(str, str, dict)  # window_id, client_addr, connection_state
+    open_file_received = pyqtSignal(
+        str, str, dict
+    )  # raw_file, client_addr, connection_state
+    add_trace_received = pyqtSignal(
+        str, str, str, str, dict
+    )  # var_name, axis, color, client_addr, connection_state
+    remove_trace_received = pyqtSignal(
+        str, str, dict
+    )  # var_name, client_addr, connection_state
+    get_data_point_received = pyqtSignal(
+        float, str, dict
+    )  # x_value, client_addr, connection_state
+    close_window_received = pyqtSignal(
+        str, str, dict
+    )  # window_id, client_addr, connection_state
     list_windows_received = pyqtSignal(str, dict)  # client_addr, connection_state
     ping_received = pyqtSignal(str, dict)  # client_addr, connection_state
 
@@ -432,35 +459,35 @@ class WaveCommandHandler(QObject):
         """
         try:
             # Extract common fields
-            client_addr = command_dict.get('_client_addr', 'unknown')
-            connection_state = command_dict.get('_connection_state', {})
+            client_addr = command_dict.get("_client_addr", "unknown")
+            connection_state = command_dict.get("_connection_state", {})
             # Store command ID in connection state for response routing
-            if 'id' in command_dict:
-                connection_state['command_id'] = command_dict['id']
+            if "id" in command_dict:
+                connection_state["command_id"] = command_dict["id"]
 
             # Route based on command type
-            command = command_dict.get('command')
-            args = command_dict.get('args', {})
+            command = command_dict.get("command")
+            args = command_dict.get("args", {})
 
-            if command == 'table_set':
+            if command == "table_set":
                 self._handle_table_set(args, client_addr, connection_state)
-            elif command == 'copyvar':
+            elif command == "copyvar":
                 self._handle_copyvar(args, client_addr, connection_state)
-            elif command == 'open_file':
+            elif command == "open_file":
                 self._handle_open_file(args, client_addr, connection_state)
-            elif command == 'add_trace':
+            elif command == "add_trace":
                 self._handle_add_trace(args, client_addr, connection_state)
-            elif command == 'remove_trace':
+            elif command == "remove_trace":
                 self._handle_remove_trace(args, client_addr, connection_state)
-            elif command == 'get_data_point':
+            elif command == "get_data_point":
                 self._handle_get_data_point(args, client_addr, connection_state)
-            elif command == 'close_window':
+            elif command == "close_window":
                 self._handle_close_window(args, client_addr, connection_state)
-            elif command == 'list_windows':
+            elif command == "list_windows":
                 self._handle_list_windows(args, client_addr, connection_state)
-            elif command == 'ping':
+            elif command == "ping":
                 self._handle_ping(args, client_addr, connection_state)
-            elif command == 'data_point_update':
+            elif command == "data_point_update":
                 self._handle_data_point_update(args, client_addr, connection_state)
             else:
                 error_msg = f"Unknown command: {command}"
@@ -472,15 +499,16 @@ class WaveCommandHandler(QObject):
             logger.error(f"{error_msg} for command: {command_dict}")
             self.invalid_command_received.emit(command_dict, error_msg)
 
-    def _handle_table_set(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_table_set(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle table_set command."""
-        raw_file = args.get('raw_file')
+        raw_file = args.get("raw_file")
         if not raw_file:
             error_msg = "Missing raw_file parameter in table_set command"
             logger.warning(f"{error_msg} from {client_addr}")
             self.invalid_command_received.emit(
-                {'command': 'table_set', 'args': args},
-                error_msg
+                {"command": "table_set", "args": args}, error_msg
             )
             return
 
@@ -488,96 +516,111 @@ class WaveCommandHandler(QObject):
         logger.debug(f"table_set args: {args}, connection_state: {connection_state}")
         self.table_set_received.emit(raw_file, client_addr, connection_state)
 
-    def _handle_copyvar(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_copyvar(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle copyvar command."""
-        var_name = args.get('var_name')
-        color = args.get('color', '#ff0000')
+        var_name = args.get("var_name")
+        color = args.get("color", "#ff0000")
 
         if not var_name:
             error_msg = "Missing var_name parameter in copyvar command"
             logger.warning(f"{error_msg} from {client_addr}")
             self.invalid_command_received.emit(
-                {'command': 'copyvar', 'args': args},
-                error_msg
+                {"command": "copyvar", "args": args}, error_msg
             )
             return
 
         # Validate color format
         if not self._is_valid_color(color):
-            logger.warning(f"Invalid color format in copyvar command from {client_addr}: {color}")
-            color = '#ff0000'  # Default to red
+            logger.warning(
+                f"Invalid color format in copyvar command from {client_addr}: {color}"
+            )
+            color = "#ff0000"  # Default to red
 
         logger.info(f"copyvar command from {client_addr}: {var_name} color {color}")
         logger.debug(f"copyvar args: {args}, connection_state: {connection_state}")
         self.copyvar_received.emit(var_name, color, client_addr, connection_state)
 
-    def _handle_open_file(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_open_file(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle open_file JSON command."""
-        raw_file = args.get('raw_file')
+        raw_file = args.get("raw_file")
         if not raw_file:
             error_msg = "Missing raw_file parameter in open_file command"
             logger.warning(f"{error_msg} from {client_addr}")
             self.invalid_command_received.emit(
-                {'command': 'open_file', 'args': args},
-                error_msg
+                {"command": "open_file", "args": args}, error_msg
             )
             return
 
         logger.info(f"open_file command from {client_addr}: {raw_file}")
         self.open_file_received.emit(raw_file, client_addr, connection_state)
 
-    def _handle_add_trace(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_add_trace(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle add_trace JSON command."""
-        var_name = args.get('var_name')
-        axis = args.get('axis', 'auto')  # auto, Y1, or Y2
-        color = args.get('color', '#ff0000')
+        var_name = args.get("var_name")
+        axis = args.get("axis", "auto")  # auto, Y1, or Y2
+        color = args.get("color", "#ff0000")
 
         if not var_name:
             error_msg = "Missing var_name parameter in add_trace command"
             logger.warning(f"{error_msg} from {client_addr}")
             self.invalid_command_received.emit(
-                {'command': 'add_trace', 'args': args},
-                error_msg
+                {"command": "add_trace", "args": args}, error_msg
             )
             return
 
         # Validate axis
-        if axis not in ('auto', 'Y1', 'Y2'):
-            logger.warning(f"Invalid axis in add_trace command from {client_addr}: {axis}")
-            axis = 'auto'
+        if axis not in ("auto", "Y1", "Y2"):
+            logger.warning(
+                f"Invalid axis in add_trace command from {client_addr}: {axis}"
+            )
+            axis = "auto"
 
         # Validate color
         if not self._is_valid_color(color):
-            logger.warning(f"Invalid color format in add_trace command from {client_addr}: {color}")
-            color = '#ff0000'
+            logger.warning(
+                f"Invalid color format in add_trace command from {client_addr}: {color}"
+            )
+            color = "#ff0000"
 
-        logger.info(f"add_trace command from {client_addr}: {var_name} axis {axis} color {color}")
-        self.add_trace_received.emit(var_name, axis, color, client_addr, connection_state)
+        logger.info(
+            f"add_trace command from {client_addr}: {var_name} axis {axis} color {color}"
+        )
+        self.add_trace_received.emit(
+            var_name, axis, color, client_addr, connection_state
+        )
 
-    def _handle_remove_trace(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_remove_trace(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle remove_trace JSON command."""
-        var_name = args.get('var_name')
+        var_name = args.get("var_name")
         if not var_name:
             error_msg = "Missing var_name parameter in remove_trace command"
             logger.warning(f"{error_msg} from {client_addr}")
             self.invalid_command_received.emit(
-                {'command': 'remove_trace', 'args': args},
-                error_msg
+                {"command": "remove_trace", "args": args}, error_msg
             )
             return
 
         logger.info(f"remove_trace command from {client_addr}: {var_name}")
         self.remove_trace_received.emit(var_name, client_addr, connection_state)
 
-    def _handle_get_data_point(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_get_data_point(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle get_data_point JSON command."""
-        x_value = args.get('x')
+        x_value = args.get("x")
         if x_value is None:
             error_msg = "Missing x parameter in get_data_point command"
             logger.warning(f"{error_msg} from {client_addr}")
             self.invalid_command_received.emit(
-                {'command': 'get_data_point', 'args': args},
-                error_msg
+                {"command": "get_data_point", "args": args}, error_msg
             )
             return
 
@@ -587,31 +630,38 @@ class WaveCommandHandler(QObject):
             error_msg = f"Invalid x value in get_data_point command: {args.get('x')}"
             logger.warning(f"{error_msg} from {client_addr}")
             self.invalid_command_received.emit(
-                {'command': 'get_data_point', 'args': args},
-                error_msg
+                {"command": "get_data_point", "args": args}, error_msg
             )
             return
 
         logger.info(f"get_data_point command from {client_addr}: x={x_value}")
         self.get_data_point_received.emit(x_value, client_addr, connection_state)
 
-    def _handle_close_window(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_close_window(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle close_window JSON command."""
-        window_id = args.get('window_id', '')
+        window_id = args.get("window_id", "")
         logger.info(f"close_window command from {client_addr}: window_id={window_id}")
         self.close_window_received.emit(window_id, client_addr, connection_state)
 
-    def _handle_list_windows(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_list_windows(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle list_windows JSON command."""
         logger.info(f"list_windows command from {client_addr}")
         self.list_windows_received.emit(client_addr, connection_state)
 
-    def _handle_ping(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_ping(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle ping JSON command."""
         logger.info(f"ping command from {client_addr}")
         self.ping_received.emit(client_addr, connection_state)
 
-    def _handle_data_point_update(self, args: dict, client_addr: str, connection_state: dict) -> None:
+    def _handle_data_point_update(
+        self, args: dict, client_addr: str, connection_state: dict
+    ) -> None:
         """Handle data_point_update JSON command (sent from pqwave to EDA tool).
 
         This command is sent by pqwave for back-annotation. When received
@@ -621,9 +671,9 @@ class WaveCommandHandler(QObject):
         # Send success response for testing purposes
         if self.wave_receiver:
             response = {
-                'status': 'success',
-                'data': {'message': 'data_point_update received'},
-                'id': connection_state.get('command_id')
+                "status": "success",
+                "data": {"message": "data_point_update received"},
+                "id": connection_state.get("command_id"),
             }
             self.wave_receiver.send_response(client_addr, response)
 
@@ -638,7 +688,7 @@ class WaveCommandHandler(QObject):
         Returns:
             True if valid, False otherwise
         """
-        if not color.startswith('#'):
+        if not color.startswith("#"):
             return False
 
         hex_part = color[1:]

@@ -112,7 +112,7 @@
   - **实现**: `pqwave/communication/command_handler.py` 命令处理器，将 TCP 命令转换为 Qt 信号
   - **实现**: `pqwave/communication/window_registry.py` 窗口注册表，管理多窗口和客户端映射
   - **实现**: 单实例服务器模式，后续 pqwave 实例将命令转发到已有服务器
-  - **配置**: 文档 `docs/xschem_integration.md` 提供详细配置说明
+  - **配置**: 文档 `docs/xschem/` 目录和 `pqwave/bridge/xschem/` 模块提供实现和配置参考
 - back-anotate data points from pqwave to xschem schematic
   - **实现**: JSON 扩展协议支持 `get_data_point` 命令查询特定 X 坐标的数据点
   - **实现**: 复数数据处理（幅度/相位、实部/虚部格式）

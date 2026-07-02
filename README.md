@@ -147,7 +147,7 @@ pqwave integrates with [xschem](https://xschem.sourceforge.io/) schematic editor
 2. Restart xschem
 3. Select nets and press Alt+G to choose "pqwave viewer"
 
-For complete configuration instructions and advanced features like back-annotation, see [Xschem Integration Documentation](docs/xschem_integration.md).
+For configuration instructions and advanced features like back-annotation, see the [Xschem Bridge](docs/xschem/) documentation and the `XschemCrossProbeClient` class in `pqwave/bridge/xschem/cross_probe.py`.
 
 ## 🔧 Architecture  
 

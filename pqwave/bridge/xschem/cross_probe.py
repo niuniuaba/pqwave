@@ -144,9 +144,7 @@ class XschemCrossProbeClient(QObject):
 
         Sends:  xschem unhilight_all; xschem redraw
         """
-        success, _ = self.send_command(
-            "xschem unhilight_all; xschem redraw"
-        )
+        success, _ = self.send_command("xschem unhilight_all; xschem redraw")
         return success
 
     # ---- Back-annotation (label stamping) ----
@@ -176,15 +174,18 @@ class XschemCrossProbeClient(QObject):
             text_idx = pqwave_texts.get(net_lower)
             if text_idx is not None:
                 # Update existing floating text in-place.
-                tcl_lines.append(
-                    f"xschem setprop text {text_idx} txt_ptr {{{value}V}}"
-                )
+                # Escape Tcl brace-quote delimiters to prevent injection.
+                safe_value = str(value).replace("}", "\\}")
+                safe_net = net_lower.replace("}", "\\}")
+                tcl_lines.append(f"xschem setprop text {text_idx} txt_ptr {{{safe_value}V}}")
                 stamp_count += 1
             elif net_lower in lab_positions:
                 x, y = lab_positions[net_lower]
+                safe_value = str(value).replace("}", "\\}")
+                safe_net = net_lower.replace("}", "\\}")
                 tcl_lines.append(
-                    f"xschem text {x:.0f} {y:.0f} 0 0 {{{value}V}} "
-                    f"{{pqwave_net={net_lower}}} 0.3 1"
+                    f"xschem text {x:.0f} {y:.0f} 0 0 {{{safe_value}V}} "
+                    f"{{pqwave_net={safe_net}}} 0.3 1"
                 )
                 stamp_count += 1
 
@@ -209,15 +210,17 @@ class XschemCrossProbeClient(QObject):
             net_lower = net_name.lower()
             text_idx = pqwave_texts.get(net_lower)
             if text_idx is not None:
-                tcl_lines.append(
-                    f"xschem setprop text {text_idx} txt_ptr {{{value}V}}"
-                )
+                safe_value = str(value).replace("}", "\\}")
+                safe_net = net_lower.replace("}", "\\}")
+                tcl_lines.append(f"xschem setprop text {text_idx} txt_ptr {{{safe_value}V}}")
                 stamp_count += 1
             elif net_lower in lab_positions:
                 x, y = lab_positions[net_lower]
+                safe_value = str(value).replace("}", "\\}")
+                safe_net = net_lower.replace("}", "\\}")
                 tcl_lines.append(
-                    f"xschem text {x:.0f} {y:.0f} 0 0 {{{value}V}} "
-                    f"{{pqwave_dc={net_lower}}} 0.3 1"
+                    f"xschem text {x:.0f} {y:.0f} 0 0 {{{safe_value}V}} "
+                    f"{{pqwave_dc={safe_net}}} 0.3 1"
                 )
                 stamp_count += 1
 
@@ -261,17 +264,14 @@ class XschemCrossProbeClient(QObject):
         self._invalidate_all_text_caches()
         return True
 
-    def _delete_one_text(self, pqwave_texts: dict[str, int],
-                         net_name: str) -> bool:
+    def _delete_one_text(self, pqwave_texts: dict[str, int], net_name: str) -> bool:
         """Delete a single text object by net name."""
         net_lower = net_name.lower()
         idx = pqwave_texts.get(net_lower)
         if idx is None:
             return False
 
-        self.send_command(
-            f"xschem select text {idx}; xschem delete; xschem redraw"
-        )
+        self.send_command(f"xschem select text {idx}; xschem delete; xschem redraw")
         self._invalidate_all_text_caches()
         return True
 
@@ -303,8 +303,7 @@ class XschemCrossProbeClient(QObject):
         lab_cmd = (
             "set _res {}; "
             + "; ".join(
-                f"lappend _res [xschem getprop instance {n} lab]"
-                for n in all_insts
+                f"lappend _res [xschem getprop instance {n} lab]" for n in all_insts
             )
             + "; set _res"
         )
@@ -330,8 +329,7 @@ class XschemCrossProbeClient(QObject):
         coord_cmd = (
             "set _res {}; "
             + "; ".join(
-                f"lappend _res [xschem instance_coord {name}]"
-                for name, _ in lab_insts
+                f"lappend _res [xschem instance_coord {name}]" for name, _ in lab_insts
             )
             + "; set _res"
         )
@@ -343,9 +341,7 @@ class XschemCrossProbeClient(QObject):
         # Parse: each instance_coord contributes 6 tokens.
         # xschem returns newlines in the output — strip braces and split on
         # whitespace (newlines included).
-        coord_tokens = (
-            coord_result.replace("{", "").replace("}", "").split()
-        )
+        coord_tokens = coord_result.replace("{", "").replace("}", "").split()
         lab_positions: dict[str, tuple[float, float]] = {}
         for i, (_, lab_val) in enumerate(lab_insts):
             base = i * 6
@@ -389,8 +385,7 @@ class XschemCrossProbeClient(QObject):
         getprop_cmd = (
             "set _res {}; "
             + "; ".join(
-                f"lappend _res [xschem getprop text {i} {tag}]"
-                for i in range(texts_n)
+                f"lappend _res [xschem getprop text {i} {tag}]" for i in range(texts_n)
             )
             + "; set _res"
         )

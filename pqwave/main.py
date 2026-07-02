@@ -20,7 +20,11 @@ from pqwave.ui.main_window import MainWindow
 from pqwave.logging_config import setup_logging
 from pqwave.bridge.xschem.wave_receiver import WaveReceiver, WaveCommandHandler
 from pqwave.models.state import ApplicationState
-from pqwave.models.raw_converter import extract_traces_to_raw, write_raw_file, FORMAT_CONFIG
+from pqwave.models.raw_converter import (
+    extract_traces_to_raw,
+    write_raw_file,
+    FORMAT_CONFIG,
+)
 from pqwave.models.rawfile import RawFile
 from pqwave.models.expression import ExprEvaluator
 from pqwave.models.trace import Trace
@@ -29,35 +33,36 @@ import numpy as np
 
 def _send_command_to_server(port, command_text):
     """Send command to xschem server and print response."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2.0)
-        sock.connect(('localhost', port))
+        sock.connect(("localhost", port))
         # Send command
-        sock.sendall((command_text + '\n').encode('utf-8'))
+        sock.sendall((command_text + "\n").encode("utf-8"))
         # Only wait for response on JSON commands (GAW-style commands don't respond)
         # JSON commands start with 'json ' or '{', GAW commands like 'table_set' don't
         stripped = command_text.strip()
-        if stripped.startswith('json ') or stripped.startswith('{'):
+        if stripped.startswith("json ") or stripped.startswith("{"):
             sock.settimeout(5.0)
-            response = sock.recv(4096).decode('utf-8', errors='ignore')
+            response = sock.recv(4096).decode("utf-8", errors="ignore")
             if response:
                 print(response.strip())
         else:
             # For GAW-style commands, use short timeout and ignore if no response
             sock.settimeout(0.1)
             try:
-                response = sock.recv(4096).decode('utf-8', errors='ignore')
+                response = sock.recv(4096).decode("utf-8", errors="ignore")
                 if response:
                     print(response.strip())
             except socket.timeout:
                 # Expected for GAW commands that don't send responses
                 pass
-        sock.close()
         return True
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return False
+    finally:
+        sock.close()
 
 
 def _run_extract() -> int:
@@ -67,9 +72,12 @@ def _run_extract() -> int:
 
     Operates without QApplication — pure models-layer operation.
     """
-    args = sys.argv[sys.argv.index('--extract') + 1:]
+    args = sys.argv[sys.argv.index("--extract") + 1 :]
     if len(args) < 3:
-        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <outputfile>", file=sys.stderr)
+        print(
+            "Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <outputfile>",
+            file=sys.stderr,
+        )
         return 1
 
     input_file = args[0]
@@ -82,23 +90,28 @@ def _run_extract() -> int:
     i = 2
     while i < len(args):
         a = args[i]
-        if a in ('-ltspice', '-ngspice', '-qspice', '-vcd'):
-            target_format = a.lstrip('-')
+        if a in ("-ltspice", "-ngspice", "-qspice", "-vcd"):
+            target_format = a.lstrip("-")
             if i + 1 < len(args):
                 output_file = args[i + 1]
             break
         i += 1
 
     if not target_format or not output_file:
-        print("Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <outputfile>", file=sys.stderr)
+        print(
+            "Usage: pqwave --extract <inputfile> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <outputfile>",
+            file=sys.stderr,
+        )
         return 1
 
-    if input_file.lower().endswith('.vcd'):
+    if input_file.lower().endswith(".vcd"):
         return _run_extract_vcd(input_file, expr_str, target_format, output_file)
     return _run_extract_raw(input_file, expr_str, target_format, output_file)
 
 
-def _run_extract_raw(input_file: str, expr_str: str, target_format: str, output_file: str) -> int:
+def _run_extract_raw(
+    input_file: str, expr_str: str, target_format: str, output_file: str
+) -> int:
     """Extract traces from a SPICE raw file."""
     try:
         raw_file = RawFile(input_file)
@@ -112,18 +125,18 @@ def _run_extract_raw(input_file: str, expr_str: str, target_format: str, output_
 
     dataset = raw_file.datasets[0]
 
-    plotname = dataset.get('plotname', '').lower()
-    flags = dataset.get('flags', '').lower()
-    is_ac = 'ac' in plotname or 'complex' in flags
+    plotname = dataset.get("plotname", "").lower()
+    flags = dataset.get("flags", "").lower()
+    is_ac = "ac" in plotname or "complex" in flags
 
-    variables = dataset.get('variables', [])
+    variables = dataset.get("variables", [])
     if not variables:
         print(f"Error: No variables found in {input_file}", file=sys.stderr)
         return 1
 
-    first_var_name = variables[0]['name']
+    first_var_name = variables[0]["name"]
 
-    expressions = [e.strip() for e in expr_str.split(',') if e.strip()]
+    expressions = [e.strip() for e in expr_str.split(",") if e.strip()]
     if not expressions:
         print("Error: No expressions specified", file=sys.stderr)
         return 1
@@ -141,11 +154,13 @@ def _run_extract_raw(input_file: str, expr_str: str, target_format: str, output_
         try:
             x_data = evaluator.evaluate(first_var_name)
         except Exception:
-            data_matrix = dataset.get('data')
+            data_matrix = dataset.get("data")
             if data_matrix is not None and data_matrix.size > 0:
                 x_data = data_matrix[:, 0].copy()
             else:
-                print(f"Error: Cannot read X axis data from {input_file}", file=sys.stderr)
+                print(
+                    f"Error: Cannot read X axis data from {input_file}", file=sys.stderr
+                )
                 return 1
 
         n = min(len(x_data), len(y_data))
@@ -155,12 +170,18 @@ def _run_extract_raw(input_file: str, expr_str: str, target_format: str, output_
             x_data=x_data[:n].copy(),
             y_data=y_data[:n].copy(),
             dataset_idx=0,
-            metadata={'x_var_name': first_var_name},
+            metadata={"x_var_name": first_var_name},
         )
         traces.append(trace)
 
     try:
-        extract_traces_to_raw(output_file, traces, raw_file, target_format=target_format, output_is_ac=is_ac)
+        extract_traces_to_raw(
+            output_file,
+            traces,
+            raw_file,
+            target_format=target_format,
+            output_is_ac=is_ac,
+        )
     except Exception as e:
         print(f"Error writing {output_file}: {e}", file=sys.stderr)
         return 1
@@ -169,7 +190,9 @@ def _run_extract_raw(input_file: str, expr_str: str, target_format: str, output_
     return 0
 
 
-def _run_extract_vcd(input_file: str, expr_str: str, target_format: str, output_file: str) -> int:
+def _run_extract_vcd(
+    input_file: str, expr_str: str, target_format: str, output_file: str
+) -> int:
     """Extract signals from a VCD file to raw or VCD format."""
     from pqwave.models.vcdfile import VcdFile
     from pqwave.digital.vcd_time_aligner import vcd_to_step_arrays
@@ -185,7 +208,7 @@ def _run_extract_vcd(input_file: str, expr_str: str, target_format: str, output_
         print(f"Error: No signals found in {input_file}", file=sys.stderr)
         return 1
 
-    expressions = [e.strip() for e in expr_str.split(',') if e.strip()]
+    expressions = [e.strip() for e in expr_str.split(",") if e.strip()]
     if not expressions:
         print("Error: No expressions specified", file=sys.stderr)
         return 1
@@ -213,18 +236,20 @@ def _run_extract_vcd(input_file: str, expr_str: str, target_format: str, output_
             vcd_v_ext = np.append(vcd_v, vcd_v[-1])
         else:
             vcd_t_ext, vcd_v_ext = vcd_t, vcd_v
-        traces.append(Trace(
-            name=expr,
-            expression=expr,
-            x_data=step_t,
-            y_data=step_v,
-            dataset_idx=0,
-            metadata={
-                'x_var_name': 'time',
-                'vcd_times': vcd_t_ext,
-                'vcd_values': vcd_v_ext,
-            },
-        ))
+        traces.append(
+            Trace(
+                name=expr,
+                expression=expr,
+                x_data=step_t,
+                y_data=step_v,
+                dataset_idx=0,
+                metadata={
+                    "x_var_name": "time",
+                    "vcd_times": vcd_t_ext,
+                    "vcd_values": vcd_v_ext,
+                },
+            )
+        )
         orig_events.append((vcd_t_ext, vcd_v_ext))
         valid_expressions.append(expr)
 
@@ -232,14 +257,21 @@ def _run_extract_vcd(input_file: str, expr_str: str, target_format: str, output_
         print("Error: No valid signals to extract", file=sys.stderr)
         return 1
 
-    if target_format == 'vcd':
+    if target_format == "vcd":
         # VCD output uses original event data for compact representation
         from pqwave.models.raw_converter import write_vcd_file
+
         vcd_traces = []
         for expr, (t, v) in zip(valid_expressions, orig_events):
-            vcd_traces.append(Trace(
-                name=expr, expression=expr, x_data=t, y_data=v, dataset_idx=0,
-            ))
+            vcd_traces.append(
+                Trace(
+                    name=expr,
+                    expression=expr,
+                    x_data=t,
+                    y_data=v,
+                    dataset_idx=0,
+                )
+            )
         try:
             write_vcd_file(output_file, vcd_traces, vcd_file.timescale)
         except Exception as e:
@@ -249,6 +281,7 @@ def _run_extract_vcd(input_file: str, expr_str: str, target_format: str, output_
         # Raw output: align all signals to a common uniform time grid
         from pqwave.digital.vcd_time_aligner import align_vcd_to_raw
         from pqwave.models.raw_converter import extract_traces_to_raw
+
         t_min = min(np.min(m[0]) for m in orig_events)
         t_max = max(np.max(m[0]) for m in orig_events)
         max_pts = max(len(m[0]) for m in orig_events)
@@ -258,17 +291,25 @@ def _run_extract_vcd(input_file: str, expr_str: str, target_format: str, output_
         raw_traces = []
         for expr, (t, v) in zip(valid_expressions, orig_events):
             aligned_v = align_vcd_to_raw(uniform_t, t, v)
-            raw_traces.append(Trace(
-                name=expr,
-                expression=expr,
-                x_data=uniform_t.copy(),
-                y_data=aligned_v,
-                dataset_idx=0,
-                metadata={'x_var_name': 'time'},
-            ))
+            raw_traces.append(
+                Trace(
+                    name=expr,
+                    expression=expr,
+                    x_data=uniform_t.copy(),
+                    y_data=aligned_v,
+                    dataset_idx=0,
+                    metadata={"x_var_name": "time"},
+                )
+            )
 
         try:
-            extract_traces_to_raw(output_file, raw_traces, raw_file=None, target_format=target_format, x_var_name='time')
+            extract_traces_to_raw(
+                output_file,
+                raw_traces,
+                raw_file=None,
+                target_format=target_format,
+                x_var_name="time",
+            )
         except Exception as e:
             print(f"Error writing {output_file}: {e}", file=sys.stderr)
             return 1
@@ -284,7 +325,7 @@ def _run_convert() -> int:
 
     Operates without QApplication — pure models-layer operation.
     """
-    args = sys.argv[sys.argv.index('--convert') + 1:]
+    args = sys.argv[sys.argv.index("--convert") + 1 :]
     if len(args) < 2:
         print(
             "Usage: pqwave --convert <inputfile> (-ltspice|-ngspice|-qspice) <outputfile>",
@@ -301,8 +342,8 @@ def _run_convert() -> int:
     i = 1
     while i < len(args):
         a = args[i]
-        if a in ('-ltspice', '-ngspice', '-qspice'):
-            target_format = a.lstrip('-')
+        if a in ("-ltspice", "-ngspice", "-qspice"):
+            target_format = a.lstrip("-")
             if i + 1 < len(args):
                 output_file = args[i + 1]
             break
@@ -327,13 +368,13 @@ def _run_convert() -> int:
         return 1
 
     dataset = raw_file.datasets[0]
-    title = dataset.get('title', 'pqwave conversion')
-    date = dataset.get('date', '')
-    plotname = dataset.get('plotname', '')
-    flags = dataset.get('flags', '')
-    variables = dataset.get('variables', [])
-    data = dataset.get('data')
-    is_ac_or_complex = dataset.get('_is_ac_or_complex', False)
+    title = dataset.get("title", "pqwave conversion")
+    date = dataset.get("date", "")
+    plotname = dataset.get("plotname", "")
+    flags = dataset.get("flags", "")
+    variables = dataset.get("variables", [])
+    data = dataset.get("data")
+    is_ac_or_complex = dataset.get("_is_ac_or_complex", False)
 
     if data is None or data.size == 0:
         print(f"Error: No data found in {input_file}", file=sys.stderr)
@@ -361,12 +402,13 @@ def _run_convert() -> int:
 
 def _run_exec() -> int:
     """Handle --exec <code>: execute Python code headless and print JSON result."""
-    idx = sys.argv.index('--exec') + 1
+    idx = sys.argv.index("--exec") + 1
     if idx >= len(sys.argv):
         print("Error: --exec requires a code argument", file=sys.stderr)
         return 1
     code = sys.argv[idx]
     from pqwave.session.api import SessionAPI
+
     result = SessionAPI.run_headless(code)
     print(result)
     return 0
@@ -375,6 +417,7 @@ def _run_exec() -> int:
 def _run_help_commands() -> int:
     """Handle --help-commands: list all registered session API commands."""
     from pqwave.session.api import get_command_registry
+
     registry = get_command_registry()
     if not registry:
         print("No commands registered.")
@@ -406,9 +449,9 @@ def _run_qucs_bridge() -> int:
     """
     from pqwave.bridge.qucs_s.wrapper import QucsBridgeRunner
 
-    args = sys.argv[sys.argv.index('--qucs-bridge') + 1:]
+    args = sys.argv[sys.argv.index("--qucs-bridge") + 1 :]
     # The netlist is always a .cir file — find it among the remaining args.
-    netlist_candidates = [a for a in args if a.endswith('.cir')]
+    netlist_candidates = [a for a in args if a.endswith(".cir")]
     if not netlist_candidates:
         print("Usage: pqwave --qucs-bridge <netlist_file>", file=sys.stderr)
         return 1
@@ -430,7 +473,7 @@ def _run_qspice_bridge() -> int:
     """
     from pqwave.bridge.qspice.wrapper import QspiceBridgeRunner, qsch2cir
 
-    args = sys.argv[sys.argv.index('--qspice-bridge') + 1:]
+    args = sys.argv[sys.argv.index("--qspice-bridge") + 1 :]
     if not args:
         print("Usage: pqwave --qspice-bridge <netlist|.qsch>", file=sys.stderr)
         return 1
@@ -455,8 +498,11 @@ def _run_setup_qucs_integration() -> int:
     """Handle --setup-qucs-integration: configure Qucs-S to use pqwave."""
     import shutil as _shutil
     from pqwave.bridge.qucs_s.config import (
-        get_config_path, is_configured_for_pqwave,
-        apply_bridge_config, detect_ngspice, read_config,
+        get_config_path,
+        is_configured_for_pqwave,
+        apply_bridge_config,
+        detect_ngspice,
+        read_config,
     )
 
     print("=== pqwave Qucs-S Integration Setup ===\n")
@@ -499,12 +545,16 @@ def _run_setup_qucs_integration() -> int:
 
     # Show current vs proposed
     print("\nCurrent config:")
-    print(f"  NgspiceExecutable = {cfg.get('General', 'NgspiceExecutable', fallback='(not set)')}")
-    print(f"  NgspiceParams      = {cfg.get('General', 'NgspiceParams', fallback='(not set)')}")
+    print(
+        f"  NgspiceExecutable = {cfg.get('General', 'NgspiceExecutable', fallback='(not set)')}"
+    )
+    print(
+        f"  NgspiceParams      = {cfg.get('General', 'NgspiceParams', fallback='(not set)')}"
+    )
     print("\nProposed config:")
     print(f"  NgspiceExecutable = {pqwave_exe}")
     print(f"  NgspiceParams      = {pqwave_params}")
-    print("\nQucs-S will run: \"{0}\" {1} <netlist>".format(pqwave_exe, pqwave_params))
+    print('\nQucs-S will run: "{0}" {1} <netlist>'.format(pqwave_exe, pqwave_params))
 
     # Confirm
     try:
@@ -512,7 +562,7 @@ def _run_setup_qucs_integration() -> int:
     except (EOFError, KeyboardInterrupt):
         print("\nAborted.")
         return 1
-    if answer not in ('y', 'yes'):
+    if answer not in ("y", "yes"):
         print("Aborted.")
         return 1
 
@@ -524,7 +574,9 @@ def _run_setup_qucs_integration() -> int:
         )
         print(f"\n✓ Configuration applied.")
         print(f"  Backup saved to: {backup}")
-        print(f"\nOpen Qucs-S and simulate any schematic — results will open in pqwave automatically.")
+        print(
+            f"\nOpen Qucs-S and simulate any schematic — results will open in pqwave automatically."
+        )
         return 0
     except Exception as e:
         print(f"\n✗ Failed to apply configuration: {e}")
@@ -534,35 +586,35 @@ def _run_setup_qucs_integration() -> int:
 def main():
     """Main entry point for pqwave."""
     # Handle --qspice-bridge before argparse (run QSPICE simulation)
-    if '--qspice-bridge' in sys.argv:
+    if "--qspice-bridge" in sys.argv:
         return _run_qspice_bridge()
 
     # Handle --qucs-bridge before argparse (post-simulation hook for Qucs-S)
-    if '--qucs-bridge' in sys.argv:
+    if "--qucs-bridge" in sys.argv:
         return _run_qucs_bridge()
 
     # Handle --setup-qucs-integration before argparse
-    if '--setup-qucs-integration' in sys.argv:
+    if "--setup-qucs-integration" in sys.argv:
         return _run_setup_qucs_integration()
 
     # Handle --extract before argparse (uses non-standard flags like -ltspice)
-    if '--extract' in sys.argv:
+    if "--extract" in sys.argv:
         return _run_extract()
 
     # Handle --convert before argparse (uses non-standard flags like -ltspice)
-    if '--convert' in sys.argv:
+    if "--convert" in sys.argv:
         return _run_convert()
 
     # Handle --exec before argparse (headless code execution)
-    if '--exec' in sys.argv:
+    if "--exec" in sys.argv:
         return _run_exec()
 
     # Handle --help-commands before argparse (lists session API commands)
-    if '--help-commands' in sys.argv:
+    if "--help-commands" in sys.argv:
         return _run_help_commands()
 
     # Handle --setup-llm before argparse (opens LLM setup wizard)
-    if '--setup-llm' in sys.argv:
+    if "--setup-llm" in sys.argv:
         return _run_setup_llm()
 
     parser = argparse.ArgumentParser(
@@ -581,90 +633,76 @@ def main():
         "--xschem-port",
         type=int,
         default=2026,
-        help="TCP port for xschem integration server (default: 2026). Set to 0 to disable."
+        help="TCP port for xschem integration server (default: 2026). Set to 0 to disable.",
     )
     parser.add_argument(
         "--xschem-ba-port",
         type=int,
         default=2021,
-        help="TCP port for xschem back-annotation (xschem_listen_port, default: 2021)."
+        help="TCP port for xschem back-annotation (xschem_listen_port, default: 2021).",
     )
     parser.add_argument(
         "--no-xschem-server",
         action="store_true",
-        help="Disable xschem integration server"
+        help="Disable xschem integration server",
     )
     parser.add_argument(
         "--xschem-send",
         metavar="COMMAND",
-        help="Send command to existing xschem server and exit"
+        help="Send command to existing xschem server and exit",
     )
     parser.add_argument(
         "files",
         nargs="*",  # Zero or more positional arguments
-        help="Files to open (.raw, .vcd, .json for project)"
+        help="Files to open (.raw, .vcd, .json for project)",
     )
     parser.add_argument(
         "--extract",
         action="store_true",
-        help="Extract traces: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <output>"
+        help="Extract traces: pqwave --extract <input> <expr1[,expr2,...]> (-ltspice|-ngspice|-qspice|-vcd) <output>",
     )
     parser.add_argument(
         "--convert",
         action="store_true",
-        help="Convert raw format: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>"
+        help="Convert raw format: pqwave --convert <input> (-ltspice|-ngspice|-qspice) <output>",
     )
     parser.add_argument(
         "--exec",
         action="store_true",
-        help="Execute Python code headless: pqwave --exec '<code>'"
+        help="Execute Python code headless: pqwave --exec '<code>'",
     )
     parser.add_argument(
         "--qspice-bridge",
         action="store_true",
-        help="Run QSPICE simulation: pqwave --qspice-bridge <netlist|.qsch>"
+        help="Run QSPICE simulation: pqwave --qspice-bridge <netlist|.qsch>",
     )
     parser.add_argument(
         "--help-commands",
         action="store_true",
-        help="List all registered session API commands"
+        help="List all registered session API commands",
     )
     parser.add_argument(
-        "--setup-llm",
-        action="store_true",
-        help="Open the LLM backend setup wizard"
+        "--setup-llm", action="store_true", help="Open the LLM backend setup wizard"
     )
-    parser.add_argument(
-        "--version", "-v",
-        action="version",
-        version="pqwave 0.3.1"
-    )
+    parser.add_argument("--version", "-v", action="version", version="pqwave 0.3.1")
 
     # Testing and debugging arguments
     parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Run test suites in ./tests directory"
+        "--test", action="store_true", help="Run test suites in ./tests directory"
     )
     parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug-level logging (most verbose)"
+        "--debug", action="store_true", help="Enable debug-level logging (most verbose)"
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Enable info-level logging (user feedback)"
+        help="Enable info-level logging (user feedback)",
     )
     parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress all output except errors"
+        "--quiet", action="store_true", help="Suppress all output except errors"
     )
     parser.add_argument(
-        "--log-file",
-        metavar="FILE",
-        help="Write logs to specified file"
+        "--log-file", metavar="FILE", help="Write logs to specified file"
     )
 
     # Bridge auto-connect arguments (used by editor Wave menus)
@@ -672,23 +710,20 @@ def main():
         "--connect",
         choices=["xschem", "lepton", "qucs", "kicad"],
         default=None,
-        help="Auto-connect to bridge on startup (used by editor Wave menu)"
+        help="Auto-connect to bridge on startup (used by editor Wave menu)",
     )
     parser.add_argument(
         "--sch-path",
         metavar="PATH",
         default=None,
-        help="Schematic file path for auto-connect (used with --connect)"
+        help="Schematic file path for auto-connect (used with --connect)",
     )
 
     args = parser.parse_args()
 
     # Setup logging based on command-line arguments
     logger = setup_logging(
-        debug=args.debug,
-        verbose=args.verbose,
-        quiet=args.quiet,
-        log_file=args.log_file
+        debug=args.debug, verbose=args.verbose, quiet=args.quiet, log_file=args.log_file
     )
 
     # Handle wave receiver integration
@@ -725,7 +760,7 @@ def main():
             f"ERROR: xschem back-annotation port {args.xschem_ba_port} "
             f"conflicts with {reserved_for_cross_probe[args.xschem_ba_port]} "
             f"(port {args.xschem_ba_port}). Use --xschem-ba-port to change.",
-            file=sys.stderr
+            file=sys.stderr,
         )
         sys.exit(1)
 
@@ -738,7 +773,7 @@ def main():
         try:
             probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            probe.bind(('localhost', args.xschem_port))
+            probe.bind(("localhost", args.xschem_port))
             probe.close()
             port_available = True
         except socket.error:
@@ -753,19 +788,29 @@ def main():
             wave_receiver.command_received.connect(wave_cmd_handler.handle_command)
             # Log command handler signals for debugging
             wave_cmd_handler.table_set_received.connect(
-                lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"table_set: {raw_file} from {client_addr}")
+                lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(
+                    f"table_set: {raw_file} from {client_addr}"
+                )
             )
             wave_cmd_handler.copyvar_received.connect(
-                lambda var_name, color, client_addr, connection_state, logger=logger: logger.debug(f"copyvar: {var_name} color {color} from {client_addr}")
+                lambda var_name, color, client_addr, connection_state, logger=logger: logger.debug(
+                    f"copyvar: {var_name} color {color} from {client_addr}"
+                )
             )
             wave_cmd_handler.open_file_received.connect(
-                lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(f"open_file: {raw_file} from {client_addr}")
+                lambda raw_file, client_addr, connection_state, logger=logger: logger.debug(
+                    f"open_file: {raw_file} from {client_addr}"
+                )
             )
             wave_cmd_handler.add_trace_received.connect(
-                lambda var_name, axis, color, client_addr, connection_state, logger=logger: logger.debug(f"add_trace: {var_name} axis {axis} from {client_addr}")
+                lambda var_name, axis, color, client_addr, connection_state, logger=logger: logger.debug(
+                    f"add_trace: {var_name} axis {axis} from {client_addr}"
+                )
             )
             wave_cmd_handler.invalid_command_received.connect(
-                lambda command_dict, error_message, logger=logger: logger.warning(f"Invalid command: {error_message} - {command_dict}")
+                lambda command_dict, error_message, logger=logger: logger.warning(
+                    f"Invalid command: {error_message} - {command_dict}"
+                )
             )
 
     # Handle --test argument
@@ -773,6 +818,7 @@ def main():
         logger.info("Running test suites...")
         try:
             from pqwave.test_runner import run_all_tests
+
             exit_code = run_all_tests()
             logger.info(f"Tests completed with exit code: {exit_code}")
             return exit_code
@@ -793,14 +839,15 @@ def main():
     #   QT_STYLE_OVERRIDE=Fusion — ensure Fusion style is used for widgets
     # Fusion style provides consistent cross-platform widget rendering and
     # does not depend on any desktop environment theming infrastructure.
-    os.environ.setdefault('QT_QPA_PLATFORMTHEME', '')
-    os.environ.setdefault('QT_STYLE_OVERRIDE', 'Fusion')
+    os.environ.setdefault("QT_QPA_PLATFORMTHEME", "")
+    os.environ.setdefault("QT_STYLE_OVERRIDE", "Fusion")
     app = QApplication(sys.argv)
-    app.setStyle('Fusion')
+    app.setStyle("Fusion")
 
     # If xschem port is busy, ask user whether to launch standalone
     if xschem_port_busy:
         from PyQt6.QtWidgets import QMessageBox
+
         reply = QMessageBox.question(
             None,
             "Port Conflict",
@@ -813,12 +860,13 @@ def main():
             return 0
 
     # Script launcher: single .py file executes before GUI
-    py_scripts = [f for f in args.files if f.lower().endswith('.py')]
+    py_scripts = [f for f in args.files if f.lower().endswith(".py")]
     if len(py_scripts) == 1 and len(args.files) == 1:
         logger.info(f"Running script: {py_scripts[0]}")
         from pqwave.session.api import SessionAPI, get_command_registry
         from functools import partial
         import builtins as _blt
+
         _builtin_names = set(dir(_blt))
         session = SessionAPI()
         ns = {"session": session, "np": __import__("numpy")}
@@ -836,15 +884,21 @@ def main():
         args.files.remove(py_scripts[0])
 
     # Validate: .json must be the only file argument
-    json_files = [f for f in args.files if f.lower().endswith('.json')]
-    other_files = [f for f in args.files if not f.lower().endswith('.json')]
+    json_files = [f for f in args.files if f.lower().endswith(".json")]
+    other_files = [f for f in args.files if not f.lower().endswith(".json")]
     if json_files and other_files:
         logger.error("Cannot mix .json project file with .raw/.vcd files")
-        print("Error: Cannot open .json project file together with .raw/.vcd files.", file=sys.stderr)
+        print(
+            "Error: Cannot open .json project file together with .raw/.vcd files.",
+            file=sys.stderr,
+        )
         return 1
     if len(json_files) > 1:
         logger.error("Only one .json project file can be opened at a time")
-        print("Error: Only one .json project file can be opened at a time.", file=sys.stderr)
+        print(
+            "Error: Only one .json project file can be opened at a time.",
+            file=sys.stderr,
+        )
         return 1
 
     # Create window
@@ -854,14 +908,14 @@ def main():
         window = MainWindow(
             initial_files=initial_files,
             xschem_ba_port=args.xschem_ba_port,
-            auto_connect=getattr(args, 'connect', None),
-            auto_connect_sch_path=getattr(args, 'sch_path', None),
+            auto_connect=getattr(args, "connect", None),
+            auto_connect_sch_path=getattr(args, "sch_path", None),
         )
     else:
         window = MainWindow(
             xschem_ba_port=args.xschem_ba_port,
-            auto_connect=getattr(args, 'connect', None),
-            auto_connect_sch_path=getattr(args, 'sch_path', None),
+            auto_connect=getattr(args, "connect", None),
+            auto_connect_sch_path=getattr(args, "sch_path", None),
         )
 
     # Start wave receiver after window is created (so signals are connected)

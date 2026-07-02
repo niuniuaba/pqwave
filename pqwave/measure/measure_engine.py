@@ -26,15 +26,26 @@ try:
         compute_snr_from_spectrum as _fft_snr,
         compute_sfdr_from_spectrum as _fft_sfdr,
     )
+
     _HAS_FFT_ENGINE = True
 except ImportError:
     _HAS_FFT_ENGINE = False
 
 _METRIC_SUFFIXES: dict[str, float] = {
-    "f": 1e-15, "p": 1e-12, "n": 1e-9, "u": 1e-6,
-    "m": 1e-3, "k": 1e3, "meg": 1e6, "g": 1e9, "t": 1e12,
+    "f": 1e-15,
+    "p": 1e-12,
+    "n": 1e-9,
+    "u": 1e-6,
+    "m": 1e-3,
+    "k": 1e3,
+    "meg": 1e6,
+    "g": 1e9,
+    "t": 1e12,
     "mil": 25.4e-6,
-    "ms": 1e-3, "us": 1e-6, "ns": 1e-9, "ps": 1e-12,
+    "ms": 1e-3,
+    "us": 1e-6,
+    "ns": 1e-9,
+    "ps": 1e-12,
 }
 
 
@@ -43,10 +54,9 @@ def _parse_value(s: str) -> float:
     s = s.strip().rstrip("x").lower()
     if not s:
         raise ValueError("empty value string")
-    for suffix, scale in sorted(_METRIC_SUFFIXES.items(),
-                                key=lambda kv: -len(kv[0])):
+    for suffix, scale in sorted(_METRIC_SUFFIXES.items(), key=lambda kv: -len(kv[0])):
         if s.endswith(suffix) and len(s) > len(suffix):
-            return float(s[:-len(suffix)]) * scale
+            return float(s[: -len(suffix)]) * scale
     return float(s)
 
 
@@ -58,11 +68,11 @@ def _parse_expr(expr: str) -> tuple[str, str, list[str], dict[str, str]]:
     kwargs values are kept as strings for lazy parsing.
     """
     s = expr.strip()
-    m = re.match(r'^([a-zA-Z_]\w*)\s*\(', s)
+    m = re.match(r"^([a-zA-Z_]\w*)\s*\(", s)
     if not m:
         raise ValueError(f"Invalid measure expression: {expr!r}")
     func_name = m.group(1).lower()
-    rest = s[m.end():]
+    rest = s[m.end() :]
 
     # Find the vector argument end — track paren depth.
     # Break at top-level comma (depth==1) or closing paren (depth==0).
@@ -70,25 +80,25 @@ def _parse_expr(expr: str) -> tuple[str, str, list[str], dict[str, str]]:
     i = 0
     while i < len(rest) and depth > 0:
         ch = rest[i]
-        if ch == '(':
+        if ch == "(":
             depth += 1
-        elif ch == ')':
+        elif ch == ")":
             depth -= 1
             if depth == 0:
                 break
-        elif ch == ',' and depth == 1:
+        elif ch == "," and depth == 1:
             break
         i += 1
 
     if depth == 0:
         # Hit closing paren — no more args: e.g. "avg(v(r1))"
         vector_name = rest[:i].strip()
-        remainder = rest[i + 1:].strip()
-    elif depth == 1 and i < len(rest) and rest[i] == ',':
+        remainder = rest[i + 1 :].strip()
+    elif depth == 1 and i < len(rest) and rest[i] == ",":
         # Hit top-level comma: e.g. "when_cross(v(r1), 96)"
         vector_name = rest[:i].strip()
-        remainder = rest[i + 1:].strip()
-        if remainder.endswith(')'):
+        remainder = rest[i + 1 :].strip()
+        if remainder.endswith(")"):
             remainder = remainder[:-1].strip()
     else:
         raise ValueError(f"Unmatched parentheses in: {expr!r}")
@@ -101,18 +111,18 @@ def _parse_expr(expr: str) -> tuple[str, str, list[str], dict[str, str]]:
         d = 0
         start = 0
         for j, ch in enumerate(remainder):
-            if ch == '(':
+            if ch == "(":
                 d += 1
-            elif ch == ')':
+            elif ch == ")":
                 d -= 1
-            elif ch == ',' and d == 0:
+            elif ch == "," and d == 0:
                 parts.append(remainder[start:j].strip())
                 start = j + 1
         parts.append(remainder[start:].strip())
 
         for part in parts:
-            if '=' in part:
-                k, v = part.split('=', 1)
+            if "=" in part:
+                k, v = part.split("=", 1)
                 kwargs[k.strip().lower()] = v.strip()
             else:
                 positional.append(part.strip())
@@ -150,8 +160,9 @@ def _apply_td(
     return x, y
 
 
-def _find_crossings(x: np.ndarray, y: np.ndarray, threshold: float,
-                    edge: str = "any") -> list[float]:
+def _find_crossings(
+    x: np.ndarray, y: np.ndarray, threshold: float, edge: str = "any"
+) -> list[float]:
     """Find x-coordinates where y crosses threshold.
 
     edge: 'rise', 'fall', or 'any'. Uses linear interpolation for sub-sample accuracy.
@@ -172,7 +183,9 @@ def _find_crossings(x: np.ndarray, y: np.ndarray, threshold: float,
 
 
 def _find_crossing_index(
-    x: np.ndarray, y: np.ndarray, threshold: float,
+    x: np.ndarray,
+    y: np.ndarray,
+    threshold: float,
     kwargs: dict[str, str],
 ) -> tuple[list[float], int]:
     """Determine which crossing to use from rise=/fall=/cross= kwargs.
@@ -242,6 +255,7 @@ def _find_crossing_index(
 
 # ---- Trigger point resolution ----
 
+
 def _find_trigger_point(
     kwargs: dict[str, str],
     get_data: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
@@ -296,32 +310,45 @@ def _find_trigger_point(
 
 # ---- Individual measure functions ----
 
+
 def _measure_min(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(np.min(y))
+
 
 def _measure_max(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(np.max(y))
 
+
 def _measure_avg(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(np.mean(y))
 
+
 def _measure_rms(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    return float(np.sqrt(np.mean(y ** 2)))
+    return float(np.sqrt(np.mean(y**2)))
+
 
 def _measure_pp(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(np.max(y) - np.min(y))
 
+
 def _measure_integ(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(np.trapezoid(y, x))
+
 
 def _measure_min_at(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(x[np.argmin(y)])
 
+
 def _measure_max_at(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     return float(x[np.argmax(y)])
 
+
 def _measure_rise_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    threshold = _parse_value(kwargs.pop("threshold", "")) if "threshold" in kwargs else (np.min(y) + np.max(y)) / 2
+    threshold = (
+        _parse_value(kwargs.pop("threshold", ""))
+        if "threshold" in kwargs
+        else (np.min(y) + np.max(y)) / 2
+    )
     rise_n = int(_parse_value(kwargs.pop("rise", "1"))) if "rise" in kwargs else 1
     low_pct = float(kwargs.pop("low_pct", "10")) / 100.0
     high_pct = float(kwargs.pop("high_pct", "90")) / 100.0
@@ -341,6 +368,7 @@ def _measure_rise_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
         )
     return float(high_cross[idx] - low_cross[idx])
 
+
 def _measure_fall_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     fall_n = int(_parse_value(kwargs.pop("fall", "1"))) if "fall" in kwargs else 1
     high_pct = float(kwargs.pop("high_pct", "90")) / 100.0
@@ -358,8 +386,13 @@ def _measure_fall_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
         raise ValueError(f"fall_time: edge {fall_n} not found")
     return float(low_cross[idx] - high_cross[idx])
 
+
 def _measure_period(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    threshold = _parse_value(kwargs.pop("threshold", "")) if "threshold" in kwargs else (np.min(y) + np.max(y)) / 2
+    threshold = (
+        _parse_value(kwargs.pop("threshold", ""))
+        if "threshold" in kwargs
+        else (np.min(y) + np.max(y)) / 2
+    )
     rise_n = int(_parse_value(kwargs.pop("rise", "1"))) if "rise" in kwargs else 1
 
     crossings = _find_crossings(x, y, threshold, "rise")
@@ -370,12 +403,18 @@ def _measure_period(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
         )
     return float(crossings[idx + 1] - crossings[idx])
 
+
 def _measure_frequency(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     period = _measure_period(x, y, kwargs)
     return 1.0 / period
 
+
 def _measure_duty_cycle(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    threshold = _parse_value(kwargs.pop("threshold", "")) if "threshold" in kwargs else (np.min(y) + np.max(y)) / 2
+    threshold = (
+        _parse_value(kwargs.pop("threshold", ""))
+        if "threshold" in kwargs
+        else (np.min(y) + np.max(y)) / 2
+    )
     rise_n = int(_parse_value(kwargs.pop("rise", "1"))) if "rise" in kwargs else 1
 
     rise_cross = _find_crossings(x, y, threshold, "rise")
@@ -395,8 +434,13 @@ def _measure_duty_cycle(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     period = rise_cross[r_idx + 1] - t_rise
     return float((t_fall - t_rise) / period * 100.0)
 
+
 def _measure_pulse_width(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    threshold = _parse_value(kwargs.pop("threshold", "")) if "threshold" in kwargs else (np.min(y) + np.max(y)) / 2
+    threshold = (
+        _parse_value(kwargs.pop("threshold", ""))
+        if "threshold" in kwargs
+        else (np.min(y) + np.max(y)) / 2
+    )
     rise_n = int(_parse_value(kwargs.pop("rise", "1"))) if "rise" in kwargs else 1
 
     rise_cross = _find_crossings(x, y, threshold, "rise")
@@ -411,6 +455,7 @@ def _measure_pulse_width(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
         raise ValueError(f"pulse_width: no falling edge after rising edge {rise_n}")
     return float(later_falls[0] - t_rise)
 
+
 def _measure_settling_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     settle_frac = float(kwargs.pop("settle_frac", "0.02"))
     final_val = y[-1]
@@ -420,9 +465,15 @@ def _measure_settling_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
             return float(x[-1] - x[i])
     return 0.0
 
+
 def _measure_slew_rate(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
-    dydx = np.abs(np.diff(y) / np.diff(x))
+    dx = np.diff(x)
+    mask = dx != 0
+    if not np.any(mask):
+        return 0.0
+    dydx = np.abs(np.diff(y)[mask] / dx[mask])
     return float(np.max(dydx))
+
 
 def _measure_overshoot(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     final_val = y[-1]
@@ -431,6 +482,7 @@ def _measure_overshoot(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
         return 0.0
     return float((peak - final_val) / abs(final_val) * 100.0)
 
+
 def _measure_undershoot(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     final_val = y[-1]
     trough = np.min(y)
@@ -438,16 +490,20 @@ def _measure_undershoot(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
         return 0.0
     return float((final_val - trough) / abs(final_val) * 100.0)
 
-def _measure_find_at(x: np.ndarray, y: np.ndarray, kwargs: dict,
-                     positional: list[str]) -> float:
+
+def _measure_find_at(
+    x: np.ndarray, y: np.ndarray, kwargs: dict, positional: list[str]
+) -> float:
     if positional:
         x_pos = _parse_value(positional[0])
     else:
         x_pos = _parse_value(kwargs.pop("at", "0"))
     return float(np.interp(x_pos, x, y))
 
-def _measure_when_cross(x: np.ndarray, y: np.ndarray, kwargs: dict,
-                        positional: list[str]) -> float:
+
+def _measure_when_cross(
+    x: np.ndarray, y: np.ndarray, kwargs: dict, positional: list[str]
+) -> float:
     if positional:
         val = _parse_value(positional[0])
     else:
@@ -484,8 +540,9 @@ def _measure_when_eq(
     return _measure_when_cross(x, diff, kwargs, ["0"])
 
 
-def _measure_deriv_at(x: np.ndarray, y: np.ndarray, kwargs: dict,
-                      positional: list[str]) -> float:
+def _measure_deriv_at(
+    x: np.ndarray, y: np.ndarray, kwargs: dict, positional: list[str]
+) -> float:
     if positional:
         x_pos = _parse_value(positional[0])
     else:
@@ -497,18 +554,25 @@ def _measure_deriv_at(x: np.ndarray, y: np.ndarray, kwargs: dict,
 
 # ---- Spectrum ----
 
+
 def _get_fft_config():
     """Return the global FFT configuration from ApplicationState."""
     from pqwave.models.state import ApplicationState
+
     return ApplicationState().fft_config
 
 
-def _compute_spectrum(x: np.ndarray, y: np.ndarray, kwargs: dict
-                      ) -> tuple[np.ndarray, np.ndarray]:
+def _compute_spectrum(
+    x: np.ndarray, y: np.ndarray, kwargs: dict
+) -> tuple[np.ndarray, np.ndarray]:
     """Run FFT on time-domain data, respecting global config and per-call overrides."""
     cfg = _get_fft_config()
     window = kwargs.pop("window", cfg.window)
-    fft_size = int(kwargs.pop("fft_size", str(cfg.fft_size)) if "fft_size" in kwargs else cfg.fft_size)
+    fft_size = int(
+        kwargs.pop("fft_size", str(cfg.fft_size))
+        if "fft_size" in kwargs
+        else cfg.fft_size
+    )
     dc_removal_str = kwargs.pop("dc_removal", None)
     if dc_removal_str is not None:
         dc_removal = dc_removal_str.lower() in ("yes", "true", "1")
@@ -516,8 +580,14 @@ def _compute_spectrum(x: np.ndarray, y: np.ndarray, kwargs: dict
         dc_removal = cfg.dc_removal
     # spectral analysis functions assume dB magnitude; ignore config preference
     kwargs.pop("representation", None)
-    return _fft_compute(x, y, window=window, fft_size=fft_size,
-                        dc_removal=dc_removal, representation="db")
+    return _fft_compute(
+        x,
+        y,
+        window=window,
+        fft_size=fft_size,
+        dc_removal=dc_removal,
+        representation="db",
+    )
 
 
 def _measure_thd(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
@@ -700,7 +770,9 @@ def _measure_deriv_when(
     # Numeric derivative at time t
     di = np.searchsorted(deriv_x, t)
     di = max(1, min(di, len(deriv_x) - 2))
-    return float((deriv_y[di + 1] - deriv_y[di - 1]) / (deriv_x[di + 1] - deriv_x[di - 1]))
+    return float(
+        (deriv_y[di + 1] - deriv_y[di - 1]) / (deriv_x[di + 1] - deriv_x[di - 1])
+    )
 
 
 def _measure_deriv_when_eq(
@@ -743,7 +815,9 @@ def _measure_deriv_when_eq(
 
     di = np.searchsorted(deriv_x, t)
     di = max(1, min(di, len(deriv_x) - 2))
-    return float((deriv_y[di + 1] - deriv_y[di - 1]) / (deriv_x[di + 1] - deriv_x[di - 1]))
+    return float(
+        (deriv_y[di + 1] - deriv_y[di - 1]) / (deriv_x[di + 1] - deriv_x[di - 1])
+    )
 
 
 def _measure_trig_targ(
@@ -784,10 +858,16 @@ def _measure_trig_targ(
         return float(t_targ - t_trig)
 
 
-_SPECIAL: frozenset[str] = frozenset({
-    "find_when", "find_when_eq", "when_eq",
-    "deriv_when", "deriv_when_eq", "trig_targ",
-})
+_SPECIAL: frozenset[str] = frozenset(
+    {
+        "find_when",
+        "find_when_eq",
+        "when_eq",
+        "deriv_when",
+        "deriv_when_eq",
+        "trig_targ",
+    }
+)
 
 _IMPLS: dict[str, Callable] = {
     "min": _measure_min,

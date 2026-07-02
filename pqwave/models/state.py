@@ -21,61 +21,66 @@ from .trace import Trace, AxisAssignment
 
 class ViewboxTheme(Enum):
     """Viewbox color themes."""
-    DARK = 'dark'
-    LIGHT = 'light'
+
+    DARK = "dark"
+    LIGHT = "light"
 
 
 @dataclass
 class SourceFile:
     """A source file loaded into the session."""
-    path: str          # absolute path
+
+    path: str  # absolute path
     relative_path: str = ""  # relative to project file
-    file_type: str = ""      # "raw" or "vcd"
+    file_type: str = ""  # "raw" or "vcd"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'path': self.relative_path or self.path,
-            'file_type': self.file_type,
+            "path": self.relative_path or self.path,
+            "file_type": self.file_type,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], base_dir: str = "") -> 'SourceFile':
-        rel = data.get('path', '')
+    def from_dict(cls, data: Dict[str, Any], base_dir: str = "") -> "SourceFile":
+        rel = data.get("path", "")
         abs_path = rel
-        if base_dir and rel and not rel.startswith('/'):
+        if base_dir and rel and not rel.startswith("/"):
             import os
+
             abs_path = os.path.normpath(os.path.join(base_dir, rel))
         return cls(
             path=abs_path,
             relative_path=rel,
-            file_type=data.get('file_type', ''),
+            file_type=data.get("file_type", ""),
         )
 
 
 # Theme color definitions
 THEME_COLORS = {
     ViewboxTheme.DARK: {
-        'background': '#000000',
-        'foreground': '#E0E0E0',
+        "background": "#000000",
+        "foreground": "#E0E0E0",
     },
     ViewboxTheme.LIGHT: {
-        'background': '#FFFFFF',
-        'foreground': '#000000',
+        "background": "#FFFFFF",
+        "foreground": "#000000",
     },
 }
 
 
 class AxisId(Enum):
     """Axis identifiers."""
-    X = 'X'
-    Y1 = 'Y1'
-    Y2 = 'Y2'
+
+    X = "X"
+    Y1 = "Y1"
+    Y2 = "Y2"
 
 
 @dataclass
 class AxisConfig:
     """Configuration for a single axis."""
-    label: str = ''
+
+    label: str = ""
     log_mode: bool = False
     range: Optional[Tuple[float, float]] = None
     visible: bool = True
@@ -85,36 +90,37 @@ class AxisConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to serializable dictionary."""
         return {
-            'label': self.label,
-            'log_mode': self.log_mode,
-            'range': self.range,
-            'visible': self.visible,
-            'grid': self.grid,
-            'auto_range': self.auto_range
+            "label": self.label,
+            "log_mode": self.log_mode,
+            "range": self.range,
+            "visible": self.visible,
+            "grid": self.grid,
+            "auto_range": self.auto_range,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AxisConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "AxisConfig":
         """Create from dictionary."""
-        raw_range = data.get('range')
+        raw_range = data.get("range")
         if raw_range is not None:
             raw_range = (float(raw_range[0]), float(raw_range[1]))
-        label = data.get('label', '')
-        if label.endswith(' (dB)'):
+        label = data.get("label", "")
+        if label.endswith(" (dB)"):
             label = label[:-5]
         return cls(
             label=label,
-            log_mode=data.get('log_mode', False),
+            log_mode=data.get("log_mode", False),
             range=raw_range,
-            visible=data.get('visible', True),
-            grid=data.get('grid', True),
-            auto_range=data.get('auto_range', True)
+            visible=data.get("visible", True),
+            grid=data.get("grid", True),
+            auto_range=data.get("auto_range", True),
         )
 
 
 @dataclass
 class PanelState:
     """Per-panel state: traces, axis configs, domain, and X variable."""
+
     panel_id: str
     traces: List[Trace] = field(default_factory=list)
     axis_configs: Dict[AxisId, AxisConfig] = field(default_factory=dict)
@@ -125,34 +131,38 @@ class PanelState:
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
-            'panel_id': self.panel_id,
-            'traces': [t.to_dict() for t in self.traces],
-            'axis_configs': {ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()},
-            'domain': self.domain,
-            'current_x_var': self.current_x_var,
+            "panel_id": self.panel_id,
+            "traces": [t.to_dict() for t in self.traces],
+            "axis_configs": {
+                ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()
+            },
+            "domain": self.domain,
+            "current_x_var": self.current_x_var,
         }
         if self.is_eye_diagram:
-            d['is_eye_diagram'] = True
-            d['eye_diagram_trace_name'] = self.eye_diagram_trace_name
+            d["is_eye_diagram"] = True
+            d["eye_diagram_trace_name"] = self.eye_diagram_trace_name
         return d
 
     def to_per_file_dict(self) -> Dict[str, Any]:
         d = {
-            'panel_id': self.panel_id,
-            'traces': [t.to_per_file_dict() for t in self.traces],
-            'axis_configs': {ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()},
-            'domain': self.domain,
-            'current_x_var': self.current_x_var,
+            "panel_id": self.panel_id,
+            "traces": [t.to_per_file_dict() for t in self.traces],
+            "axis_configs": {
+                ax.value: cfg.to_dict() for ax, cfg in self.axis_configs.items()
+            },
+            "domain": self.domain,
+            "current_x_var": self.current_x_var,
         }
         if self.is_eye_diagram:
-            d['is_eye_diagram'] = True
-            d['eye_diagram_trace_name'] = self.eye_diagram_trace_name
+            d["is_eye_diagram"] = True
+            d["eye_diagram_trace_name"] = self.eye_diagram_trace_name
         return d
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'PanelState':
+    def from_dict(cls, data: Dict[str, Any]) -> "PanelState":
         axis_configs = {}
-        for key, ax_data in data.get('axis_configs', {}).items():
+        for key, ax_data in data.get("axis_configs", {}).items():
             try:
                 axis_id = AxisId(key)
                 axis_configs[axis_id] = AxisConfig.from_dict(ax_data)
@@ -162,109 +172,111 @@ class PanelState:
             if axis_id not in axis_configs:
                 axis_configs[axis_id] = AxisConfig(label=axis_id.value)
 
-        traces = [Trace.from_dict(t) for t in data.get('traces', [])]
+        traces = [Trace.from_dict(t) for t in data.get("traces", [])]
         return cls(
-            panel_id=data.get('panel_id', ''),
+            panel_id=data.get("panel_id", ""),
             traces=traces,
             axis_configs=axis_configs,
-            domain=data.get('domain', 'time'),
-            current_x_var=data.get('current_x_var'),
-            is_eye_diagram=data.get('is_eye_diagram', False),
-            eye_diagram_trace_name=data.get('eye_diagram_trace_name', ''),
+            domain=data.get("domain", "time"),
+            current_x_var=data.get("current_x_var"),
+            is_eye_diagram=data.get("is_eye_diagram", False),
+            eye_diagram_trace_name=data.get("eye_diagram_trace_name", ""),
         )
 
 
 @dataclass
 class FftConfig:
     """Global FFT configuration."""
-    window: str = "none"          # window function name
-    fft_size: int = 0             # 0 = auto nextpow2
+
+    window: str = "none"  # window function name
+    fft_size: int = 0  # 0 = auto nextpow2
     dc_removal: bool = True
-    representation: str = "db"    # db, linear
-    x_range_mode: str = "full"    # "full", "current zoom", "manual"
-    x_range_start: float = 0.0    # manual range start (seconds)
-    x_range_end: float = 0.0      # manual range end (seconds)
-    binomial_smooth: int = 0      # 0 = off, N = number of passes
+    representation: str = "db"  # db, linear
+    x_range_mode: str = "full"  # "full", "current zoom", "manual"
+    x_range_start: float = 0.0  # manual range start (seconds)
+    x_range_end: float = 0.0  # manual range end (seconds)
+    binomial_smooth: int = 0  # 0 = off, N = number of passes
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'window': self.window,
-            'fft_size': self.fft_size,
-            'dc_removal': self.dc_removal,
-            'representation': self.representation,
-            'x_range_mode': self.x_range_mode,
-            'x_range_start': self.x_range_start,
-            'x_range_end': self.x_range_end,
-            'binomial_smooth': self.binomial_smooth,
+            "window": self.window,
+            "fft_size": self.fft_size,
+            "dc_removal": self.dc_removal,
+            "representation": self.representation,
+            "x_range_mode": self.x_range_mode,
+            "x_range_start": self.x_range_start,
+            "x_range_end": self.x_range_end,
+            "binomial_smooth": self.binomial_smooth,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'FftConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "FftConfig":
         return cls(
-            window=str(data.get('window', 'none')),
-            fft_size=int(data.get('fft_size', 0)),
-            dc_removal=bool(data.get('dc_removal', True)),
-            representation=str(data.get('representation', 'db')),
-            x_range_mode=str(data.get('x_range_mode', 'full')),
-            x_range_start=float(data.get('x_range_start', 0.0)),
-            x_range_end=float(data.get('x_range_end', 0.0)),
-            binomial_smooth=int(data.get('binomial_smooth', 0)),
+            window=str(data.get("window", "none")),
+            fft_size=int(data.get("fft_size", 0)),
+            dc_removal=bool(data.get("dc_removal", True)),
+            representation=str(data.get("representation", "db")),
+            x_range_mode=str(data.get("x_range_mode", "full")),
+            x_range_start=float(data.get("x_range_start", 0.0)),
+            x_range_end=float(data.get("x_range_end", 0.0)),
+            binomial_smooth=int(data.get("binomial_smooth", 0)),
         )
 
 
 @dataclass
 class EyeDiagramConfig:
     """Global eye diagram configuration using eyediagram library params."""
-    window_size: int = 48           # samples per eye window (eyediagram window_size)
-    offset: int = 16               # sample phase offset (eyediagram offset)
-    fuzz: bool = True              # anti-aliasing jitter for grid_count
-    mode: str = "persistence"      # "overlay" or "persistence"
+
+    window_size: int = 48  # samples per eye window (eyediagram window_size)
+    offset: int = 16  # sample phase offset (eyediagram offset)
+    fuzz: bool = True  # anti-aliasing jitter for grid_count
+    mode: str = "persistence"  # "overlay" or "persistence"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'window_size': self.window_size,
-            'offset': self.offset,
-            'fuzz': self.fuzz,
-            'mode': self.mode,
+            "window_size": self.window_size,
+            "offset": self.offset,
+            "fuzz": self.fuzz,
+            "mode": self.mode,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'EyeDiagramConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "EyeDiagramConfig":
         return cls(
-            window_size=int(data.get('window_size', 48)),
-            offset=int(data.get('offset', 16)),
-            fuzz=bool(data.get('fuzz', True)),
-            mode=str(data.get('mode', 'persistence')),
+            window_size=int(data.get("window_size", 48)),
+            offset=int(data.get("offset", 16)),
+            fuzz=bool(data.get("fuzz", True)),
+            mode=str(data.get("mode", "persistence")),
         )
 
 
 @dataclass
 class FontConfig:
     """Font configuration for a UI element group."""
-    family: str = ''    # empty = system default
-    size: int = 0       # 0 = system default point size
-    color: str = ''     # empty = use theme foreground color
+
+    family: str = ""  # empty = system default
+    size: int = 0  # 0 = system default point size
+    color: str = ""  # empty = use theme foreground color
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'family': self.family, 'size': self.size, 'color': self.color}
+        return {"family": self.family, "size": self.size, "color": self.color}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'FontConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "FontConfig":
         return cls(
-            family=data.get('family', ''),
-            size=data.get('size', 0),
-            color=data.get('color', ''),
+            family=data.get("family", ""),
+            size=data.get("size", 0),
+            color=data.get("color", ""),
         )
 
 
 @dataclass
 class HistogramConfig:
     """Configuration for histogram computation."""
+
     bins: Optional[int] = None
     norm: str = "count"
     range: Optional[Tuple[float, float]] = None
-
-
 
 
 class ApplicationState:
@@ -274,7 +286,7 @@ class ApplicationState:
     instance of application state throughout the application.
     """
 
-    _instance: Optional['ApplicationState'] = None
+    _instance: Optional["ApplicationState"] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -307,7 +319,7 @@ class ApplicationState:
         self.status_bar_visible: bool = True
         self.toolbar_visible: bool = True
         self.chat_panel_visible: bool = False
-        self.plot_title: str = ''
+        self.plot_title: str = ""
         self.viewbox_theme: ViewboxTheme = ViewboxTheme.DARK
 
         # Font configurations (all empty = use defaults)
@@ -322,7 +334,7 @@ class ApplicationState:
 
         self.fft_config: FftConfig = FftConfig()
         # Impedance display format: 'polar' or 'rectangular'
-        self.impedance_format: str = 'polar'
+        self.impedance_format: str = "polar"
         self.eye_diagram_config: EyeDiagramConfig = EyeDiagramConfig()
 
         # Tool paths for external converters (none = use $PATH)
@@ -382,23 +394,27 @@ class ApplicationState:
         """Register a new panel, optionally copying state from an existing panel."""
         if copy_from and copy_from in self.panels:
             import copy
+
             src = self.panels[copy_from]
             # Strip UI-only metadata that can't be deepcopied (Qt objects).
             saved_bots = []
             for t in src.traces:
-                saved_bots.append(t.metadata.pop('_bus_bot_item', None))
-            panel_state = copy.deepcopy(src)
-            panel_state.panel_id = panel_id
-            # Restore stripped items on the source panel.
-            for t, bot in zip(src.traces, saved_bots):
-                if bot is not None:
-                    t.metadata['_bus_bot_item'] = bot
+                saved_bots.append(t.metadata.pop("_bus_bot_item", None))
+            try:
+                panel_state = copy.deepcopy(src)
+                panel_state.panel_id = panel_id
+            finally:
+                # Restore stripped items on the source panel even if
+                # deepcopy raises — otherwise source traces are corrupted.
+                for t, bot in zip(src.traces, saved_bots):
+                    if bot is not None:
+                        t.metadata["_bus_bot_item"] = bot
         else:
             panel_state = PanelState(panel_id=panel_id)
             panel_state.axis_configs = {
-                AxisId.X: AxisConfig(label='X'),
-                AxisId.Y1: AxisConfig(label='Y1'),
-                AxisId.Y2: AxisConfig(label='Y2'),
+                AxisId.X: AxisConfig(label="X"),
+                AxisId.Y1: AxisConfig(label="Y1"),
+                AxisId.Y2: AxisConfig(label="Y2"),
             }
         self.panels[panel_id] = panel_state
         self.panel_order.append(panel_id)
@@ -434,12 +450,19 @@ class ApplicationState:
         """Remove a dataset by index from all panels."""
         if 0 <= dataset_idx < len(self.datasets):
             for panel_state in self.panels.values():
-                panel_state.traces = [t for t in panel_state.traces if t.dataset_idx != dataset_idx]
+                panel_state.traces = [
+                    t for t in panel_state.traces if t.dataset_idx != dataset_idx
+                ]
                 for trace in panel_state.traces:
                     if trace.dataset_idx > dataset_idx:
                         trace.dataset_idx -= 1
             self.datasets.pop(dataset_idx)
-            if self.current_dataset_idx >= len(self.datasets):
+            # Adjust current index: if it pointed above the removed dataset,
+            # decrement; if it pointed at the removed dataset (or beyond the
+            # new end), clamp to the new last index.
+            if self.current_dataset_idx > dataset_idx:
+                self.current_dataset_idx -= 1
+            elif self.current_dataset_idx >= len(self.datasets):
                 self.current_dataset_idx = max(0, len(self.datasets) - 1)
             return True
         return False
@@ -497,7 +520,9 @@ class ApplicationState:
         """Set log mode for an axis."""
         self.axis_configs[axis_id].log_mode = log_mode
 
-    def set_axis_range(self, axis_id: AxisId, range_min: float, range_max: float) -> None:
+    def set_axis_range(
+        self, axis_id: AxisId, range_min: float, range_max: float
+    ) -> None:
         """Set range for an axis."""
         self.axis_configs[axis_id].range = (range_min, range_max)
         self.axis_configs[axis_id].auto_range = False
@@ -516,69 +541,73 @@ class ApplicationState:
     def to_dict(self) -> Dict[str, Any]:
         """Convert entire state to serializable dictionary."""
         result = {
-            'datasets': [
+            "datasets": [
                 {
-                    'title': ds.title,
-                    'plotname': ds.plotname,
-                    'n_variables': ds.n_variables,
-                    'n_points': ds.n_points
+                    "title": ds.title,
+                    "plotname": ds.plotname,
+                    "n_variables": ds.n_variables,
+                    "n_points": ds.n_points,
                 }
                 for ds in self.datasets
             ],
-            'current_dataset_idx': self.current_dataset_idx,
-            'grid_visible': self.grid_visible,
-            'legend_visible': self.legend_visible,
-            'status_bar_visible': self.status_bar_visible,
-            'toolbar_visible': self.toolbar_visible,
-            'plot_title': self.plot_title,
-            'viewbox_theme': self.viewbox_theme.value,
-            'title_font': self.title_font.to_dict(),
-            'label_font': self.label_font.to_dict(),
-            'tick_font': self.tick_font.to_dict(),
-            'ui_font': self.ui_font.to_dict(),
-            'fft_config': self.fft_config.to_dict(),
-            'impedance_format': self.impedance_format,
-            'eye_diagram_config': self.eye_diagram_config.to_dict(),
+            "current_dataset_idx": self.current_dataset_idx,
+            "grid_visible": self.grid_visible,
+            "legend_visible": self.legend_visible,
+            "status_bar_visible": self.status_bar_visible,
+            "toolbar_visible": self.toolbar_visible,
+            "plot_title": self.plot_title,
+            "viewbox_theme": self.viewbox_theme.value,
+            "title_font": self.title_font.to_dict(),
+            "label_font": self.label_font.to_dict(),
+            "tick_font": self.tick_font.to_dict(),
+            "ui_font": self.ui_font.to_dict(),
+            "fft_config": self.fft_config.to_dict(),
+            "impedance_format": self.impedance_format,
+            "eye_diagram_config": self.eye_diagram_config.to_dict(),
             # Per-panel state (new format)
-            'panels': {pid: ps.to_dict() for pid, ps in self.panels.items()},
-            'panel_order': list(self.panel_order),
-            'active_panel_id': self.active_panel_id,
+            "panels": {pid: ps.to_dict() for pid, ps in self.panels.items()},
+            "panel_order": list(self.panel_order),
+            "active_panel_id": self.active_panel_id,
         }
         # Backward compat: include flat keys for the active panel
         if self.active_panel_id and self.active_panel_id in self.panels:
             ps = self.panels[self.active_panel_id]
-            result['traces'] = [t.to_dict() for t in ps.traces]
-            result['axis_configs'] = {ax.value: cfg.to_dict() for ax, cfg in ps.axis_configs.items()}
-            result['current_x_var'] = ps.current_x_var
+            result["traces"] = [t.to_dict() for t in ps.traces]
+            result["axis_configs"] = {
+                ax.value: cfg.to_dict() for ax, cfg in ps.axis_configs.items()
+            }
+            result["current_x_var"] = ps.current_x_var
         else:
-            result['traces'] = []
-            result['axis_configs'] = {}
-            result['current_x_var'] = None
+            result["traces"] = []
+            result["axis_configs"] = {}
+            result["current_x_var"] = None
         return result
 
     def to_per_file_dict(self) -> Dict[str, Any]:
         """Convert to dict for per-file state (excludes data arrays)."""
         result = {
-            'plot_title': self.plot_title,
-            'grid_visible': self.grid_visible,
-            'legend_visible': self.legend_visible,
-            'panels': {pid: ps.to_per_file_dict() for pid, ps in self.panels.items()},
-            'panel_order': list(self.panel_order),
-            'active_panel_id': self.active_panel_id,
-            'fft_config': self.fft_config.to_dict(),
-            'impedance_format': self.impedance_format,
-            'eye_diagram_config': self.eye_diagram_config.to_dict(),
+            "plot_title": self.plot_title,
+            "grid_visible": self.grid_visible,
+            "legend_visible": self.legend_visible,
+            "panels": {pid: ps.to_per_file_dict() for pid, ps in self.panels.items()},
+            "panel_order": list(self.panel_order),
+            "active_panel_id": self.active_panel_id,
+            "fft_config": self.fft_config.to_dict(),
+            "impedance_format": self.impedance_format,
+            "eye_diagram_config": self.eye_diagram_config.to_dict(),
         }
         # Backward compat: include flat keys for the active panel
         if self.active_panel_id and self.active_panel_id in self.panels:
             ps = self.panels[self.active_panel_id]
-            result['traces'] = [t.to_per_file_dict() for t in ps.traces]
-            result['current_x_var'] = ps.current_x_var
-            result['axis_configs'] = {ax.value: cfg.to_dict() for ax, cfg in ps.axis_configs.items()}
+            result["traces"] = [t.to_per_file_dict() for t in ps.traces]
+            result["current_x_var"] = ps.current_x_var
+            result["axis_configs"] = {
+                ax.value: cfg.to_dict() for ax, cfg in ps.axis_configs.items()
+            }
         else:
-            result['traces'] = []
-            result['current_x_var'] = None
-            result['axis_configs'] = {}
+            result["traces"] = []
+            result["current_x_var"] = None
+            result["axis_configs"] = {}
         return result
 
     def __repr__(self) -> str:

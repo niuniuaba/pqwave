@@ -50,7 +50,7 @@ class Variable:
         if self.is_complex:
             return np.real(self.data)
         else:
-            return self.data
+            return self.data.copy()
 
     @property
     def imag(self) -> np.ndarray:
@@ -80,13 +80,13 @@ class Variable:
         Raises:
             ValueError: If component is invalid
         """
-        if component == 'mag':
+        if component == "mag":
             return self.magnitude
-        elif component == 'real':
+        elif component == "real":
             return self.real
-        elif component == 'imag':
+        elif component == "imag":
             return self.imag
-        elif component == 'ph':
+        elif component == "ph":
             return self.phase
         else:
             raise ValueError(f"Invalid component: {component}")
@@ -104,7 +104,7 @@ class Dataset:
     and derived components transparently.
     """
 
-    def __init__(self, raw_file: 'RawFile', dataset_idx: int = 0):
+    def __init__(self, raw_file: "RawFile", dataset_idx: int = 0):
         """Initialize a Dataset from a RawFile.
 
         Args:
@@ -118,23 +118,25 @@ class Dataset:
         self.dataset_idx = dataset_idx
 
         if dataset_idx >= len(raw_file.datasets):
-            raise IndexError(f"Dataset index {dataset_idx} out of range (max {len(raw_file.datasets)-1})")
+            raise IndexError(
+                f"Dataset index {dataset_idx} out of range (max {len(raw_file.datasets)-1})"
+            )
 
         dataset_dict = raw_file.datasets[dataset_idx]
-        self.title = dataset_dict.get('title', '')
-        self.date = dataset_dict.get('date', '')
-        self.plotname = dataset_dict.get('plotname', '')
-        self.flags = dataset_dict.get('flags', '')
-        self._data = dataset_dict.get('data')
+        self.title = dataset_dict.get("title", "")
+        self.date = dataset_dict.get("date", "")
+        self.plotname = dataset_dict.get("plotname", "")
+        self.flags = dataset_dict.get("flags", "")
+        self._data = dataset_dict.get("data")
 
         # Create Variable objects
         self.variables: List[Variable] = []
-        var_dicts = dataset_dict.get('variables', [])
-        data_matrix = dataset_dict.get('data')
+        var_dicts = dataset_dict.get("variables", [])
+        data_matrix = dataset_dict.get("data")
         for var_dict in var_dicts:
-            name = var_dict['name']
-            index = var_dict['index']
-            var_type = var_dict['type']
+            name = var_dict["name"]
+            index = var_dict["index"]
+            var_type = var_dict["type"]
             # Reference column from memmap/column_stack directly (numpy view, no copy)
             if data_matrix is not None and data_matrix.size > 0:
                 data = data_matrix[:, index]
@@ -184,9 +186,9 @@ class Dataset:
 
         # Update the column header in the dataset dict if present
         dataset_dict = self.raw_file.datasets[self.dataset_idx]
-        for vd in dataset_dict.get('variables', []):
-            if vd['name'] == old_name:
-                vd['name'] = new_name
+        for vd in dataset_dict.get("variables", []):
+            if vd["name"] == old_name:
+                vd["name"] = new_name
                 break
 
     def get_variable_names(self, include_derived: bool = False) -> List[str]:
@@ -204,12 +206,14 @@ class Dataset:
             derived = []
             for var in self.variables:
                 if var.is_complex:
-                    derived.extend([
-                        f'mag({var.name})',
-                        f'real({var.name})',
-                        f'imag({var.name})',
-                        f'ph({var.name})'
-                    ])
+                    derived.extend(
+                        [
+                            f"mag({var.name})",
+                            f"real({var.name})",
+                            f"imag({var.name})",
+                            f"ph({var.name})",
+                        ]
+                    )
             names.extend(derived)
         return names
 
@@ -226,27 +230,27 @@ class Dataset:
             Variable object or None if not found
         """
         # Check for derived variable
-        if name.startswith('mag(') and name.endswith(')'):
+        if name.startswith("mag(") and name.endswith(")"):
             base_name = name[4:-1]
             var = self._var_map.get(base_name)
             if var is not None:
                 # Return a wrapper variable for magnitude
-                return DerivedVariable(var, 'mag')
-        elif name.startswith('real(') and name.endswith(')'):
+                return DerivedVariable(var, "mag")
+        elif name.startswith("real(") and name.endswith(")"):
             base_name = name[5:-1]
             var = self._var_map.get(base_name)
             if var is not None:
-                return DerivedVariable(var, 'real')
-        elif name.startswith('imag(') and name.endswith(')'):
+                return DerivedVariable(var, "real")
+        elif name.startswith("imag(") and name.endswith(")"):
             base_name = name[5:-1]
             var = self._var_map.get(base_name)
             if var is not None:
-                return DerivedVariable(var, 'imag')
-        elif name.startswith('ph(') and name.endswith(')'):
+                return DerivedVariable(var, "imag")
+        elif name.startswith("ph(") and name.endswith(")"):
             base_name = name[3:-1]
             var = self._var_map.get(base_name)
             if var is not None:
-                return DerivedVariable(var, 'ph')
+                return DerivedVariable(var, "ph")
 
         # Regular variable
         return self._var_map.get(name)
@@ -290,7 +294,7 @@ class DerivedVariable(Variable):
             name=f"{component}({base_variable.name})",
             index=base_variable.index,
             var_type=base_variable.type,
-            data=base_variable.get_derived_data(component)
+            data=base_variable.get_derived_data(component),
         )
 
     def __repr__(self) -> str:
