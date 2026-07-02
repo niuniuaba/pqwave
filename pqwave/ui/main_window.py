@@ -2499,26 +2499,46 @@ class MainWindow(QMainWindow):
                 with open(cir_path, "w") as f:
                     f.write(modified)
 
-                proc = subprocess.run(
-                    [ngspice, "-b", cir_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    cwd=work_dir,
-                )
-                output_value: float | None = parse_op_output(
-                    proc.stdout, target=target_var
-                )
+                try:
+                    proc = subprocess.run(
+                        [ngspice, "-b", cir_path],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                        cwd=work_dir,
+                    )
+                    output_value: float | None = parse_op_output(
+                        proc.stdout, target=target_var
+                    )
+                    results.append(
+                        {
+                            "corner": i,
+                            "components": corner.copy(),
+                            "output": output_value,
+                            "stdout": proc.stdout,
+                            "stderr": proc.stderr,
+                        }
+                    )
+                except subprocess.TimeoutExpired:
+                    results.append(
+                        {
+                            "corner": i,
+                            "components": corner.copy(),
+                            "output": None,
+                            "stderr": f"timeout after 60s",
+                        }
+                    )
+                except FileNotFoundError:
+                    QMessageBox.critical(
+                        self, "ngspice Not Found",
+                        f"Could not run ngspice ({ngspice}). "
+                        "Install ngspice or set the path in "
+                        "Settings > External Converter Paths.")
+                    shutil.rmtree(work_dir, ignore_errors=True)
+                    return
 
-                results.append(
-                    {
-                        "corner": i,
-                        "components": corner.copy(),
-                        "output": output_value,
-                        "stdout": proc.stdout,
-                        "stderr": proc.stderr,
-                    }
-                )
+                # Keep GUI responsive during long corner sweeps
+                QApplication.processEvents()
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
