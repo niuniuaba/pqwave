@@ -31,6 +31,7 @@ def api_command(name: str, signature: str, help: str):
     Commands registered this way are auto-discovered by the REPL,
     help system, and AI translator prompt.
     """
+
     def decorator(fn: Callable):
         _COMMAND_REGISTRY[name] = {
             "fn": fn,
@@ -38,12 +39,30 @@ def api_command(name: str, signature: str, help: str):
             "help": help,
         }
         return fn
+
     return decorator
 
 
 def get_command_registry() -> dict[str, dict]:
     """Return the full command registry (for REPL/AI discovery)."""
     return _COMMAND_REGISTRY
+
+
+def _name_in_expression(old_name: str, expr: str | None) -> bool:
+    """Check if *old_name* appears as a complete token in *expr*.
+
+    Uses word-boundary lookarounds (``(?<!\\w)`` / ``(?!\\w)``) to avoid
+    substring false positives such as ``v(in)`` matching ``v(input)``,
+    while still correctly matching ``v(in)`` inside ``mag(v(in))``.
+
+    SPICE variable names (e.g. ``v(out)``) are treated as atomic tokens;
+    the parentheses inside them are handled correctly because ``(`` and ``)``
+    are not ``\\w`` characters.
+    """
+    if not expr:
+        return False
+    escaped = re.escape(old_name)
+    return bool(re.search(rf"(?<!\w){escaped}(?!\w)", expr))
 
 
 def get_template_dir() -> str:
@@ -53,11 +72,13 @@ def get_template_dir() -> str:
 
 # ---- Session API ----
 
+
 class SessionAPI:
     """Qt-free orchestrator for pqwave session operations."""
 
     def __init__(self, state=None):
         from pqwave.models.state import ApplicationState
+
         self._state = state or ApplicationState()
         self._on_mutation: Callable | None = None
 
@@ -75,7 +96,10 @@ class SessionAPI:
         """Resolve a signal name to (x_data, y_data). Searches all datasets."""
         name_lower = name.lower()
         for trace in self._state.traces:
-            if trace.name.lower() == name_lower or trace.expression.lower() == name_lower:
+            if (
+                trace.name.lower() == name_lower
+                or trace.expression.lower() == name_lower
+            ):
                 return trace.x_data, trace.y_data
         for ds in self._state.datasets:
             var = ds.get_variable(name)
@@ -133,17 +157,28 @@ class SessionAPI:
 
     # ---- Monte Carlo ----
 
-    def mc_load(self, source: str, source_type: str = "stepped",
-                grouping_pattern: str | None = None) -> dict:
+    def mc_load(
+        self,
+        source: str,
+        source_type: str = "stepped",
+        grouping_pattern: str | None = None,
+    ) -> dict:
         """Load file(s) as Monte Carlo run collection."""
         if self._on_mutation:
-            self._on_mutation("mc_load", source=source, source_type=source_type,
-                              grouping_pattern=grouping_pattern)
+            self._on_mutation(
+                "mc_load",
+                source=source,
+                source_type=source_type,
+                grouping_pattern=grouping_pattern,
+            )
             return {"status": "ok"}
         from pqwave.models.rawfile import RawFile
         from pqwave.models.mc_collection import (
-            build_mc_from_stepped, build_mc_from_pattern, build_mc_from_multi_files
+            build_mc_from_stepped,
+            build_mc_from_pattern,
+            build_mc_from_multi_files,
         )
+
         if source_type == "stepped":
             raw = RawFile(source)
             mc = build_mc_from_stepped(raw, source)
@@ -234,7 +269,10 @@ class SessionAPI:
             return {"status": "ok"}
         mc = self._state.mc_collection
         if mc is None:
-            return {"status": "error", "message": "No MC data loaded — use mc_load first"}
+            return {
+                "status": "error",
+                "message": "No MC data loaded — use mc_load first",
+            }
         # In headless mode, record the grouping intent
         if pattern:
             mc.parameters["_grouping_pattern"] = [pattern]
@@ -262,13 +300,19 @@ class SessionAPI:
         if data is None:
             return {"status": "error", "message": f"No MC data for signal {signal}"}
         from pqwave.analysis.multi_run import compute_cross_run_stats
-        stats = compute_cross_run_stats(data)
-        return {"status": "ok", "mean": stats["mean"].tolist(),
-                "std": stats["std"].tolist(), "min": stats["min"].tolist(),
-                "max": stats["max"].tolist()}
 
-    def mc_histogram(self, measurement: str, bins: int = 50,
-                     range: tuple | None = None) -> dict:
+        stats = compute_cross_run_stats(data)
+        return {
+            "status": "ok",
+            "mean": stats["mean"].tolist(),
+            "std": stats["std"].tolist(),
+            "min": stats["min"].tolist(),
+            "max": stats["max"].tolist(),
+        }
+
+    def mc_histogram(
+        self, measurement: str, bins: int = 50, range: tuple | None = None
+    ) -> dict:
         """Compute histogram of a measurement across MC runs.
 
         The measurement string must be of the form 'max(v(out))'
@@ -276,35 +320,49 @@ class SessionAPI:
         argument is a signal name.
         """
         if self._on_mutation:
-            self._on_mutation("mc_histogram", measurement=measurement,
-                              bins=bins, range=range)
+            self._on_mutation(
+                "mc_histogram", measurement=measurement, bins=bins, range=range
+            )
             return {"status": "ok"}
         import re
+
         m = re.match(r"(\w+)\((.*)\)", measurement)
         if not m:
-            return {"status": "error", "message": "Measurement must be of form 'max(v(out))'"}
+            return {
+                "status": "error",
+                "message": "Measurement must be of form 'max(v(out))'",
+            }
         measure, signal = m.group(1), m.group(2)
         data = self._mc_get_signal_data(signal)
         if data is None:
             return {"status": "error", "message": f"No MC data for signal {signal}"}
         from pqwave.analysis.multi_run import compute_run_measurements
+
         values = compute_run_measurements(data, measure)
         from pqwave.analysis.histogram import compute_histogram
-        hist = compute_histogram(values, bins=bins, norm="count", range=range)
-        return {"status": "ok", "counts": hist["counts"].tolist(),
-                "centers": hist["centers"].tolist(), "edges": hist["edges"].tolist()}
 
-    def mc_yield(self, signal: str, low: float, high: float,
-                  condition: str | None = None) -> dict:
+        hist = compute_histogram(values, bins=bins, norm="count", range=range)
+        return {
+            "status": "ok",
+            "counts": hist["counts"].tolist(),
+            "centers": hist["centers"].tolist(),
+            "edges": hist["edges"].tolist(),
+        }
+
+    def mc_yield(
+        self, signal: str, low: float, high: float, condition: str | None = None
+    ) -> dict:
         """Compute yield of runs within spec limits."""
         if self._on_mutation:
-            self._on_mutation("mc_yield", signal=signal, low=low,
-                              high=high, condition=condition)
+            self._on_mutation(
+                "mc_yield", signal=signal, low=low, high=high, condition=condition
+            )
             return {"status": "ok"}
         data = self._mc_get_signal_data(signal)
         if data is None:
             return {"status": "error", "message": f"No MC data for signal {signal}"}
         from pqwave.analysis.multi_run import compute_yield
+
         result = compute_yield(data, low, high, condition)
         if isinstance(result, float):
             return {"status": "ok", "yield_pct": result}
@@ -316,9 +374,13 @@ class SessionAPI:
             self._on_mutation("mc_scatter", measurement=measurement, param=param)
             return {"status": "ok"}
         import re
+
         m = re.match(r"(\w+)\((.*)\)", measurement)
         if not m:
-            return {"status": "error", "message": "Measurement must be of form 'max(v(out))'"}
+            return {
+                "status": "error",
+                "message": "Measurement must be of form 'max(v(out))'",
+            }
         measure, signal = m.group(1), m.group(2)
         data = self._mc_get_signal_data(signal)
         if data is None:
@@ -327,10 +389,16 @@ class SessionAPI:
         if mc is None or not mc.has_parameters or param not in mc.parameters:
             return {"status": "error", "message": f"Parameter {param} not annotated"}
         from pqwave.analysis.multi_run import compute_run_measurements
+
         measurements = compute_run_measurements(data, measure)
         param_vals = mc.parameters[param]
-        return {"status": "ok", "x": list(param_vals),
-                "y": measurements.tolist(), "param": param, "measure": measure}
+        return {
+            "status": "ok",
+            "x": list(param_vals),
+            "y": measurements.tolist(),
+            "param": param,
+            "measure": measure,
+        }
 
     def mc_worst(self, n: int = 5, metric: str = "max_abs_diff") -> dict:
         """Return worst N runs by deviation from nominal."""
@@ -350,8 +418,12 @@ class SessionAPI:
                 if data is not None:
                     break
         if data is None:
-            return {"status": "error", "message": "No trace data available for worst-case analysis"}
+            return {
+                "status": "error",
+                "message": "No trace data available for worst-case analysis",
+            }
         from pqwave.analysis.multi_run import compute_worst_cases
+
         worst = compute_worst_cases(data, mc.nominal_index, n, metric)
         return {"status": "ok", "worst": worst}
 
@@ -364,19 +436,27 @@ class SessionAPI:
         if mc is None or not mc.has_parameters:
             return {"status": "error", "message": "No parameters annotated"}
         import re
+
         m = re.match(r"(\w+)\((.*)\)", measurement)
         if not m:
-            return {"status": "error", "message": "Measurement must be of form 'max(v(out))'"}
+            return {
+                "status": "error",
+                "message": "Measurement must be of form 'max(v(out))'",
+            }
         measure, signal = m.group(1), m.group(2)
         data = self._mc_get_signal_data(signal)
         if data is None:
             return {"status": "error", "message": f"No MC data for signal {signal}"}
-        from pqwave.analysis.multi_run import compute_run_measurements, compute_sensitivity
+        from pqwave.analysis.multi_run import (
+            compute_run_measurements,
+            compute_sensitivity,
+        )
         import numpy as np
+
         measurements = compute_run_measurements(data, measure)
-        sensitivity = compute_sensitivity(measurements, {
-            k: np.array(v) for k, v in mc.parameters.items()
-        })
+        sensitivity = compute_sensitivity(
+            measurements, {k: np.array(v) for k, v in mc.parameters.items()}
+        )
         return {"status": "ok", "sensitivity": sensitivity}
 
     def mc_correlation_load(self, path: str) -> dict:
@@ -388,6 +468,7 @@ class SessionAPI:
         if mc is None:
             return {"status": "error", "message": "No MC data loaded"}
         import csv
+
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 reader = csv.reader(fh)
@@ -407,6 +488,7 @@ class SessionAPI:
                     val = 0.0 if r != c else 1.0
                 flat.append(val)
         from pqwave.models.mc_collection import CorrelationMatrix
+
         mc._correlation = CorrelationMatrix(params=headers, matrix=flat)
         return {"status": "ok", "size": n, "params": headers}
 
@@ -434,8 +516,11 @@ class SessionAPI:
         return {"status": "error", "message": "Editor requires GUI"}
 
     def mc_generate(
-        self, output_path: str, output_format: str = "csv",
-        runs: int = 100, seed: int | None = None,
+        self,
+        output_path: str,
+        output_format: str = "csv",
+        runs: int = 100,
+        seed: int | None = None,
         nominals: list[float] | None = None,
         sigmas: list[float] | None = None,
     ) -> dict:
@@ -450,17 +535,30 @@ class SessionAPI:
             sigmas: Optional per-parameter absolute variation. Defaults to 0.1.
         """
         if self._on_mutation:
-            self._on_mutation("mc_generate", output_path=output_path,
-                              output_format=output_format, runs=runs, seed=seed,
-                              nominals=nominals, sigmas=sigmas)
+            self._on_mutation(
+                "mc_generate",
+                output_path=output_path,
+                output_format=output_format,
+                runs=runs,
+                seed=seed,
+                nominals=nominals,
+                sigmas=sigmas,
+            )
             return {"status": "ok"}
         return _mc_generate_core(
-            self._state, output_path, output_format, runs, seed, nominals, sigmas,
+            self._state,
+            output_path,
+            output_format,
+            runs,
+            seed,
+            nominals,
+            sigmas,
         )
 
     def _mc_get_signal_data(self, signal: str):
         """Get 2D data array (n_runs, n_points) for an MC signal from state."""
         import numpy as np
+
         mc = self._state.mc_collection
         if mc is None or mc.active_count == 0:
             return None
@@ -470,16 +568,16 @@ class SessionAPI:
             if ds_idx >= len(self._state.datasets):
                 continue
             ds = self._state.datasets[ds_idx]
-            var = ds.get_variable(signal) if hasattr(ds, 'get_variable') else None
+            var = ds.get_variable(signal) if hasattr(ds, "get_variable") else None
             if var is not None:
-                y = var.y_data if hasattr(var, 'y_data') else np.array(var.data)
+                y = var.y_data if hasattr(var, "y_data") else np.array(var.data)
                 run_data.append(y)
         if not run_data:
             return None
         n_points = max(len(y) for y in run_data)
         data = np.zeros((len(run_data), n_points))
         for i, y in enumerate(run_data):
-            data[i, :len(y)] = y
+            data[i, : len(y)] = y
         return data
 
     # ---- Lepton-EDA bridge methods ----
@@ -501,6 +599,7 @@ class SessionAPI:
             self._on_mutation("lepton_simulate", path=path)
             return {"status": "ok"}
         from pqwave.bridge.lepton.bridge import LeptonBridge
+
         bridge = LeptonBridge()
         return bridge.simulate(path)
 
@@ -518,12 +617,16 @@ class SessionAPI:
             self._on_mutation("lepton_probe_net", name=name)
             return {"status": "ok"}
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+
         client = LeptonCrossProbeClient()
         if client.connect_to_server():
             client.probe_net(name)
             client.disconnect()
             return {"status": "ok"}
-        return {"status": "error", "message": "lepton-schematic not running or pqwave server not active"}
+        return {
+            "status": "error",
+            "message": "lepton-schematic not running or pqwave server not active",
+        }
 
     def lepton_probe_part(self, ref: str, pin: str | None = None) -> dict:
         """Highlight a component in lepton-schematic."""
@@ -531,6 +634,7 @@ class SessionAPI:
             self._on_mutation("lepton_probe_part", ref=ref, pin=pin)
             return {"status": "ok"}
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+
         client = LeptonCrossProbeClient()
         if client.connect_to_server():
             client.probe_part(ref, pin)
@@ -544,6 +648,7 @@ class SessionAPI:
             self._on_mutation("lepton_clear")
             return {"status": "ok"}
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+
         client = LeptonCrossProbeClient()
         if client.connect_to_server():
             client.clear()
@@ -557,6 +662,7 @@ class SessionAPI:
             self._on_mutation("lepton_annotate_dc", voltages=voltages)
             return {"status": "ok"}
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+
         client = LeptonCrossProbeClient()
         if client.connect_to_server():
             for netname, voltage in (voltages or {}).items():
@@ -571,6 +677,7 @@ class SessionAPI:
             self._on_mutation("lepton_clear_annotations")
             return {"status": "ok"}
         from pqwave.bridge.lepton.cross_probe import LeptonCrossProbeClient
+
         client = LeptonCrossProbeClient()
         if client.connect_to_server():
             client.send_command("$CLEAR:ANNOTATIONS")
@@ -589,15 +696,20 @@ class SessionAPI:
         """
         if key == "install_server":
             from pqwave.bridge.lepton.cross_probe import install_scheme_server
+
             return install_scheme_server()
 
         if key == "port":
             if value is not None:
                 reserved = {2026: "xschem (server)", 2021: "xschem (back-annotation)"}
                 if int(value) in reserved:
-                    return {"status": "error", "message": f"Port {value} conflicts with {reserved[int(value)]}"}
+                    return {
+                        "status": "error",
+                        "message": f"Port {value} conflicts with {reserved[int(value)]}",
+                    }
 
         from pqwave.models.state import ApplicationState
+
         state = ApplicationState()
         if not hasattr(state, "_lepton_config"):
             state._lepton_config = {"port": 9424, "auto_simulate": True}
@@ -627,6 +739,7 @@ class SessionAPI:
             self._on_mutation("xschem_simulate", path=path)
             return {"status": "ok", "triggered": True}
         from pqwave.bridge.xschem.bridge import XschemBridge
+
         bridge = XschemBridge()
         result = bridge.simulate(path)
         if result["raw_file"]:
@@ -647,6 +760,7 @@ class SessionAPI:
             self._on_mutation("xschem_probe_net", name=name)
             return {"status": "ok"}
         from pqwave.bridge.xschem.bridge import XschemBridge
+
         bridge = XschemBridge()
         bridge.probe_net(name)
         return {"status": "ok"}
@@ -657,6 +771,7 @@ class SessionAPI:
             self._on_mutation("xschem_probe_part", ref=ref, pin=pin)
             return {"status": "ok"}
         from pqwave.bridge.xschem.bridge import XschemBridge
+
         bridge = XschemBridge()
         bridge.probe_part(ref, pin)
         return {"status": "ok"}
@@ -667,6 +782,7 @@ class SessionAPI:
             self._on_mutation("xschem_clear")
             return {"status": "ok"}
         from pqwave.bridge.xschem.bridge import XschemBridge
+
         bridge = XschemBridge()
         bridge.clear_probe()
         return {"status": "ok"}
@@ -679,6 +795,7 @@ class SessionAPI:
               ngspice (binary path)
         """
         from pqwave.models.state import ApplicationState
+
         state = ApplicationState()
         if not hasattr(state, "_xschem_config"):
             state._xschem_config = {
@@ -709,6 +826,7 @@ class SessionAPI:
         """Get or create a cached KiCadBridge for API calls."""
         if not hasattr(self, "_kicad_bridge") or self._kicad_bridge is None:
             from pqwave.bridge.kicad.bridge import KiCadBridge
+
             self._kicad_bridge = KiCadBridge()
         return self._kicad_bridge
 
@@ -719,12 +837,12 @@ class SessionAPI:
         kicad-cli must be available.
         """
         import os
+
         if not os.path.isfile(path):
             raise FileNotFoundError(f"Schematic not found: {path!r}")
         if not path.lower().endswith(".kicad_sch"):
             raise ValueError(
-                f"Expected a .kicad_sch file, got: "
-                f"{os.path.splitext(path)[1]!r}"
+                f"Expected a .kicad_sch file, got: " f"{os.path.splitext(path)[1]!r}"
             )
         if self._on_mutation:
             self._on_mutation("kicad_connect", path=path)
@@ -739,6 +857,7 @@ class SessionAPI:
         If no path given, uses the last connected path.
         """
         import os
+
         path = sch_path or getattr(self, "_kicad_connected_path", None)
         if not path:
             raise ValueError("No schematic connected. Use kicad_connect first.")
@@ -780,8 +899,11 @@ class SessionAPI:
         return {
             "status": "ok" if ok else "unavailable",
             "count": len(voltages) if voltages else 0,
-            "message": "IPC API not available — install kicad-python and enable in KiCad"
-            if not ok else f"Annotated {len(voltages)} values",
+            "message": (
+                "IPC API not available — install kicad-python and enable in KiCad"
+                if not ok
+                else f"Annotated {len(voltages)} values"
+            ),
         }
 
     def kicad_clear_annotations(self) -> dict:
@@ -795,8 +917,11 @@ class SessionAPI:
         ok = bridge.clear_dc_annotations()
         return {
             "status": "ok" if ok else "unavailable",
-            "message": "Cleared annotations" if ok else
-            "IPC API not available — install kicad-python and enable in KiCad",
+            "message": (
+                "Cleared annotations"
+                if ok
+                else "IPC API not available — install kicad-python and enable in KiCad"
+            ),
         }
 
     def kicad_config(self, key: str, value=None) -> dict:
@@ -807,8 +932,10 @@ class SessionAPI:
         """
         state = self._state
         if value is None:
-            return {"status": "ok", key:
-                    getattr(state, "_kicad_config", {}).get(key, "")}
+            return {
+                "status": "ok",
+                key: getattr(state, "_kicad_config", {}).get(key, ""),
+            }
         cfg = dict(getattr(state, "_kicad_config", {}))
         cfg[key] = value
         state._kicad_config = cfg
@@ -820,16 +947,18 @@ class SessionAPI:
         TODO: duplicates MainWindow._extract_dc_voltages — extract shared helper.
         """
         import re
+
         voltages = {}
         state = self._state
         if not state.datasets:
             return {}
         ds = state.datasets[-1]
         for var in ds.variables:
-            m = re.match(r'^v\((.+)\)$', var.name, re.IGNORECASE)
+            m = re.match(r"^v\((.+)\)$", var.name, re.IGNORECASE)
             if m and var.data is not None and len(var.data) > 0:
                 try:
                     import numpy as np
+
                     voltages[m.group(1)] = float(np.mean(var.data))
                 except (TypeError, ValueError):
                     pass
@@ -863,7 +992,9 @@ class SessionAPI:
         else:
             info = self._load_raw(abs_path)
 
-        self._state.source_files.append(SourceFile(path=abs_path, file_type=ext.lstrip(".")))
+        self._state.source_files.append(
+            SourceFile(path=abs_path, file_type=ext.lstrip("."))
+        )
         return info
 
     def _load_raw(self, path: str) -> dict:
@@ -982,7 +1113,8 @@ class SessionAPI:
             None — not a range pattern
         """
         import re
-        m = re.match(r'^([a-zA-Z0-9_]\w*?)(\d+)~\1(\d+)$', expr)
+
+        m = re.match(r"^([a-zA-Z0-9_]\w*?)(\d+)~\1(\d+)$", expr)
         if not m:
             return None
         prefix = m.group(1)
@@ -1012,12 +1144,12 @@ class SessionAPI:
         # Only when * or ? looks like a glob, not a math operator:
         #   q*, v(q*)  → glob    (no math context)
         #   v(1)*v(2)  → product (digit or ) before *)
-        if ('*' in expr or '?' in expr) and not re.search(r'[\d)][*?]|[*?]\d', expr):
+        if ("*" in expr or "?" in expr) and not re.search(r"[\d)][*?]|[*?]\d", expr):
             result = self.show_matching(expr)
             return result.get("shown", [])
 
         # Expand range notation: q1~q4 → add(["q1","q2","q3","q4"])
-        if '~' in expr:
+        if "~" in expr:
             expanded = self._expand_range(expr, self.signals())
             if expanded is not None:
                 if not expanded:
@@ -1149,8 +1281,14 @@ class SessionAPI:
 
     # ---- Analysis ----
 
-    def fft(self, signal: str, window: str = "hann", from_: str = None,
-            to: str = None, **kwargs) -> dict:
+    def fft(
+        self,
+        signal: str,
+        window: str = "hann",
+        from_: str = None,
+        to: str = None,
+        **kwargs,
+    ) -> dict:
         """Compute FFT of a signal. In GUI mode, adds as plot trace."""
         from pqwave.ui.fft_engine import compute_fft
         from pqwave.measure.measure_engine import _parse_value
@@ -1169,13 +1307,21 @@ class SessionAPI:
         if x_min is not None or x_max is not None:
             fft_kwargs["x_range_mode"] = "manual"
             fft_kwargs["x_range_start"] = x_min if x_min is not None else 0.0
-            fft_kwargs["x_range_end"] = x_max if x_max is not None else float(x_data[-1])
+            fft_kwargs["x_range_end"] = (
+                x_max if x_max is not None else float(x_data[-1])
+            )
 
         freq, mag = compute_fft(y_data, x_data, **fft_kwargs)
         return {"freq": freq, "mag": mag}
 
-    def power(self, v_signal: str, i_signal: str, from_: str = None,
-              to: str = None, v_threshold: float = None) -> dict:
+    def power(
+        self,
+        v_signal: str,
+        i_signal: str,
+        from_: str = None,
+        to: str = None,
+        v_threshold: float = None,
+    ) -> dict:
         """Compute instantaneous power P(t) = V(t) * I(t)."""
         from pqwave.analysis.power_analyzer import power_analysis
         from pqwave.measure.measure_engine import _parse_value
@@ -1192,8 +1338,13 @@ class SessionAPI:
 
         return power_analysis(v_data, i_data, t_data, xmin, xmax, v_threshold)
 
-    def histogram(self, trace: str, bins: int | None = None,
-                  range: list[float] | None = None, norm: str = "count") -> dict:
+    def histogram(
+        self,
+        trace: str,
+        bins: int | None = None,
+        range: list[float] | None = None,
+        norm: str = "count",
+    ) -> dict:
         """Compute histogram of a trace and return the bin data.
 
         In GUI mode, delegates to the main window for dialog + rendering.
@@ -1201,11 +1352,15 @@ class SessionAPI:
         """
         if self._on_mutation:
             kwargs = {"bins": bins, "range": range, "norm": norm}
-            self._on_mutation("histogram", trace=trace,
-                              **{k: v for k, v in kwargs.items() if v is not None})
+            self._on_mutation(
+                "histogram",
+                trace=trace,
+                **{k: v for k, v in kwargs.items() if v is not None},
+            )
             return {"success": True, "trace": trace}
 
         from pqwave.analysis.histogram import compute_histogram
+
         found = None
         for t in self._state.traces:
             if t.name == trace or t.expression == trace:
@@ -1215,15 +1370,19 @@ class SessionAPI:
             return {"success": False, "error": f"Trace '{trace}' not found"}
         y_data = found.y_data if found.y_data is not None else np.array([])
         result = compute_histogram(
-            y_data, bins=bins,
+            y_data,
+            bins=bins,
             range=tuple(range) if range else None,
             norm=norm,
         )
-        return {"success": True, "data": {
-            "counts": result["counts"].tolist(),
-            "edges": result["edges"].tolist(),
-            "centers": result["centers"].tolist(),
-        }}
+        return {
+            "success": True,
+            "data": {
+                "counts": result["counts"].tolist(),
+                "edges": result["edges"].tolist(),
+                "centers": result["centers"].tolist(),
+            },
+        }
 
     def nyquist(self, real: str, imag: str, freq: str | None = None) -> dict:
         """Compute a Nyquist trace from real and imaginary vector data.
@@ -1253,12 +1412,17 @@ class SessionAPI:
                 pass
 
         result = compute_nyquist_trace(
-            real=real_data, imag=imag_data, freq=freq_data,
+            real=real_data,
+            imag=imag_data,
+            freq=freq_data,
         )
-        return {"success": True, "data": {
-            "x": result["x"].tolist(),
-            "y": result["y"].tolist(),
-        }}
+        return {
+            "success": True,
+            "data": {
+                "x": result["x"].tolist(),
+                "y": result["y"].tolist(),
+            },
+        }
 
     def bode(self, mag: str, phase: str, freq: str | None = None) -> dict:
         """Compute a Bode plot from magnitude and phase vector data.
@@ -1293,24 +1457,35 @@ class SessionAPI:
                 pass
 
         result = compute_bode(
-            mag_db=mag_data, phase_deg=phase_data, freq=freq_data,
+            mag_db=mag_data,
+            phase_deg=phase_data,
+            freq=freq_data,
         )
-        return {"success": True, "data": {
-            "gain_db": result["gain_db"].tolist(),
-            "phase_deg": result["phase_deg"].tolist(),
-            "freq": result["freq"].tolist(),
-        }}
+        return {
+            "success": True,
+            "data": {
+                "gain_db": result["gain_db"].tolist(),
+                "phase_deg": result["phase_deg"].tolist(),
+                "freq": result["freq"].tolist(),
+            },
+        }
 
     # ---- View control ----
 
-    def range(self, xmin: float = None, xmax: float = None,
-              ymin: float = None, ymax: float = None) -> dict:
+    def range(
+        self,
+        xmin: float = None,
+        xmax: float = None,
+        ymin: float = None,
+        ymax: float = None,
+    ) -> dict:
         """Set view range of the active panel."""
         if self._on_mutation:
             self._on_mutation("range", xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
             return {"xmin": xmin, "xmax": xmax, "ymin": ymin, "ymax": ymax}
 
         from pqwave.models.state import AxisId
+
         if xmin is not None or xmax is not None:
             cur = self._state.get_axis_config(AxisId.X)
             cur_min, cur_max = cur.range or (0, 1)
@@ -1335,6 +1510,7 @@ class SessionAPI:
             self._on_mutation("log_x", on=on)
             return {"log_x": on}
         from pqwave.models.state import AxisId
+
         self._state.set_axis_log_mode(AxisId.X, on)
         return {"log_x": on}
 
@@ -1344,6 +1520,7 @@ class SessionAPI:
             self._on_mutation("log_y", on=on)
             return {"log_y": on}
         from pqwave.models.state import AxisId
+
         self._state.set_axis_log_mode(AxisId.Y1, on)
         return {"log_y": on}
 
@@ -1404,14 +1581,14 @@ class SessionAPI:
 
     def _template_manager(self):
         from pqwave.templates.manager import TemplateManager
+
         return TemplateManager(get_template_dir())
 
     def save_template(self, name: str) -> dict:
         """Save current panel view as a named template."""
         config = {
             "axis_configs": {
-                ax.value: cfg.to_dict()
-                for ax, cfg in self._state.axis_configs.items()
+                ax.value: cfg.to_dict() for ax, cfg in self._state.axis_configs.items()
             },
             "trace_expressions": [
                 {
@@ -1419,7 +1596,8 @@ class SessionAPI:
                     "axis": t.y_axis.value,
                     "color": list(t.color),
                 }
-                for t in self._state.traces if t.visible
+                for t in self._state.traces
+                if t.visible
             ],
             "display": {
                 "title": self._state.plot_title,
@@ -1468,8 +1646,7 @@ class SessionAPI:
                 applied += 1
             except Exception:
                 logger.warning(
-                    "load_template: skipping '%s' — vector not found "
-                    "in loaded data",
+                    "load_template: skipping '%s' — vector not found " "in loaded data",
                     te.get("expr", ""),
                 )
                 skipped.append(te.get("expr", ""))
@@ -1487,9 +1664,7 @@ class SessionAPI:
                         break
                 # In GUI mode, also update the plot item pen through mutation
                 if self._on_mutation:
-                    self._on_mutation(
-                        "set_trace", name=te["expr"], color=color_tuple
-                    )
+                    self._on_mutation("set_trace", name=te["expr"], color=color_tuple)
 
         # Apply display
         if config.get("display", {}).get("title"):
@@ -1503,8 +1678,7 @@ class SessionAPI:
         if skipped:
             result["skipped_expressions"] = skipped
             result["warning"] = (
-                f"Skipped {len(skipped)} expression(s) "
-                f"not found in current data"
+                f"Skipped {len(skipped)} expression(s) " f"not found in current data"
             )
         return result
 
@@ -1533,6 +1707,7 @@ class SessionAPI:
         """Execute a line of Python code against this session."""
         namespace = {"session": self, "np": np}
         from functools import partial
+
         for name, entry in _COMMAND_REGISTRY.items():
             namespace[name] = partial(entry["fn"], self)
 
@@ -1648,6 +1823,7 @@ class SessionAPI:
     def show_matching(self, pattern: str) -> dict:
         """Plot all signals matching a glob pattern (e.g., 'v(q*)')."""
         import fnmatch
+
         sigs = self.signals()
         shown = []
         for sig in sigs:
@@ -1656,7 +1832,9 @@ class SessionAPI:
                     self.add(sig)
                     shown.append(sig)
                 except Exception:
-                    logger.warning("show_matching: failed to add %s", sig, exc_info=True)
+                    logger.warning(
+                        "show_matching: failed to add %s", sig, exc_info=True
+                    )
         return {"pattern": pattern, "shown": shown}
 
     # ---- Bus / Digital ----
@@ -1687,14 +1865,31 @@ class SessionAPI:
             self._on_mutation("digital", sig=sig, on=on)
         return {"digital": sig, "on": on}
 
-    def set_trace(self, name: str, height: float = None, width: int = None,
-                  color: tuple = None, alias: str = None) -> dict:
+    def set_trace(
+        self,
+        name: str,
+        height: float = None,
+        width: int = None,
+        color: tuple = None,
+        alias: str = None,
+    ) -> dict:
         """Set properties of an existing trace by name."""
         if self._on_mutation:
-            self._on_mutation("set_trace", name=name, height=height,
-                              width=width, color=color, alias=alias)
-        return {"name": name, "height": height, "width": width,
-                "color": color, "alias": alias}
+            self._on_mutation(
+                "set_trace",
+                name=name,
+                height=height,
+                width=width,
+                color=color,
+                alias=alias,
+            )
+        return {
+            "name": name,
+            "height": height,
+            "width": width,
+            "color": color,
+            "alias": alias,
+        }
 
     # ---- Cursor visibility ----
 
@@ -1727,9 +1922,11 @@ class SessionAPI:
 
     # ---- FFT parameters ----
 
-    def fft_config(self, window: str = None, fft_size: int = None,
-                   representation: str = None) -> dict:
+    def fft_config(
+        self, window: str = None, fft_size: int = None, representation: str = None
+    ) -> dict:
         from pqwave.models.state import FftConfig
+
         cfg = self._state.fft_config
         if window:
             cfg.window = window
@@ -1737,8 +1934,11 @@ class SessionAPI:
             cfg.fft_size = fft_size
         if representation:
             cfg.representation = representation
-        return {"window": cfg.window, "fft_size": cfg.fft_size,
-                "representation": cfg.representation}
+        return {
+            "window": cfg.window,
+            "fft_size": cfg.fft_size,
+            "representation": cfg.representation,
+        }
 
     # ---- Reload ----
 
@@ -1757,11 +1957,14 @@ class SessionAPI:
         # Headless fallback: render traces with matplotlib
         try:
             import matplotlib
+
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
-            return {"export_plot": None,
-                    "error": "matplotlib is required for headless export. Install it with: pip install matplotlib"}
+            return {
+                "export_plot": None,
+                "error": "matplotlib is required for headless export. Install it with: pip install matplotlib",
+            }
 
         from pqwave.models.state import ViewboxTheme, AxisId
         from pqwave.models.trace import AxisAssignment
@@ -1800,14 +2003,24 @@ class SessionAPI:
 
         for trace in y1_traces:
             r, g, b = trace.color
-            ax.plot(trace.x_data, trace.y_data, color=f"#{r:02x}{g:02x}{b:02x}",
-                    linewidth=trace.line_width, label=trace.name)
+            ax.plot(
+                trace.x_data,
+                trace.y_data,
+                color=f"#{r:02x}{g:02x}{b:02x}",
+                linewidth=trace.line_width,
+                label=trace.name,
+            )
 
         for trace in y2_traces:
             r, g, b = trace.color
             c = f"#{r:02x}{g:02x}{b:02x}"
-            (ax2 if ax2 else ax).plot(trace.x_data, trace.y_data, color=c,
-                    linewidth=trace.line_width, label=trace.name)
+            (ax2 if ax2 else ax).plot(
+                trace.x_data,
+                trace.y_data,
+                color=c,
+                linewidth=trace.line_width,
+                label=trace.name,
+            )
 
         if is_dark:
             fig.patch.set_facecolor("#1a1a1a")
@@ -1841,10 +2054,14 @@ class SessionAPI:
             lines.extend(l2)
             labels.extend(lab2)
         if lines:
-            ax.legend(lines, labels, loc="upper right",
-                      facecolor="#2a2a2a" if is_dark else "#ffffff",
-                      edgecolor="#555555" if is_dark else "#cccccc",
-                      labelcolor="#cccccc" if is_dark else "#000000")
+            ax.legend(
+                lines,
+                labels,
+                loc="upper right",
+                facecolor="#2a2a2a" if is_dark else "#ffffff",
+                edgecolor="#555555" if is_dark else "#cccccc",
+                labelcolor="#cccccc" if is_dark else "#000000",
+            )
 
         fig.tight_layout()
         fig.savefig(path, dpi=100, facecolor=fig.get_facecolor())
@@ -1894,6 +2111,24 @@ class SessionAPI:
             self._on_mutation("close_panel")
         return {}
 
+    def rename_vector(
+        self, dataset_index: int, old_name: str, new_name: str
+    ) -> dict:
+        """Rename a vector in the specified dataset.
+
+        Public wrapper around the ``rename_vector`` session command.
+        Blocks if any active trace references the old name.
+
+        Args:
+            dataset_index: Index of the dataset containing the vector.
+            old_name: Current vector name.
+            new_name: New vector name (must not be empty).
+
+        Returns:
+            Result dict with ``status`` key.
+        """
+        return _cmd_rename_vector(self, dataset_index, old_name, new_name)
+
 
 def _mc_generate_core(
     state,
@@ -1913,9 +2148,13 @@ def _mc_generate_core(
         return {"status": "error", "message": "No correlation matrix loaded"}
 
     from pqwave.analysis.correlation import (
-        compute_cholesky, generate_correlated_values,
-        generate_control_script, generate_csv, generate_param_snippet,
+        compute_cholesky,
+        generate_correlated_values,
+        generate_control_script,
+        generate_csv,
+        generate_param_snippet,
     )
+
     try:
         L = compute_cholesky(cm)
     except ValueError as e:
@@ -1944,8 +2183,13 @@ def _mc_generate_core(
                 ),
             }
         generate_control_script(
-            params, noms, L, output_path,
-            sim_command="tran 1n 100n 0", n_runs=runs, seed=seed,
+            params,
+            noms,
+            L,
+            output_path,
+            sim_command="tran 1n 100n 0",
+            n_runs=runs,
+            seed=seed,
         )
     elif output_format == "csv":
         generate_csv(values, cm.params, output_path)
@@ -1965,351 +2209,435 @@ def _mc_generate_core(
 # The @api_command decorator is available for future modules without circular deps.
 
 
-@api_command("measure", "measure(expr, from_=None, to=None, ...)",
-             "Evaluate a measurement expression (avg, rms, rise_time, etc.)")
+@api_command(
+    "measure",
+    "measure(expr, from_=None, to=None, ...)",
+    "Evaluate a measurement expression (avg, rms, rise_time, etc.)",
+)
 def _cmd_measure(session: SessionAPI, expr: str, **kwargs):
     return session.measure(expr, **kwargs)
 
 
-@api_command("measure_script", "measure_script(text)",
-             "Execute a .meas-style script")
+@api_command("measure_script", "measure_script(text)", "Execute a .meas-style script")
 def _cmd_measure_script(session: SessionAPI, text: str):
     return session.measure_script(text)
 
 
-@api_command("add", "add(expr, axis='Y1')",
-             "Add a trace to the active panel")
+@api_command("add", "add(expr, axis='Y1')", "Add a trace to the active panel")
 def _cmd_add(session: SessionAPI, expr, axis: str = "Y1"):
     return session.add(expr, axis)
 
 
-@api_command("show", "show(expr)",
-             "Show a hidden trace (make it visible)")
+@api_command("show", "show(expr)", "Show a hidden trace (make it visible)")
 def _cmd_show(session: SessionAPI, expr):
     return session.show(expr)
 
 
-@api_command("add_all", "add_all()",
-             "Add all available signals to the active panel")
+@api_command("add_all", "add_all()", "Add all available signals to the active panel")
 def _cmd_add_all(session: SessionAPI):
     return session.add_all()
 
 
-@api_command("show_all", "show_all()",
-             "Make all traces visible")
+@api_command("show_all", "show_all()", "Make all traces visible")
 def _cmd_show_all(session: SessionAPI):
     return session.show_all()
 
 
-@api_command("remove", "remove(trace_identifier)",
-             "Remove a trace by name or index")
+@api_command("remove", "remove(trace_identifier)", "Remove a trace by name or index")
 def _cmd_remove(session: SessionAPI, trace_identifier):
     return session.remove(trace_identifier)
 
 
-@api_command("remove_all", "remove_all()",
-             "Remove all traces from the active panel")
+@api_command("remove_all", "remove_all()", "Remove all traces from the active panel")
 def _cmd_remove_all(session: SessionAPI):
     return session.remove_all()
 
 
-@api_command("hide", "hide(expr)",
-             "Hide a trace (make it invisible)")
+@api_command("hide", "hide(expr)", "Hide a trace (make it invisible)")
 def _cmd_hide(session: SessionAPI, expr):
     return session.hide(expr)
 
 
-@api_command("hide_all", "hide_all()",
-             "Make all traces invisible")
+@api_command("hide_all", "hide_all()", "Make all traces invisible")
 def _cmd_hide_all(session: SessionAPI):
     return session.hide_all()
 
 
-@api_command("fft", "fft(signal, window='hann', from_=None, to=None)",
-             "Compute FFT of a signal")
-def _cmd_fft(session: SessionAPI, signal: str, window: str = "hann",
-             from_: str = None, to: str = None, **kwargs):
+@api_command(
+    "fft", "fft(signal, window='hann', from_=None, to=None)", "Compute FFT of a signal"
+)
+def _cmd_fft(
+    session: SessionAPI,
+    signal: str,
+    window: str = "hann",
+    from_: str = None,
+    to: str = None,
+    **kwargs,
+):
     return session.fft(signal, window=window, from_=from_, to=to, **kwargs)
 
 
-@api_command("power", "power(v_signal, i_signal, from_=None, to=None, v_threshold=None)",
-             "Compute instantaneous power P(t) = V(t) * I(t)")
-def _cmd_power(session: SessionAPI, v_signal: str, i_signal: str,
-               from_: str = None, to: str = None, v_threshold: float = None):
-    return session.power(v_signal, i_signal, from_=from_, to=to, v_threshold=v_threshold)
+@api_command(
+    "power",
+    "power(v_signal, i_signal, from_=None, to=None, v_threshold=None)",
+    "Compute instantaneous power P(t) = V(t) * I(t)",
+)
+def _cmd_power(
+    session: SessionAPI,
+    v_signal: str,
+    i_signal: str,
+    from_: str = None,
+    to: str = None,
+    v_threshold: float = None,
+):
+    return session.power(
+        v_signal, i_signal, from_=from_, to=to, v_threshold=v_threshold
+    )
 
 
-@api_command("histogram", "histogram(trace, bins=None, range=None, norm='count')",
-             "Compute histogram of a trace")
+@api_command(
+    "histogram",
+    "histogram(trace, bins=None, range=None, norm='count')",
+    "Compute histogram of a trace",
+)
 def _cmd_histogram(session: SessionAPI, trace: str, **kwargs):
     return session.histogram(trace, **kwargs)
 
 
-@api_command("nyquist", "nyquist(real, imag, freq=None)",
-             "Render a Nyquist plot from real and imaginary vector data")
+@api_command(
+    "nyquist",
+    "nyquist(real, imag, freq=None)",
+    "Render a Nyquist plot from real and imaginary vector data",
+)
 def _cmd_nyquist(session: SessionAPI, real: str, imag: str, freq: str | None = None):
     return session.nyquist(real, imag, freq)
 
 
-@api_command("bode", "bode(mag, phase, freq=None)",
-             "Render a Bode plot (gain/phase vs frequency)")
+@api_command(
+    "bode",
+    "bode(mag, phase, freq=None)",
+    "Render a Bode plot (gain/phase vs frequency)",
+)
 def _cmd_bode(session: SessionAPI, mag: str, phase: str, freq: str | None = None):
     return session.bode(mag, phase, freq)
 
 
-@api_command("load", "load(path)",
-             "Load a raw, vcd, or json project file")
+@api_command("load", "load(path)", "Load a raw, vcd, or json project file")
 def _cmd_load(session: SessionAPI, path: str):
     return session.load(path)
 
 
-@api_command("signals", "signals()",
-             "List all available signal names")
+@api_command("signals", "signals()", "List all available signal names")
 def _cmd_signals(session: SessionAPI):
     return session.signals()
 
 
-@api_command("show_matching", "show_matching(pattern)",
-             "Plot signals matching a glob pattern (e.g., 'v(q*)')")
+@api_command(
+    "show_matching",
+    "show_matching(pattern)",
+    "Plot signals matching a glob pattern (e.g., 'v(q*)')",
+)
 def _cmd_show_matching(session: SessionAPI, pattern: str):
     return session.show_matching(pattern)
 
 
-@api_command("rename_vector", "rename_vector(dataset_index, old_name, new_name)",
-             "Rename a vector (node) in a loaded dataset")
-def _cmd_rename_vector(session: SessionAPI, dataset_index: int,
-                       old_name: str, new_name: str) -> dict:
+@api_command(
+    "rename_vector",
+    "rename_vector(dataset_index, old_name, new_name)",
+    "Rename a vector (node) in a loaded dataset",
+)
+def _cmd_rename_vector(
+    session: SessionAPI, dataset_index: int, old_name: str, new_name: str
+) -> dict:
     """Rename a vector in the specified dataset.
 
     Blocks if any active trace references the old name.
     """
     from pqwave.models.state import ApplicationState
+
     state = ApplicationState()
     if dataset_index < 0 or dataset_index >= len(state.datasets):
-        return {"status": "error",
-                "message": f"Dataset index {dataset_index} out of range"}
+        return {
+            "status": "error",
+            "message": f"Dataset index {dataset_index} out of range",
+        }
+
+    # Reject empty/whitespace-only new names
+    if not new_name or not new_name.strip():
+        return {"status": "error", "message": "New name cannot be empty"}
 
     ds = state.datasets[dataset_index]
 
-    # Check for active traces referencing old_name across all panels
+    # Check for active traces referencing old_name across all panels.
+    # Use token-level matching to avoid substring false positives
+    # (e.g., 'v(in)' should NOT match a trace named 'v(input)').
     for panel_id in state.panel_order:
         panel = state.panels.get(panel_id)
         if panel is None:
             continue
         for trace in panel.traces:
-            if old_name in (trace.name or ""):
-                return {"status": "error",
-                        "message": f"Cannot rename: active trace '{trace.name}' "
-                                   f"on panel '{panel_id}' references "
-                                   f"'{old_name}'. Remove the trace first."}
-            if old_name in (trace.expression or ""):
-                return {"status": "error",
-                        "message": f"Cannot rename: active trace expression "
-                                   f"'{trace.expression}' references "
-                                   f"'{old_name}'. Remove the trace first."}
+            if _name_in_expression(old_name, trace.name):
+                return {
+                    "status": "error",
+                    "message": f"Cannot rename: active trace '{trace.name}' "
+                    f"on panel '{panel_id}' references "
+                    f"'{old_name}'. Remove the trace first.",
+                }
+            if _name_in_expression(old_name, trace.expression):
+                return {
+                    "status": "error",
+                    "message": f"Cannot rename: active trace expression "
+                    f"'{trace.expression}' references "
+                    f"'{old_name}'. Remove the trace first.",
+                }
 
     try:
         ds.rename_variable(old_name, new_name)
-        return {"status": "ok",
-                "message": f"Renamed '{old_name}' -> '{new_name}' "
-                           f"in dataset {dataset_index}"}
+        return {
+            "status": "ok",
+            "message": f"Renamed '{old_name}' -> '{new_name}' "
+            f"in dataset {dataset_index}",
+        }
     except (KeyError, ValueError) as e:
         return {"status": "error", "message": str(e)}
 
 
-@api_command("range", "range(xmin=None, xmax=None, ymin=None, ymax=None)",
-             "Set view range of the active panel")
-def _cmd_range(session: SessionAPI, xmin: float = None, xmax: float = None,
-               ymin: float = None, ymax: float = None):
+@api_command(
+    "range",
+    "range(xmin=None, xmax=None, ymin=None, ymax=None)",
+    "Set view range of the active panel",
+)
+def _cmd_range(
+    session: SessionAPI,
+    xmin: float = None,
+    xmax: float = None,
+    ymin: float = None,
+    ymax: float = None,
+):
     return session.range(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
 
 
-@api_command("log_x", "log_x(on=True)",
-             "Toggle X-axis log mode")
+@api_command("log_x", "log_x(on=True)", "Toggle X-axis log mode")
 def _cmd_log_x(session: SessionAPI, on: bool = True):
     return session.log_x(on)
 
 
-@api_command("log_y", "log_y(on=True)",
-             "Toggle Y-axis log mode")
+@api_command("log_y", "log_y(on=True)", "Toggle Y-axis log mode")
 def _cmd_log_y(session: SessionAPI, on: bool = True):
     return session.log_y(on)
 
 
-@api_command("info", "info()",
-             "Return session metadata")
+@api_command("info", "info()", "Return session metadata")
 def _cmd_info(session: SessionAPI):
     return session.info()
 
 
-@api_command("export_csv", "export_csv(path, signals=None)",
-             "Export current traces to a CSV file")
+@api_command(
+    "export_csv",
+    "export_csv(path, signals=None)",
+    "Export current traces to a CSV file",
+)
 def _cmd_export_csv(session: SessionAPI, path: str, signals=None):
     return session.export_csv(path, signals)
 
 
-@api_command("export_plot", "export_plot(path, width=1200, height=800)",
-             "Export current plot to PNG/SVG (requires GUI)")
-def _cmd_export_plot(session: SessionAPI, path: str,
-                     width: int = 1200, height: int = 800):
+@api_command(
+    "export_plot",
+    "export_plot(path, width=1200, height=800)",
+    "Export current plot to PNG/SVG (requires GUI)",
+)
+def _cmd_export_plot(
+    session: SessionAPI, path: str, width: int = 1200, height: int = 800
+):
     return session.export_plot(path, width, height)
 
 
 # ---- Cursor commands ----
 
-@api_command("cursor_xa", "cursor_xa(value)",
-             "Set XA cursor position (supports SPICE suffixes: 1m, 1u)")
+
+@api_command(
+    "cursor_xa",
+    "cursor_xa(value)",
+    "Set XA cursor position (supports SPICE suffixes: 1m, 1u)",
+)
 def _cmd_cursor_xa(session: SessionAPI, value=None):
     return session.cursor_xa(value)
 
-@api_command("cursor_xb", "cursor_xb(value)",
-             "Set XB cursor position")
+
+@api_command("cursor_xb", "cursor_xb(value)", "Set XB cursor position")
 def _cmd_cursor_xb(session: SessionAPI, value=None):
     return session.cursor_xb(value)
 
-@api_command("cursor_ya", "cursor_ya(value)",
-             "Set YA cursor position")
+
+@api_command("cursor_ya", "cursor_ya(value)", "Set YA cursor position")
 def _cmd_cursor_ya(session: SessionAPI, value=None):
     return session.cursor_ya(value)
 
-@api_command("cursor_yb", "cursor_yb(value)",
-             "Set YB cursor position")
+
+@api_command("cursor_yb", "cursor_yb(value)", "Set YB cursor position")
 def _cmd_cursor_yb(session: SessionAPI, value=None):
     return session.cursor_yb(value)
 
-@api_command("cursor_delta", "cursor_delta()",
-             "Get delta between XA/XB and YA/YB cursors")
+
+@api_command(
+    "cursor_delta", "cursor_delta()", "Get delta between XA/XB and YA/YB cursors"
+)
 def _cmd_cursor_delta(session: SessionAPI):
     return session.cursor_delta()
 
-@api_command("cursor", "cursor()",
-             "Get all cursor positions and deltas")
+
+@api_command("cursor", "cursor()", "Get all cursor positions and deltas")
 def _cmd_cursor(session: SessionAPI):
     return session.cursor()
 
 
 # ---- View toggle commands ----
 
-@api_command("grid", "grid(on=True)",
-             "Toggle or set grid visibility")
+
+@api_command("grid", "grid(on=True)", "Toggle or set grid visibility")
 def _cmd_grid(session: SessionAPI, on: bool = None):
     return session.grid(on)
 
-@api_command("legend", "legend(on=True)",
-             "Toggle or set legend visibility")
+
+@api_command("legend", "legend(on=True)", "Toggle or set legend visibility")
 def _cmd_legend(session: SessionAPI, on: bool = None):
     return session.legend(on)
 
-@api_command("cross_hair", "cross_hair(on=True)",
-             "Toggle or set crosshair visibility")
+
+@api_command("cross_hair", "cross_hair(on=True)", "Toggle or set crosshair visibility")
 def _cmd_cross_hair(session: SessionAPI, on: bool = None):
     return session.cross_hair(on)
 
-@api_command("zoom_fit", "zoom_fit()",
-             "Zoom to fit all traces in view")
+
+@api_command("zoom_fit", "zoom_fit()", "Zoom to fit all traces in view")
 def _cmd_zoom_fit(session: SessionAPI):
     return session.zoom_fit()
 
-@api_command("auto_range_x", "auto_range_x()",
-             "Auto-range X axis")
+
+@api_command("auto_range_x", "auto_range_x()", "Auto-range X axis")
 def _cmd_auto_range_x(session: SessionAPI):
     return session.auto_range_x()
 
-@api_command("auto_range_y", "auto_range_y()",
-             "Auto-range Y axis")
+
+@api_command("auto_range_y", "auto_range_y()", "Auto-range Y axis")
 def _cmd_auto_range_y(session: SessionAPI):
     return session.auto_range_y()
 
-@api_command("title", "title(text)",
-             "Set plot title")
+
+@api_command("title", "title(text)", "Set plot title")
 def _cmd_title(session: SessionAPI, text: str = None):
     return session.title(text)
 
 
 # ---- Bus / Digital commands ----
 
-@api_command("bus", "bus(signals, name='bus')",
-             "Group digital signals into a bus (e.g., bus(['d0','d1']))")
+
+@api_command(
+    "bus",
+    "bus(signals, name='bus')",
+    "Group digital signals into a bus (e.g., bus(['d0','d1']))",
+)
 def _cmd_bus(session: SessionAPI, signals, name: str = "bus"):
     return session.bus(signals, name)
 
-@api_command("expand", "expand(bus_name)",
-             "Expand bus members to show individual bits")
+
+@api_command("expand", "expand(bus_name)", "Expand bus members to show individual bits")
 def _cmd_expand(session: SessionAPI, bus_name: str):
     return session.expand(bus_name)
 
-@api_command("collapse", "collapse(bus_name)",
-             "Collapse bus members to hide individual bits")
+
+@api_command(
+    "collapse", "collapse(bus_name)", "Collapse bus members to hide individual bits"
+)
 def _cmd_collapse(session: SessionAPI, bus_name: str):
     return session.collapse(bus_name)
 
-@api_command("digital", "digital(sig, on=True)",
-             "Toggle digital/analog view for a signal")
+
+@api_command(
+    "digital", "digital(sig, on=True)", "Toggle digital/analog view for a signal"
+)
 def _cmd_digital(session: SessionAPI, sig, on: bool = True):
     return session.digital(sig, on)
 
 
 # ---- Cursor visibility commands ----
 
-@api_command("cursor_xa_visible", "cursor_xa_visible(on=True)",
-             "Show/hide XA cursor")
+
+@api_command("cursor_xa_visible", "cursor_xa_visible(on=True)", "Show/hide XA cursor")
 def _cmd_cursor_xa_visible(session: SessionAPI, on: bool = True):
     return session.cursor_xa_visible(on)
 
-@api_command("cursor_xb_visible", "cursor_xb_visible(on=True)",
-             "Show/hide XB cursor")
+
+@api_command("cursor_xb_visible", "cursor_xb_visible(on=True)", "Show/hide XB cursor")
 def _cmd_cursor_xb_visible(session: SessionAPI, on: bool = True):
     return session.cursor_xb_visible(on)
 
-@api_command("cursor_ya_visible", "cursor_ya_visible(on=True)",
-             "Show/hide YA cursor")
+
+@api_command("cursor_ya_visible", "cursor_ya_visible(on=True)", "Show/hide YA cursor")
 def _cmd_cursor_ya_visible(session: SessionAPI, on: bool = True):
     return session.cursor_ya_visible(on)
 
-@api_command("cursor_yb_visible", "cursor_yb_visible(on=True)",
-             "Show/hide YB cursor")
+
+@api_command("cursor_yb_visible", "cursor_yb_visible(on=True)", "Show/hide YB cursor")
 def _cmd_cursor_yb_visible(session: SessionAPI, on: bool = True):
     return session.cursor_yb_visible(on)
 
 
 # ---- Eye diagram ----
 
-@api_command("eye", "eye(sig, period=None)",
-             "Show eye diagram for a signal (period supports suffixes: 100n)")
+
+@api_command(
+    "eye",
+    "eye(sig, period=None)",
+    "Show eye diagram for a signal (period supports suffixes: 100n)",
+)
 def _cmd_eye(session: SessionAPI, sig: str, period: str = None):
     return session.eye(sig, period)
 
-@api_command("fft_config", "fft_config(window=None, fft_size=None, representation=None)",
-             "Configure FFT parameters (window, fft_size, representation=linear|db)")
-def _cmd_fft_config(session: SessionAPI, window: str = None,
-                    fft_size: int = None, representation: str = None):
-    return session.fft_config(window=window, fft_size=fft_size,
-                              representation=representation)
+
+@api_command(
+    "fft_config",
+    "fft_config(window=None, fft_size=None, representation=None)",
+    "Configure FFT parameters (window, fft_size, representation=linear|db)",
+)
+def _cmd_fft_config(
+    session: SessionAPI,
+    window: str = None,
+    fft_size: int = None,
+    representation: str = None,
+):
+    return session.fft_config(
+        window=window, fft_size=fft_size, representation=representation
+    )
+
 
 # ---- Reload / Export ----
 
-@api_command("reload", "reload()",
-             "Re-read the current file (post-simulation refresh)")
+
+@api_command("reload", "reload()", "Re-read the current file (post-simulation refresh)")
 def _cmd_reload(session: SessionAPI):
     return session.reload()
 
-@api_command("theme", "theme(name)",
-             "Set plot theme (dark or light)")
+
+@api_command("theme", "theme(name)", "Set plot theme (dark or light)")
 def _cmd_theme(session: SessionAPI, name: str = None):
     return session.theme(name)
 
 
-@api_command("change_x", "change_x(var)",
-             "Change the X-axis variable (e.g., change_x('v(r2)'))")
+@api_command(
+    "change_x", "change_x(var)", "Change the X-axis variable (e.g., change_x('v(r2)'))"
+)
 def _cmd_change_x(session: SessionAPI, var: str):
     return session.change_x(var)
 
 
 # ---- Zoom ----
 
+
 @api_command("zoom_in", "zoom_in()", "Zoom in")
 def _cmd_zoom_in(session: SessionAPI):
     return session.zoom_in()
+
 
 @api_command("zoom_out", "zoom_out()", "Zoom out")
 def _cmd_zoom_out(session: SessionAPI):
@@ -2318,53 +2646,73 @@ def _cmd_zoom_out(session: SessionAPI):
 
 # ---- Panel management ----
 
-@api_command("split_horizontal", "split_horizontal()",
-             "Split active panel horizontally")
+
+@api_command(
+    "split_horizontal", "split_horizontal()", "Split active panel horizontally"
+)
 def _cmd_split_horizontal(session: SessionAPI):
     return session.split_horizontal()
 
-@api_command("split_vertical", "split_vertical()",
-             "Split active panel vertically")
+
+@api_command("split_vertical", "split_vertical()", "Split active panel vertically")
 def _cmd_split_vertical(session: SessionAPI):
     return session.split_vertical()
 
-@api_command("close_panel", "close_panel()",
-             "Close the active panel")
+
+@api_command("close_panel", "close_panel()", "Close the active panel")
 def _cmd_close_panel(session: SessionAPI):
     return session.close_panel()
 
 
-@api_command("set_trace", "set_trace(name, height=None, width=None, color=None, alias=None)",
-             "Set trace properties: height, line width, color, alias")
-def _cmd_set_trace(session: SessionAPI, name: str, height: float = None,
-                   width: int = None, color=None, alias: str = None):
-    return session.set_trace(name, height=height, width=width,
-                             color=color, alias=alias)
+@api_command(
+    "set_trace",
+    "set_trace(name, height=None, width=None, color=None, alias=None)",
+    "Set trace properties: height, line width, color, alias",
+)
+def _cmd_set_trace(
+    session: SessionAPI,
+    name: str,
+    height: float = None,
+    width: int = None,
+    color=None,
+    alias: str = None,
+):
+    return session.set_trace(name, height=height, width=width, color=color, alias=alias)
 
 
 # ---- View Templates ----
 
-@api_command("save_template", "save_template(name)",
-             "Save current panel view as a named template")
+
+@api_command(
+    "save_template",
+    "save_template(name)",
+    "Save current panel view as a named template",
+)
 def _cmd_save_template(session: SessionAPI, name: str):
     return session.save_template(name)
 
-@api_command("load_template", "load_template(name)",
-             "Load a saved view template onto the active panel")
+
+@api_command(
+    "load_template",
+    "load_template(name)",
+    "Load a saved view template onto the active panel",
+)
 def _cmd_load_template(session: SessionAPI, name: str):
     return session.load_template(name)
 
-@api_command("list_templates", "list_templates()",
-             "List all saved view templates")
+
+@api_command("list_templates", "list_templates()", "List all saved view templates")
 def _cmd_list_templates(session: SessionAPI):
     return session.list_templates()
 
 
 # ---- Multi-dataset commands ----
 
+
 @api_command("datasets", "datasets()", "List all loaded datasets")
 def _cmd_datasets(session: SessionAPI):
     return session.datasets()
+
 
 @api_command("unload", "unload(idx)", "Remove a dataset by index")
 def _cmd_unload(session: SessionAPI, idx: int):
@@ -2373,126 +2721,206 @@ def _cmd_unload(session: SessionAPI, idx: int):
 
 # ---- MC commands ----
 
-@api_command("mc_load", "mc_load(source, source_type='stepped')",
-             "Load file(s) as Monte Carlo run collection")
-def _cmd_mc_load(session: SessionAPI, source, source_type: str = "stepped",
-                 grouping_pattern: str | None = None):
+
+@api_command(
+    "mc_load",
+    "mc_load(source, source_type='stepped')",
+    "Load file(s) as Monte Carlo run collection",
+)
+def _cmd_mc_load(
+    session: SessionAPI,
+    source,
+    source_type: str = "stepped",
+    grouping_pattern: str | None = None,
+):
     return session.mc_load(source, source_type, grouping_pattern)
+
 
 @api_command("mc_info", "mc_info()", "Show current MC collection info")
 def _cmd_mc_info(session: SessionAPI):
     return session.mc_info()
 
-@api_command("mc_style", "mc_style(mode, sigma=3)",
-             "Set MC display: spaghetti, envelope, or single")
+
+@api_command(
+    "mc_style",
+    "mc_style(mode, sigma=3)",
+    "Set MC display: spaghetti, envelope, or single",
+)
 def _cmd_mc_style(session: SessionAPI, mode: str, sigma: float = 3.0):
     return session.mc_style(mode, sigma)
+
 
 @api_command("mc_nominal", "mc_nominal(idx)", "Set the nominal run index")
 def _cmd_mc_nominal(session: SessionAPI, idx: int):
     return session.mc_nominal(idx)
 
+
 @api_command("mc_filter", "mc_filter(runs)", "Filter runs: 'all' or list of indices")
 def _cmd_mc_filter(session: SessionAPI, runs):
     return session.mc_filter(runs)
 
-@api_command("mc_param", "mc_param(name, values)",
-             "Annotate runs with parameter values")
+
+@api_command(
+    "mc_param", "mc_param(name, values)", "Annotate runs with parameter values"
+)
 def _cmd_mc_param(session: SessionAPI, name: str, values: list):
     return session.mc_param(name, values)
+
 
 @api_command("mc_stats", "mc_stats(signal)", "Cross-run statistics for a signal")
 def _cmd_mc_stats(session: SessionAPI, signal: str):
     return session.mc_stats(signal)
 
-@api_command("mc_histogram", "mc_histogram(measurement, bins=50)",
-             "Histogram of a measurement across MC runs")
+
+@api_command(
+    "mc_histogram",
+    "mc_histogram(measurement, bins=50)",
+    "Histogram of a measurement across MC runs",
+)
 def _cmd_mc_histogram(session: SessionAPI, measurement: str, bins: int = 50):
     return session.mc_histogram(measurement, bins)
 
-@api_command("mc_yield", "mc_yield(signal, low, high)",
-             "Compute yield of runs within spec limits")
+
+@api_command(
+    "mc_yield",
+    "mc_yield(signal, low, high)",
+    "Compute yield of runs within spec limits",
+)
 def _cmd_mc_yield(session: SessionAPI, signal: str, low: float, high: float):
     return session.mc_yield(signal, low, high)
 
-@api_command("mc_scatter", "mc_scatter(measurement, param)",
-             "Scatter plot of measurement vs parameter")
+
+@api_command(
+    "mc_scatter",
+    "mc_scatter(measurement, param)",
+    "Scatter plot of measurement vs parameter",
+)
 def _cmd_mc_scatter(session: SessionAPI, measurement: str, param: str):
     return session.mc_scatter(measurement, param)
+
 
 @api_command("mc_worst", "mc_worst(n=5)", "Return worst N runs")
 def _cmd_mc_worst(session: SessionAPI, n: int = 5):
     return session.mc_worst(n)
 
-@api_command("mc_sensitivity", "mc_sensitivity(measurement)",
-             "Rank parameters by impact on measurement")
+
+@api_command(
+    "mc_sensitivity",
+    "mc_sensitivity(measurement)",
+    "Rank parameters by impact on measurement",
+)
 def _cmd_mc_sensitivity(session: SessionAPI, measurement: str):
     return session.mc_sensitivity(measurement)
 
+
 # ---- Correlation commands ----
 
-@api_command("mc_correlation_load", "mc_correlation_load(path)",
-             "Load a correlation matrix from CSV onto the MC collection")
+
+@api_command(
+    "mc_correlation_load",
+    "mc_correlation_load(path)",
+    "Load a correlation matrix from CSV onto the MC collection",
+)
 def _cmd_mc_correlation_load(session: SessionAPI, path: str):
     return session.mc_correlation_load(path)
 
-@api_command("mc_correlation_show", "mc_correlation_show()",
-             "Print the current correlation matrix")
+
+@api_command(
+    "mc_correlation_show",
+    "mc_correlation_show()",
+    "Print the current correlation matrix",
+)
 def _cmd_mc_correlation_show(session: SessionAPI):
     return session.mc_correlation_show()
 
-@api_command("mc_correlation_edit", "mc_correlation_edit()",
-             "Open the Correlation Matrix Editor dialog (GUI)")
+
+@api_command(
+    "mc_correlation_edit",
+    "mc_correlation_edit()",
+    "Open the Correlation Matrix Editor dialog (GUI)",
+)
 def _cmd_mc_correlation_edit(session: SessionAPI):
     return session.mc_correlation_edit()
 
-@api_command("mc_generate", "mc_generate(path, output_format='csv', runs=100, seed=None, nominals=None, sigmas=None)",
-             "Generate correlated parameter values to a file")
-def _cmd_mc_generate(session: SessionAPI, path: str, output_format: str = "csv",
-                    runs: int = 100, seed: int | None = None,
-                    nominals: list[float] | None = None,
-                    sigmas: list[float] | None = None):
-    return session.mc_generate(path, output_format=output_format, runs=runs, seed=seed,
-                               nominals=nominals, sigmas=sigmas)
+
+@api_command(
+    "mc_generate",
+    "mc_generate(path, output_format='csv', runs=100, seed=None, nominals=None, sigmas=None)",
+    "Generate correlated parameter values to a file",
+)
+def _cmd_mc_generate(
+    session: SessionAPI,
+    path: str,
+    output_format: str = "csv",
+    runs: int = 100,
+    seed: int | None = None,
+    nominals: list[float] | None = None,
+    sigmas: list[float] | None = None,
+):
+    return session.mc_generate(
+        path,
+        output_format=output_format,
+        runs=runs,
+        seed=seed,
+        nominals=nominals,
+        sigmas=sigmas,
+    )
 
 
-@api_command("xschem_connect", "xschem_connect(path=None)",
-             "Connect to xschem bridge (cross-probe and back-annotation)")
+@api_command(
+    "xschem_connect",
+    "xschem_connect(path=None)",
+    "Connect to xschem bridge (cross-probe and back-annotation)",
+)
 def _cmd_xschem_connect(session: SessionAPI, path: str = None):
     return session.xschem_connect(path)
 
 
-@api_command("xschem_disconnect", "xschem_disconnect()",
-             "Disconnect from xschem bridge")
+@api_command(
+    "xschem_disconnect", "xschem_disconnect()", "Disconnect from xschem bridge"
+)
 def _cmd_xschem_disconnect(session: SessionAPI):
     return session.xschem_disconnect()
 
 
-@api_command("xschem_simulate", "xschem_simulate(sch_path=None)",
-             "Manually trigger xschem simulation pipeline")
+@api_command(
+    "xschem_simulate",
+    "xschem_simulate(sch_path=None)",
+    "Manually trigger xschem simulation pipeline",
+)
 def _cmd_xschem_simulate(session: SessionAPI, sch_path: str = None):
     return session.xschem_simulate(sch_path)
 
 
-@api_command("xschem_probe_net", "xschem_probe_net(name)",
-             "Cross-probe: highlight a net in xschem schematic")
+@api_command(
+    "xschem_probe_net",
+    "xschem_probe_net(name)",
+    "Cross-probe: highlight a net in xschem schematic",
+)
 def _cmd_xschem_probe_net(session: SessionAPI, name: str):
     return session.xschem_probe_net(name)
 
 
-@api_command("xschem_probe_part", "xschem_probe_part(ref, pin=None)",
-             "Cross-probe: highlight a component or pin in xschem schematic")
+@api_command(
+    "xschem_probe_part",
+    "xschem_probe_part(ref, pin=None)",
+    "Cross-probe: highlight a component or pin in xschem schematic",
+)
 def _cmd_xschem_probe_part(session: SessionAPI, ref: str, pin: str = None):
     return session.xschem_probe_part(ref, pin)
 
 
-@api_command("xschem_clear", "xschem_clear()",
-             "Clear all cross-probe highlights in xschem")
+@api_command(
+    "xschem_clear", "xschem_clear()", "Clear all cross-probe highlights in xschem"
+)
 def _cmd_xschem_clear(session: SessionAPI):
     return session.xschem_clear()
 
 
-@api_command("xschem_config", "xschem_config(key, value=None)",
-             "Get or set xschem bridge configuration")
+@api_command(
+    "xschem_config",
+    "xschem_config(key, value=None)",
+    "Get or set xschem bridge configuration",
+)
 def _cmd_xschem_config(session: SessionAPI, key: str, value=None):
     return session.xschem_config(key, value)

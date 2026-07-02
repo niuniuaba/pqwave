@@ -84,18 +84,25 @@ def modify_netlist(netlist: str, corner: dict[str, float]) -> str:
     """
     lines = netlist.splitlines()
     result: list[str] = []
+    # Pre-compile patterns per refdes to avoid recompilation in the inner loop
+    patterns = {
+        refdes: re.compile(
+            rf"^\s*({re.escape(refdes)})\s+(\S+)\s+(\S+)\s+(\S+)",
+            re.IGNORECASE,
+        )
+        for refdes in corner
+    }
     for line in lines:
         modified = line
         for refdes, value in corner.items():
-            # Match: <refdes> <node1> <node2> <value> [optional rest]
-            pattern = re.compile(
-                rf"^({re.escape(refdes)})\s+(\S+)\s+(\S+)\s+(\S+)",
-                re.IGNORECASE,
-            )
-            match = pattern.match(line.strip())
+            pattern = patterns[refdes]
+            match = pattern.match(line)
             if match:
-                prefix = line[: match.start()]
-                suffix = line[match.end() :]
+                # Use group start positions to correctly handle indented lines:
+                #   prefix = leading whitespace before refdes
+                #   suffix = everything after the old value token
+                prefix = line[: match.start(1)]
+                suffix = line[match.end(4) :]
                 modified = (
                     f"{prefix}{match.group(1)} {match.group(2)} "
                     f"{match.group(3)} {_format_spice_value(value)}{suffix}"

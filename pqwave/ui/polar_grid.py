@@ -1,4 +1,5 @@
 """Polar grid renderer: concentric rings and radial lines for polar plots."""
+
 import math
 
 import numpy as np
@@ -13,7 +14,7 @@ def render_polar_grid(
     n_radials: int = 12,
     max_radius: float = 1.0,
     log_scale: bool = False,
-) -> None:
+) -> list[QGraphicsPathItem]:
     """Add a polar reference grid to a PlotWidget.
 
     Renders *n_rings* concentric circles and *n_radials* radial lines.
@@ -31,9 +32,13 @@ def render_polar_grid(
         Outer ring radius (default 1.0).
     log_scale:
         If True, rings are log-spaced.
+
+    Returns:
+        List of added QGraphicsPathItems (for later removal on re-invocation).
     """
     grid_pen = QPen(QColor(60, 60, 60), 1)
     radial_pen = QPen(QColor(50, 50, 50), 1, pg.QtCore.Qt.PenStyle.DashLine)
+    items: list[QGraphicsPathItem] = []
 
     # Concentric rings
     if log_scale and max_radius > 0:
@@ -47,6 +52,7 @@ def render_polar_grid(
         item = QGraphicsPathItem(path)
         item.setPen(grid_pen)
         plot_widget.addItem(item)
+        items.append(item)
 
     # Radial lines
     for i in range(n_radials):
@@ -59,6 +65,7 @@ def render_polar_grid(
         item = QGraphicsPathItem(path)
         item.setPen(radial_pen)
         plot_widget.addItem(item)
+        items.append(item)
 
     # Outer boundary circle (slightly bolder)
     outer_pen = QPen(QColor(80, 80, 80), 1.5)
@@ -67,3 +74,6 @@ def render_polar_grid(
     item = QGraphicsPathItem(path)
     item.setPen(outer_pen)
     plot_widget.addItem(item)
+    items.append(item)
+
+    return items

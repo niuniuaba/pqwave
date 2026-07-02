@@ -101,6 +101,24 @@ class _VarTreeRenameFilter(QObject):
         return False
 
 
+def _detect_output_variable(netlist_text: str) -> str | None:
+    """Heuristic: pick the most likely output variable name from a netlist.
+
+    Checks ``.print`` / ``.plot`` / ``.probe`` statements first, then falls
+    back to common names (``v(out)``, ``v(output)``).
+    """
+    for m in re.finditer(
+        r"\.(?:print|plot|probe)\s+.*?(v|i)\((\S+?)\)",
+        netlist_text,
+        re.IGNORECASE,
+    ):
+        return f"{m.group(1)}({m.group(2)})"
+    for candidate in ("v(out)", "v(output)", "v(vout)"):
+        if candidate[2:-1] in netlist_text.lower():
+            return candidate
+    return None
+
+
 class MainWindow(QMainWindow):
     """Main application window orchestrating all UI components."""
 
@@ -2390,6 +2408,14 @@ class MainWindow(QMainWindow):
         # TODO: wire analysis_type selector — currently only .op parsing
         #       is implemented. For .ac / .tran, use different output parsing.
         # TODO: CSV/waveform export from spec (plot worst-case waveforms).
+        if analysis_type in ("ac", "tran"):
+            QMessageBox.information(
+                self,
+                "Not Yet Implemented",
+                f"AC and transient worst-case analysis are not yet implemented. "
+                f"Only operating point (.op) is supported. "
+                f"The analysis will proceed with .op parsing.",
+            )
         netlist_path = dlg.get_netlist_path()
 
         if not netlist_path or not os.path.isfile(netlist_path):
@@ -2403,6 +2429,14 @@ class MainWindow(QMainWindow):
         for refdes, comp in components.items():
             if comp.get("tempco", 0.0) != 0.0:
                 # Use midpoint of temperature range for tempco adjustment
+                # NOTE: This zeros out the tempco contribution for symmetric
+                # ranges around t_nom.  The correct approach is to treat
+                # temperature as an additional corner dimension — apply tempco
+                # at t_min and t_max separately, adding 2 additional corners
+                # per component with non-zero tempco.  That is left as a TODO
+                # because it multiplies the corner count and requires choosing
+                # whether to combine temperature × tolerance corners or treat
+                # them independently (RSS).
                 t_actual = (t_min + t_max) / 2.0
                 from pqwave.analysis.worst_case import apply_tempco
 
@@ -2412,9 +2446,12 @@ class MainWindow(QMainWindow):
 
         # If N > 8, suggest sensitivity pre-filter (requires sensitivity data)
         if len(components) > 8:
-            # TODO: wire sensitivity pre-filter — would need to run a
-            #       small-signal sensitivity simulation first, then call
-            #       rank_by_sensitivity() to select top-8 components.
+            # TODO: Wire sensitivity pre-filter.  When N > 8, run nominal +
+            #       one-perturbation-per-component simulations to compute
+            #       sensitivities, then use rank_by_sensitivity() (exported
+            #       from pqwave.analysis.worst_case) to select the top-8
+            #       components for full 2^8=256 corner enumeration, avoiding
+            #       exponential blowup for circuits with many components.
             pass
 
         with open(netlist_path, "r") as f:
@@ -2425,6 +2462,10 @@ class MainWindow(QMainWindow):
             modify_netlist,
             parse_op_output,
         )
+
+        # Auto-detect a reasonable output-variable target from the netlist
+        # so parse_op_output picks the right value instead of the first v()/i().
+        target_var = _detect_output_variable(netlist_text)
 
         corners = enumerate_corners(components)
 
@@ -2465,7 +2506,9 @@ class MainWindow(QMainWindow):
                     timeout=60,
                     cwd=work_dir,
                 )
-                output_value: float | None = parse_op_output(proc.stdout)
+                output_value: float | None = parse_op_output(
+                    proc.stdout, target=target_var
+                )
 
                 results.append(
                     {
@@ -2479,17 +2522,23 @@ class MainWindow(QMainWindow):
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
-        # Sort by output value; identify worst min and max
-        results.sort(key=lambda r: r["output"] or 0.0)
-        worst_min = results[0] if results else None
-        worst_max = results[-1] if results else None
+        # Separate failed simulations (output=None) from successes before sorting,
+        # so that failed runs are flagged rather than silently sorted as 0.0.
+        successful = [r for r in results if r["output"] is not None]
+        failed = [r for r in results if r["output"] is None]
+        successful.sort(key=lambda r: r["output"])
+        worst_min = successful[0] if successful else None
+        worst_max = successful[-1] if successful else None
 
         # Show results in a table dialog
         from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem
         from PyQt6.QtGui import QColor
 
         result_dlg = QDialog(self)
-        result_dlg.setWindowTitle(f"Worst-Case Results — {len(results)} corners")
+        title = f"Worst-Case Results — {len(successful)} corners"
+        if failed:
+            title += f", {len(failed)} failed"
+        result_dlg.setWindowTitle(title)
         result_dlg.resize(700, 400)
         result_layout = QVBoxLayout(result_dlg)
 
@@ -2503,16 +2552,17 @@ class MainWindow(QMainWindow):
                 row,
                 2,
                 QTableWidgetItem(
-                    f"{r['output']:.6g}" if r["output"] is not None else "N/A"
+                    f"{r['output']:.6g}" if r["output"] is not None else "FAILED"
                 ),
             )
-            # Highlight worst min (blue) and worst max (red)
-            if r is worst_min:
-                for col in range(3):
-                    table.item(row, col).setBackground(QColor(0, 0, 180, 80))
-            if r is worst_max:
-                for col in range(3):
-                    table.item(row, col).setBackground(QColor(180, 0, 0, 80))
+            # Highlight worst min (blue) and worst max (red) — only for successful runs
+            if r["output"] is not None:
+                if r is worst_min:
+                    for col in range(3):
+                        table.item(row, col).setBackground(QColor(0, 0, 180, 80))
+                if r is worst_max:
+                    for col in range(3):
+                        table.item(row, col).setBackground(QColor(180, 0, 0, 80))
         result_layout.addWidget(table)
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
@@ -2521,10 +2571,13 @@ class MainWindow(QMainWindow):
         result_dlg.exec()
 
         if worst_min and worst_max:
-            status.showMessage(
+            msg = (
                 f"Worst-case: min={worst_min['output']:.4g}, "
                 f"max={worst_max['output']:.4g}"
             )
+            if failed:
+                msg += f" ({len(failed)} corner(s) failed — check stderr)"
+            status.showMessage(msg)
         else:
             status.showMessage("Worst-case analysis complete")
 
@@ -4977,36 +5030,11 @@ class MainWindow(QMainWindow):
             if dataset_idx is None or dataset_idx >= len(self.state.datasets):
                 return
 
-            # Check for active traces referencing old_name (same logic as API command)
-            for panel_id in self.state.panel_order:
-                panel = self.state.panels.get(panel_id)
-                if panel is None:
-                    continue
-                for trace in panel.traces:
-                    if old_name in (trace.name or ""):
-                        QMessageBox.warning(
-                            self,
-                            "Rename Failed",
-                            f"Cannot rename: active trace '{trace.name}' "
-                            f"on panel '{panel_id}' references "
-                            f"'{old_name}'. Remove the trace first.",
-                        )
-                        return
-                    if old_name in (trace.expression or ""):
-                        QMessageBox.warning(
-                            self,
-                            "Rename Failed",
-                            f"Cannot rename: active trace expression "
-                            f"'{trace.expression}' references "
-                            f"'{old_name}'. Remove the trace first.",
-                        )
-                        return
-
-            # Use the session API for the rename (includes active trace check)
-            from pqwave.session.api import _cmd_rename_vector
-
-            result = _cmd_rename_vector(
-                self.session_api, dataset_idx, old_name, new_name
+            # Use the public session API for the rename (includes empty-name
+            # validation and token-level active-trace check; no need to
+            # duplicate those checks here).
+            result = self.session_api.rename_vector(
+                dataset_idx, old_name, new_name
             )
             if result.get("status") != "ok":
                 QMessageBox.warning(
@@ -5801,18 +5829,42 @@ class MainWindow(QMainWindow):
             state = ApplicationState()
             mode = state.impedance_format
             cf = {}
-            ya = positions.get("yA")
-            if ya is not None:
-                cf["yA"] = format_complex(complex(ya, 0), "", mode)
-            yb = positions.get("yB")
-            if yb is not None:
-                cf["yB"] = format_complex(complex(yb, 0), "", mode)
-            dy1 = deltas.get("dy1")
-            if dy1 is not None:
-                cf["dy1"] = format_complex(complex(dy1, 0), "", mode)
-            dy2 = deltas.get("dy2")
-            if dy2 is not None:
-                cf["dy2"] = format_complex(complex(dy2, 0), "", mode)
+            xa = positions.get("xa")
+            xb = positions.get("xb")
+
+            # Find the first visible complex trace to interpolate actual
+            # complex trace values at cursor X positions (instead of wrapping
+            # the cursor-Y float as complex(float, 0), which discards the
+            # imaginary component — matching the legend approach in trace_manager).
+            panel = self.panel_grid.get_active_panel()
+            complex_trace = None
+            if panel:
+                for trace in panel.trace_manager.state_traces:
+                    if trace.visible and np.iscomplexobj(trace.y_data):
+                        complex_trace = trace
+                        break
+
+            if complex_trace is not None:
+                xd = complex_trace.x_data
+                yd = complex_trace.y_data
+                if xa is not None and len(xd) > 0:
+                    x_clip = max(float(xd[0]), min(xa, float(xd[-1])))
+                    ya_complex = np.interp(x_clip, xd, yd)
+                    cf["yA"] = format_complex(complex(ya_complex), "", mode)
+                yb = positions.get("yB")
+                if yb is not None and xb is not None and len(xd) > 0:
+                    xb_clip = max(float(xd[0]), min(xb, float(xd[-1])))
+                    yb_complex = np.interp(xb_clip, xd, yd)
+                    cf["yB"] = format_complex(complex(yb_complex), "", mode)
+                if xa is not None and xb is not None and len(xd) > 0:
+                    xa_clip = max(float(xd[0]), min(xa, float(xd[-1])))
+                    xb_clip = max(float(xd[0]), min(xb, float(xd[-1])))
+                    ya_c = np.interp(xa_clip, xd, yd)
+                    yb_c = np.interp(xb_clip, xd, yd)
+                    cf["dy1"] = format_complex(
+                        complex(yb_c - ya_c), "", mode
+                    )
+
             complex_formats = cf if cf else None
         if self.menu_manager:
             self.menu_manager.update_cursor_status(positions, deltas, complex_formats)
@@ -7212,9 +7264,29 @@ class MainWindow(QMainWindow):
 
         pw = new_panel.plot_widget
 
+        # Remove any previous polar grid items to prevent accumulation
+        if hasattr(new_panel, "_polar_grid_items"):
+            for item in new_panel._polar_grid_items:
+                pw.removeItem(item)
+            new_panel._polar_grid_items.clear()
+        else:
+            new_panel._polar_grid_items = []
+
         from pqwave.ui.polar_grid import render_polar_grid
 
-        render_polar_grid(pw, n_rings=5, n_radials=12)
+        # Compute max_radius from the actual data with a 10 % margin
+        all_mag = np.sqrt(result["x"] ** 2 + result["y"] ** 2)
+        if len(all_mag) > 0:
+            max_radius = float(np.max(all_mag)) * 1.1
+            if max_radius <= 0:
+                max_radius = 1.0
+        else:
+            max_radius = 1.0
+
+        new_grid_items = render_polar_grid(
+            pw, n_rings=5, n_radials=12, max_radius=max_radius
+        )
+        new_panel._polar_grid_items.extend(new_grid_items)
 
         # Use PlotDataItem per CLAUDE.md performance rules
         curve = pg.PlotDataItem(

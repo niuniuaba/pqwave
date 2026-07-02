@@ -13,9 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 
-def compute_reflection_coefficient(
-    z: np.ndarray, z0: float = 50.0
-) -> np.ndarray:
+def compute_reflection_coefficient(z: np.ndarray, z0: float = 50.0) -> np.ndarray:
     """Compute reflection coefficient Gamma = (Z - Z0) / (Z + Z0).
 
     Args:
@@ -36,6 +34,20 @@ def compute_reflection_coefficient(
         gamma = (z - z0) / (z + z0)
     if np.any(inf_mask):
         gamma = np.where(inf_mask, np.array(1.0 + 0.0j), gamma)
+    # Guard against gamma still containing inf/nan after inf_mask handling.
+    # This can happen when z = -z0, making the denominator zero and gamma = -inf,
+    # which the inf_mask on z (not gamma) does not catch.
+    gamma_inf = np.isinf(gamma)
+    gamma_nan = np.isnan(gamma)
+    if np.any(gamma_inf | gamma_nan):
+        # Map inf/nan to unit circle boundary:
+        #   z = -z0  ->  gamma = -inf  ->  -1.0+0j (short circuit)
+        #   NaN from other edge cases  ->   1.0+0j (open circuit)
+        gamma = np.where(
+            gamma_inf,
+            np.array(-1.0 + 0.0j),
+            np.where(gamma_nan, np.array(1.0 + 0.0j), gamma),
+        )
     return gamma
 
 
@@ -95,7 +107,10 @@ def smith_grid_circles() -> dict:
 
 
 def clamp_gamma(gamma: np.ndarray, max_mag: float = 0.999) -> np.ndarray:
-    """Clamp |Gamma| to *max_mag*, preserving phase. Returns copy.
+    """Clamp |Gamma| to *max_mag*, preserving phase.
+
+    Returns a copy when clamping is needed; returns the original array when
+    no clamping is required (avoids unnecessary allocation).
 
     Args:
         gamma: Complex reflection coefficient array.
@@ -108,6 +123,10 @@ def clamp_gamma(gamma: np.ndarray, max_mag: float = 0.999) -> np.ndarray:
     mask = mag > max_mag
     if np.any(mask):
         result = gamma.copy()
-        result[mask] = max_mag * (result[mask] / mag[mask])
+        # Guard against inf/inf or nan/inf in mag division (safety net)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            clamped = max_mag * (result[mask] / mag[mask])
+        clamped = np.where(np.isfinite(clamped), clamped, max_mag + 0.0j)
+        result[mask] = clamped
         return result
     return gamma

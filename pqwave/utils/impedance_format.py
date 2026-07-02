@@ -22,6 +22,19 @@ def format_complex(value: complex, unit: str = "", mode: str = "polar") -> str:
     """
     r, x = value.real, value.imag
 
+    # Guard against NaN
+    if math.isnan(r) or math.isnan(x):
+        return "NaN"
+
+    # Guard against Infinity
+    if math.isinf(r) or math.isinf(x):
+        if mode == "polar":
+            return f"∞ {unit} ∠ 90.0°" if unit else "∞ ∠ 90.0°"
+        # rectangular
+        if math.isinf(r):
+            return f"{'∞' if r > 0 else '-∞'} {unit}".strip() if unit else ('∞' if r > 0 else '-∞')
+        return f"{'j∞' if x > 0 else '-j∞'} {unit}".strip() if unit else ('j∞' if x > 0 else '-j∞')
+
     if mode == "polar":
         mag = math.sqrt(r * r + x * x)
         phase = math.degrees(math.atan2(x, r))
