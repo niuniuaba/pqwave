@@ -2855,10 +2855,25 @@ class MainWindow(QMainWindow):
         )
         panel.axis_manager.axis_range_changed.connect(self._on_axis_range_changed)
         panel.axis_manager.axis_label_changed.connect(self._on_axis_label_changed)
+        panel.trace_manager.tier3_active_changed.connect(self._on_tier3_changed)
 
         self._bound_plot_widget = panel.plot_widget
         self._bound_axis_manager = panel.axis_manager
         self._bound_trace_manager = panel.trace_manager
+
+    def _on_tier3_changed(self, has_tier3: bool, max_points: int) -> None:
+        """Handle Tier-3 rendering state change.
+
+        Shows a toast notification when the first Tier-3 trace appears,
+        and hides the persistent indicator when all Tier-3 traces are gone.
+        """
+        if has_tier3:
+            msg = (
+                f"Large trace detected ({max_points:,} points). "
+                f"Rendering in performance mode. "
+                f"Consider extracting signals of interest before loading."
+            )
+            self.statusBar().showMessage(msg, 8000)
 
     def _on_panel_activated(self, panel_id):
         """Handle active panel change: initialize new panel and rebind signals."""

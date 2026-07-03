@@ -48,3 +48,23 @@ def test_trace_creation_tier3_uses_plotcurveitem():
     assert rs.pen_width == 1.0
     assert rs.antialias is False
     assert rs.pre_ds_target == 1600
+
+
+def test_tier3_signal_emitted_for_large_trace():
+    """Verify _select_render_strategy returns Tier 3 for 1M points."""
+    from pqwave.ui.trace_manager import TraceManager, TIER2_MAX
+    n_pts = TIER2_MAX + 1  # 500,001 -> Tier 3
+    rs = TraceManager._select_render_strategy(n_pts, n_pts)
+    assert rs.item_type == "PlotCurveItem", (
+        f"Expected Tier 3 for {n_pts} points, got {rs.item_type}"
+    )
+    assert rs.pre_ds_target is not None
+
+
+def test_tier1_no_signal_for_small_trace():
+    """Verify _select_render_strategy returns Tier 1 for small trace."""
+    from pqwave.ui.trace_manager import TraceManager, TIER1_MAX
+    n_pts = TIER1_MAX - 1  # 49,999 -> Tier 1
+    rs = TraceManager._select_render_strategy(n_pts, n_pts)
+    assert rs.item_type == "PlotDataItem"
+    assert rs.pre_ds_target is None

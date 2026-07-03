@@ -141,6 +141,10 @@ class TraceManager(QtCore.QObject):
     trace_context_menu_requested = QtCore.pyqtSignal(str)
     # Emitted when a trace is removed (expression string)
     trace_removed = QtCore.pyqtSignal(str)
+    # Emitted when Tier-3 rendering state changes.
+    # bool: True if any trace is in Tier 3, False if all Tier-3 traces removed.
+    # int: Point count of the largest trace (for the toast message).
+    tier3_active_changed = QtCore.pyqtSignal(bool, int)
 
     @staticmethod
     def _is_fft_expression(expr: str) -> bool:
@@ -182,6 +186,10 @@ class TraceManager(QtCore.QObject):
         self.raw_file = None
         self.vcd_file = None  # Optional VcdFile for mixed-signal overlay
         self.current_dataset = 0
+
+        # Tier-3 tracking (large-trace performance mode notification)
+        self._has_tier3_trace = False
+        self._tier3_toast_shown = False
 
         # Log mode flags (should be synchronized with axis configuration)
         self.x_log = False
@@ -1480,6 +1488,28 @@ class TraceManager(QtCore.QObject):
                 pre_ds_target=DOWNSAMPLE_TARGET,
             )
 
+    def _check_tier3_state(self, n_points: int) -> None:
+        """Update Tier-3 tracking state and emit signal if changed.
+
+        Called after creating a new trace item.  Emits tier3_active_changed
+        when the first Tier-3 trace appears or the last one is removed.
+        """
+        is_tier3 = n_points >= TIER2_MAX
+        if is_tier3 and not self._has_tier3_trace:
+            self._has_tier3_trace = True
+            self._tier3_toast_shown = True
+            self.tier3_active_changed.emit(True, n_points)
+        elif not is_tier3:
+            # Check if any remaining trace is Tier 3 by scanning state
+            any_tier3 = any(
+                len(t.y_data) >= TIER2_MAX
+                for t in self.state_traces
+                if t.visible
+            )
+            if not any_tier3 and self._has_tier3_trace:
+                self._has_tier3_trace = False
+                self.tier3_active_changed.emit(False, 0)
+
     @staticmethod
     def _apply_log10_if_needed(
         x: np.ndarray, y: np.ndarray,
@@ -1809,6 +1839,7 @@ class TraceManager(QtCore.QObject):
             plot_item.setSegmentedLineMode('on')
 
         self._add_to_viewbox(plot_item, trace.y_axis)
+        self._check_tier3_state(n_points)
         return plot_item
 
     def _create_mc_spaghetti(self, mc, signal_name, x_data_list, y_data_list, color):
