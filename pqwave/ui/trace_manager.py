@@ -14,7 +14,7 @@ from PyQt6 import QtCore
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 
 from pqwave.ui.trace_analysis_dialog import TraceAnalysisDialog
 
@@ -711,6 +711,8 @@ class TraceManager(QtCore.QObject):
         self.state.clear_traces()
 
         # Reset Tier-3 tracking state
+        if self._has_tier3_trace:
+            self.tier3_active_changed.emit(False, 0)
         self._has_tier3_trace = False
         self._tier3_toast_shown = False
 
@@ -1803,7 +1805,7 @@ class TraceManager(QtCore.QObject):
         )
 
     def _create_analog_plot_item(self, trace: Trace) -> (
-            pg.PlotCurveItem | pg.PlotDataItem):
+            Union[pg.PlotCurveItem, pg.PlotDataItem]):
         """Create a graphics item for the trace using the tiered strategy.
 
         Tier 1/2 (<500K pts): PlotDataItem with autoDownsample, AA ON, w=2.
