@@ -53,7 +53,7 @@ class RenderStrategy:
     item_type: str          # 'PlotDataItem' | 'PlotCurveItem'
     pen_width: float
     antialias: bool
-    pre_ds_target: int | None
+    pre_ds_target: Optional[int]
 
 
 # Rendering constants for bus trace visualisation
@@ -710,6 +710,10 @@ class TraceManager(QtCore.QObject):
         # Clear traces from application state
         self.state.clear_traces()
 
+        # Reset Tier-3 tracking state
+        self._has_tier3_trace = False
+        self._tier3_toast_shown = False
+
         # Reset dB mode on Y axes
         for orientation in ('left', 'right'):
             ax = self.plot_widget.plotItem.getAxis(orientation)
@@ -1214,6 +1218,7 @@ class TraceManager(QtCore.QObject):
         self.logger.info(f"Removed trace for variable '{variable_name}'")
         self._auto_range_y_axis(AxisAssignment.Y1)
         self._auto_range_x()
+        self._check_tier3_state(0)  # Re-scan after removal
         try:
             self.trace_removed.emit(var)
         except Exception:
@@ -1263,7 +1268,7 @@ class TraceManager(QtCore.QObject):
                 # Re-downsample the transformed data using tiered strategy.
                 # PlotDataItem (Tiers 1-2) handles its own downsampling via
                 # autoDownsample — only pre-downsample for Tier 3 traces.
-                n_pts = len(trace.y_data)
+                n_pts = len(y_orig)
                 total_vis = sum(
                     len(t.y_data) for t in self.state_traces if t.visible
                 )
