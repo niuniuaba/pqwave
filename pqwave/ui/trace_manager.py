@@ -1417,6 +1417,46 @@ class TraceManager(QtCore.QObject):
         return x_ds, y_ds
 
     @staticmethod
+    def _select_render_strategy(trace_points: int,
+                                total_visible_points: int) -> RenderStrategy:
+        """Select rendering strategy based on per-trace point count.
+
+        Args:
+            trace_points: Number of data points in this trace.
+            total_visible_points: Sum of points across all visible traces
+                (reserved for future total-visible-points gating).
+
+        Returns:
+            RenderStrategy with appropriate item type, pen width, AA, and
+            downsampling target for the trace's point count.
+        """
+        if trace_points < TIER1_MAX:
+            # Tier 1: quality-first — adaptive resolution, AA ON, w=2
+            return RenderStrategy(
+                item_type="PlotDataItem",
+                pen_width=2.0,
+                antialias=True,
+                pre_ds_target=None,
+            )
+        elif trace_points < TIER2_MAX:
+            # Tier 2: balanced — same rendering as Tier 1, distinct for
+            # future total-visible-points gating
+            return RenderStrategy(
+                item_type="PlotDataItem",
+                pen_width=2.0,
+                antialias=True,
+                pre_ds_target=None,
+            )
+        else:
+            # Tier 3: performance — pre-downsampled, no AA, w=1
+            return RenderStrategy(
+                item_type="PlotCurveItem",
+                pen_width=1.0,
+                antialias=False,
+                pre_ds_target=DOWNSAMPLE_TARGET,
+            )
+
+    @staticmethod
     def _apply_log10_if_needed(
         x: np.ndarray, y: np.ndarray,
         x_log: bool, y_log: bool,
