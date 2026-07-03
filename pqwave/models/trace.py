@@ -56,7 +56,7 @@ class Trace:
     y_data: np.ndarray
     y_axis: AxisAssignment = AxisAssignment.Y1
     color: Tuple[int, int, int] = (0, 0, 255)  # Blue
-    line_width: float = 1.0
+    line_width: float = 2.0
     visible: bool = True
     dataset_idx: int = 0
     selected: bool = False

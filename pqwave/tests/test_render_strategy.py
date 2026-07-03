@@ -105,6 +105,37 @@ def test_select_strategy_no_qt_dependency():
     assert callable(TraceManager._select_render_strategy)
 
 
+def test_trace_default_line_width_is_2():
+    """New Trace objects default to line_width 2.0."""
+    import numpy as np
+    from pqwave.models.trace import Trace
+    t = Trace(
+        name="test",
+        expression="V(out)",
+        x_data=np.array([1.0, 2.0, 3.0]),
+        y_data=np.array([0.0, 1.0, 0.0]),
+    )
+    assert t.line_width == 2.0, f"Expected 2.0, got {t.line_width}"
+
+
+def test_trace_line_width_serialization_roundtrip():
+    """Explicit line_width survives serialization roundtrip."""
+    import numpy as np
+    from pqwave.models.trace import Trace
+    t = Trace(
+        name="test",
+        expression="V(out)",
+        x_data=np.array([1.0, 2.0]),
+        y_data=np.array([0.0, 1.0]),
+        line_width=1.0,  # Explicit old value
+    )
+    d = t.to_dict()
+    t2 = Trace.from_dict(d)
+    assert t2.line_width == 1.0, (
+        f"Explicit line_width should survive roundtrip, got {t2.line_width}"
+    )
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

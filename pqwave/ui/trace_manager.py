@@ -429,7 +429,7 @@ class TraceManager(QtCore.QObject):
                         y_data=y_data,
                         y_axis=y_axis,
                         color=color,
-                        line_width=1.0,
+                        line_width=2.0,
                         dataset_idx=self.current_dataset
                     )
 
@@ -564,7 +564,7 @@ class TraceManager(QtCore.QObject):
         trace = Trace(
             name=stripped, expression=stripped,
             x_data=trace_x_data, y_data=y_data,
-            y_axis=y_axis, color=color, line_width=1.0,
+            y_axis=y_axis, color=color, line_width=2.0,
             dataset_idx=0,
         )
         if vcd_sig.width > 1:
