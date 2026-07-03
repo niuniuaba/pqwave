@@ -13,6 +13,7 @@ import pyqtgraph as pg
 from PyQt6 import QtCore
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox
+from dataclasses import dataclass
 from typing import Optional, List, Tuple
 
 from pqwave.ui.trace_analysis_dialog import TraceAnalysisDialog
@@ -32,6 +33,28 @@ from pqwave.logging_config import get_logger
 # Pre-downsample target: 2x typical screen width.  This gives good visual
 # quality for moderate zoom-in while keeping per-paint overhead low.
 DOWNSAMPLE_TARGET = 1600
+
+# Tiered rendering strategy constants
+TIER1_MAX = 50_000       # < this: quality-first (Tier 1)
+TIER2_MAX = 500_000      # < this: balanced (Tier 2), >= this: performance (Tier 3)
+
+
+@dataclass
+class RenderStrategy:
+    """Rendering strategy selected based on trace point count.
+
+    Attributes:
+        item_type: 'PlotDataItem' for adaptive resolution or 'PlotCurveItem'
+                   for pre-downsampled rendering.
+        pen_width: Line width in pixels for the trace pen.
+        antialias: Whether to enable anti-aliasing on the plot item.
+        pre_ds_target: Points to downsample to (None = no pre-downsampling).
+    """
+    item_type: str          # 'PlotDataItem' | 'PlotCurveItem'
+    pen_width: float
+    antialias: bool
+    pre_ds_target: int | None
+
 
 # Rendering constants for bus trace visualisation
 BUS_BASE_OFFSET = 0.5     # base Y level for bus centre line (relative to y_off)
