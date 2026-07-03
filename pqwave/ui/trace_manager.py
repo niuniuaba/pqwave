@@ -1743,9 +1743,19 @@ class TraceManager(QtCore.QObject):
             f"vb.viewRange={vb.viewRange()}"
         )
 
-    def _create_analog_plot_item(self, trace: Trace) -> pg.PlotCurveItem:
-        """Create a PlotCurveItem for the trace with pre-downsampled data."""
-        pen = pg.mkPen(color=trace.color, width=trace.line_width)
+    def _create_analog_plot_item(self, trace: Trace) -> (
+            pg.PlotCurveItem | pg.PlotDataItem):
+        """Create a graphics item for the trace using the tiered strategy.
+
+        Tier 1/2 (<500K pts): PlotDataItem with autoDownsample, AA ON, w=2.
+        Tier 3 (>=500K pts): StaticCurveItem with pre-downsample, no AA, w=1.
+        """
+        # Compute total visible points for future total-visible-points gating
+        total_visible = sum(
+            len(t.y_data) for t in self.state_traces if t.visible
+        )
+        n_points = len(trace.y_data)
+        strategy = self._select_render_strategy(n_points, total_visible)
 
         y_log = self.y1_log if trace.y_axis == AxisAssignment.Y1 else self.y2_log
         is_fft = self._is_fft_expression(trace.expression)
@@ -1753,19 +1763,28 @@ class TraceManager(QtCore.QObject):
             trace.x_data, trace.y_data, self.x_log, y_log, is_fft
         )
 
-        # Pre-downsample to fixed resolution
-        x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
+        pen = pg.mkPen(color=trace.color, width=strategy.pen_width)
 
-        plot_item = _StaticCurveItem(
-            x_ds, y_ds,
-            pen=pen,
-        )
-        # Segmented line mode is faster than path rendering for line plots.
-        # Uses drawLines() instead of drawPath().
-        plot_item.setSegmentedLineMode('on')
+        if strategy.item_type == "PlotDataItem":
+            # Tiers 1-2: adaptive resolution via pyqtgraph autoDownsample.
+            # No manual pre-downsampling — autoDownsample adapts to viewport.
+            plot_item = pg.PlotDataItem(
+                x, y,
+                pen=pen,
+                symbol=None,
+                skipFiniteCheck=True,
+                autoDownsample=True,
+                downsampleMethod='peak',
+                antialias=strategy.antialias,
+            )
+        else:
+            # Tier 3: pre-downsample to fixed resolution (current behavior).
+            ds_target = strategy.pre_ds_target or DOWNSAMPLE_TARGET
+            x_ds, y_ds = self._downsample(x, y, ds_target)
+            plot_item = _StaticCurveItem(x_ds, y_ds, pen=pen)
+            plot_item.setSegmentedLineMode('on')
 
         self._add_to_viewbox(plot_item, trace.y_axis)
-
         return plot_item
 
     def _create_mc_spaghetti(self, mc, signal_name, x_data_list, y_data_list, color):
