@@ -1252,10 +1252,25 @@ class TraceManager(QtCore.QObject):
                     x_orig, y_orig, self.x_log, y_log, is_fft
                 )
 
-                # Re-downsample the transformed data
-                x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
+                # Re-downsample the transformed data using tiered strategy.
+                # PlotDataItem (Tiers 1-2) handles its own downsampling via
+                # autoDownsample — only pre-downsample for Tier 3 traces.
+                n_pts = len(trace.y_data)
+                total_vis = sum(
+                    len(t.y_data) for t in self.state_traces if t.visible
+                )
+                strategy = self._select_render_strategy(n_pts, total_vis)
 
-                plot_item.setData(x_ds, y_ds)
+                if strategy.pre_ds_target is not None:
+                    # Tier 3: pre-downsample then setData
+                    x_ds, y_ds = self._downsample(
+                        x, y, strategy.pre_ds_target
+                    )
+                    plot_item.setData(x_ds, y_ds)
+                else:
+                    # Tiers 1-2: PlotDataItem with autoDownsample.
+                    # setData triggers autoDownsample internally.
+                    plot_item.setData(x, y)
                 plot_item.prepareGeometryChange()
 
         finally:
@@ -1307,9 +1322,18 @@ class TraceManager(QtCore.QObject):
                 new_x_data, trace.y_data, self.x_log, y_log, is_fft
             )
 
-            # Downsample and update the plot item
-            x_ds, y_ds = self._downsample(x, y, DOWNSAMPLE_TARGET)
-            plot_item.setData(x_ds, y_ds)
+            # Downsample and update the plot item using tiered strategy.
+            n_pts = len(trace.y_data)
+            total_vis = sum(
+                len(t.y_data) for t in state_traces if t.visible
+            )
+            strategy = self._select_render_strategy(n_pts, total_vis)
+
+            if strategy.pre_ds_target is not None:
+                x_ds, y_ds = self._downsample(x, y, strategy.pre_ds_target)
+                plot_item.setData(x_ds, y_ds)
+            else:
+                plot_item.setData(x, y)
             updated_count += 1
 
         if updated_count > 0:
