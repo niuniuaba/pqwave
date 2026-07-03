@@ -189,7 +189,6 @@ class TraceManager(QtCore.QObject):
 
         # Tier-3 tracking (large-trace performance mode notification)
         self._has_tier3_trace = False
-        self._tier3_toast_shown = False
 
         # Log mode flags (should be synchronized with axis configuration)
         self.x_log = False
@@ -714,7 +713,6 @@ class TraceManager(QtCore.QObject):
         if self._has_tier3_trace:
             self.tier3_active_changed.emit(False, 0)
         self._has_tier3_trace = False
-        self._tier3_toast_shown = False
 
         # Reset dB mode on Y axes
         for orientation in ('left', 'right'):
@@ -1504,7 +1502,6 @@ class TraceManager(QtCore.QObject):
         is_tier3 = n_points >= TIER2_MAX
         if is_tier3 and not self._has_tier3_trace:
             self._has_tier3_trace = True
-            self._tier3_toast_shown = True
             self.tier3_active_changed.emit(True, n_points)
         elif not is_tier3:
             # Check if any remaining trace is Tier 3 by scanning state
@@ -1824,7 +1821,7 @@ class TraceManager(QtCore.QObject):
             trace.x_data, trace.y_data, self.x_log, y_log, is_fft
         )
 
-        pen = pg.mkPen(color=trace.color, width=strategy.pen_width)
+        pen = pg.mkPen(color=trace.color, width=trace.line_width)
 
         if strategy.item_type == "PlotDataItem":
             # Tiers 1-2: adaptive resolution via pyqtgraph autoDownsample.

@@ -67,8 +67,9 @@ per-trace point count:
 3. On log mode switch, reuse objects and only transform data.
 4. Set all styles/options at object creation; afterwards only update data.
 5. Enable anti-aliasing by default on all `PlotDataItem` and `PlotCurveItem`
-   instances (set `antialias=True`). The Qt raster engine's AA path uses SIMD-
-   optimised subpixel rendering and avoids a pathological overhead in the
+   instances (set `antialias=True`). Exception: Tier 3 (performance) traces
+   explicitly disable AA (`antialias=False`). The Qt raster engine's AA path
+   uses SIMD-optimised subpixel rendering and avoids a pathological overhead in the
    non-AA `PlotCurveItem` segmented-line path.
 6. Pass NumPy ndarrays to `setData`, not Python lists.
 7. Set `skipFiniteCheck=True` (validation belongs in simulation, not rendering).
