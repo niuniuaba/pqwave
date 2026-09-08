@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "pqwave architecture",
+    "output": "pqwave-architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "File to pixels",
+        "focus": [
+          "tools",
+          "ingest",
+          "models",
+          "state",
+          "render",
+          "ui"
+        ],
+        "note": "A result file becomes lazy NumPy columns, then panel state, then tiered plot items."
+      },
+      {
+        "id": "headless-plane",
+        "label": "Headless control plane",
+        "focus": [
+          "llm",
+          "session",
+          "state"
+        ],
+        "note": "The same commands the GUI uses, driven with no display."
+      },
+      {
+        "id": "eda-loop",
+        "label": "EDA round-trip",
+        "focus": [
+          "eda",
+          "bridges",
+          "session"
+        ],
+        "note": "Net clicks arrive as commands; highlights and stamped values travel back."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "tools",
+      "type": "external",
+      "label": "SPICE simulators",
+      "sublabel": "ngspice \u00b7 LTspice \u00b7 QSPICE",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "ingest",
+      "type": "backend",
+      "label": "Reader layer",
+      "sublabel": ".raw .qraw \u00b7 VCD FST",
+      "pos": [
+        210,
+        40
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "models",
+      "type": "backend",
+      "label": "Dataset + math",
+      "sublabel": "lazy views \u00b7 87 fns",
+      "pos": [
+        380,
+        40
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": "App state",
+      "sublabel": "panels \u00b7 traces",
+      "pos": [
+        550,
+        40
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "render",
+      "type": "backend",
+      "label": "TraceManager",
+      "sublabel": "tiered renderer",
+      "pos": [
+        720,
+        40
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Qt workspace",
+      "sublabel": "4 panels \u00b7 2 Y axes",
+      "pos": [
+        890,
+        40
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "analysis",
+      "type": "backend",
+      "label": "Analysis + meas",
+      "sublabel": "Bode \u00b7 Smith \u00b7 MC",
+      "pos": [
+        380,
+        185
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "session",
+      "type": "backend",
+      "label": "SessionAPI",
+      "sublabel": "85 headless ops",
+      "pos": [
+        550,
+        185
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "eda",
+      "type": "external",
+      "label": "Schematic editors",
+      "sublabel": "KiCad \u00b7 xschem",
+      "pos": [
+        890,
+        185
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "frontend",
+      "label": "REPL \u00b7 CLI",
+      "sublabel": "--exec \u00b7 LLM",
+      "pos": [
+        380,
+        320
+      ],
+      "size": [
+        130,
+        70
+      ]
+    },
+    {
+      "id": "bridges",
+      "type": "backend",
+      "label": "EDA bridges",
+      "sublabel": "cross-probe",
+      "pos": [
+        720,
+        320
+      ],
+      "size": [
+        130,
+        70
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Qt-free kernel",
+      "wraps": [
+        "ingest",
+        "models",
+        "state"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "files-in",
+      "from": "tools",
+      "to": "ingest",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ingest-models",
+      "from": "ingest",
+      "to": "models",
+      "variant": "emphasis"
+    },
+    {
+      "id": "models-state",
+      "from": "models",
+      "to": "state",
+      "variant": "emphasis"
+    },
+    {
+      "id": "state-render",
+      "from": "state",
+      "to": "render",
+      "variant": "emphasis"
+    },
+    {
+      "id": "render-ui",
+      "from": "render",
+      "to": "ui",
+      "variant": "emphasis"
+    },
+    {
+      "id": "models-analysis",
+      "from": "models",
+      "to": "analysis",
+      "label": "arrays",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        445,
+        150
+      ]
+    },
+    {
+      "id": "session-state",
+      "from": "session",
+      "to": "state",
+      "label": "same state",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "llm-session",
+      "from": "llm",
+      "to": "session",
+      "label": "intent to command",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "eda-bridges",
+      "from": "eda",
+      "to": "bridges",
+      "label": "net clicks"
+    },
+    {
+      "id": "bridges-session",
+      "from": "bridges",
+      "to": "session",
+      "label": "GAW + JSON",
+      "fromSide": "top",
+      "toSide": "right"
+    },
+    {
+      "id": "session-bridges",
+      "from": "session",
+      "to": "bridges",
+      "label": "highlight back",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "One ingestion core, many simulators",
+      "items": [
+        "Reads LTspice, QSPICE, ngspice and Xyce results",
+        "Mixed-signal VCD plus FST and GHW waveforms",
+        "Writes traces back out as ltspice, qspice, ngspice or vcd"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "A headless control plane",
+      "items": [
+        "Every GUI action is one of 85 Qt-free session commands",
+        "REPL, --exec and --extract drive the same App state",
+        "Natural-language intents are translated into those commands"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Schematic round-trip",
+      "items": [
+        "KiCad IPC, xschem GAW+JSON, Lepton server, Qucs-S hook",
+        "Click a net in the editor, the trace lands in pqwave",
+        "Values are stamped back onto the schematic"
+      ]
+    }
+  ]
+}

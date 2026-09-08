@@ -1,202 +1,255 @@
-# pqwave - a Wave Viewer for SPICE raw data using spicelib and PyQtGraph
+# pqwave
 
-![Version](https://img.shields.io/badge/version-0.3.4-blue)
-![Python](https://img.shields.io/badge/python-3.8+-green)
-![License](https://img.shields.io/badge/license-MIT-orange)
+**A waveform viewer for people who have outgrown the simulator's own plotter.**
 
-## ✨ Features
+pqwave opens the result files that ngspice, Xyce, LTspice and QSPICE leave behind, the
+VCD/FST/GHW dumps that mixed-signal runs leave behind, and then gives you an
+instrument bench on top of them: 87 registered functions, 31 measurement operators,
+Bode/Nyquist/Smith/polar dialogs, a real Monte-Carlo statistics workbench, and an
+eye-diagram renderer — all of it scriptable from a headless API, all of it under MIT.
 
-### 🎯 Core Capabilities
-- **Multi-format Support**: ngspice/xyce, ltspice, qspice .qraw files
-- **Dual Y-Axis**: Independent Y1 and Y2 axes with shared X-axis
-- **Mathematical Expressions**: Infix notation with built-in functions
-
-### 🖥️ User Interface
-- **Unified Vector Selection**: Single combo box for all variables
-- **Expression Support**: Quoted variables and complex expressions
-
-## 📸 Screenshots
-![本地图片](./screenshot.png)
-
-## 📦 Installation 
-```bash
-# Clone repository
-git clone https://github.com/niuniuaba/pqwave.git
-
-# Create virtual environment
-cd pqwave
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-## 🚀 Command Line Usage
-```bash
-# Open a RAW file directly
-python pqwave.py simulation.raw
-
-# Show version information
-python pqwave.py --version
-
-# Display help
-python pqwave.py --help
-```
-
-### Command Line Options
-
-| Option | Description |
-|--------|-------------|
-| `raw_file` | SPICE raw file to open (optional) |
-| `--version`, `-v` | Show version and exit |
-| `--test` | Run test suites and exit |
-| `--debug` | Enable debug-level logging (most verbose) |
-| `--verbose` | Enable info-level logging (user feedback) |
-| `--quiet` | Suppress all output except errors |
-| `--log-file FILE` | Write logs to specified file |
-| `--xschem-port PORT` | TCP port for xschem integration server (default: 2026) |
-| `--no-xschem-server` | Disable xschem integration server |
-| `--xschem-send COMMAND` | Send command to existing xschem server and exit |
-
-**Logging level priority**: `--debug` > `--verbose` > default (WARNING) > `--quiet` (ERROR only)
-
-### Examples
+![pqwave](screenshot.png)
 
 ```bash
-# Run all tests
-python pqwave.py --test
-
-# Open a file with verbose logging to see user feedback messages
-python pqwave.py --verbose simulation.raw
-
-# Enable full debug output for troubleshooting
-python pqwave.py --debug simulation.raw
-
-# Suppress all non-error output for clean terminal
-python pqwave.py --quiet simulation.raw
-
-# Write logs to a file while running GUI
-python pqwave.py --debug --log-file pqwave.log simulation.raw
+pip install -r requirements.txt && python pqwave.py your_circuit.raw
 ```
 
-### Xschem Integration Examples
+The examples below use `tests/bridge.raw`, the small sample capture that ships with the
+repository.
+
+---
+
+## Architecture
+
+![pqwave architecture](docs/arch/architecture-preview.png)
+
+The same diagram as an interactive, zoomable, themeable page — search, focus,
+relationship tracing and PNG/SVG/WebM export:
+**[docs/arch/pqwave-architecture.html](docs/arch/pqwave-architecture.html)**
+(source spec: [`pqwave.architecture.json`](docs/arch/pqwave.architecture.json)).
+
+The load-bearing detail is the **Qt-free kernel**. Everything that understands data —
+parsing, the expression engine, analysis, measurement, the whole `SessionAPI` — never
+touches Qt. That is why the same 85 commands work from a menu click, a REPL, a shell
+flag and a CI job with no display attached.
+
+---
+
+## Why this exists
+
+Every SPICE tool ships a plotter, and every plotter is built for one job: show *this*
+run, from *that* simulator, well enough to eyeball it. That stops being enough the
+moment your work is any of these:
+
+- **You use more than one simulator.** LTspice will not open your ngspice run next to
+  your QSPICE run. pqwave reads all of them — including QSPICE's `.qraw`, Xyce's
+  output, and ASCII raw files — and plots them in the same window, on the same axes.
+- **You need numbers, not eyeballs.** `rise_time`, overshoot, settling time, THD,
+  SINAD, SNR, SFDR, slew rate, duty cycle and 22 more, written the way you would
+  write a `.meas` line, evaluated against any expression you can type.
+- **You ran a Monte-Carlo sweep and now what?** 500 overlaid traces are not an
+  answer. Load the run as a collection and get yield against spec limits, a
+  correlation matrix you can edit, parameter-sensitivity ranking, per-measurement
+  histograms, envelope and spaghetti display modes, and a worst-N shortlist.
+- **You want it automated.** There is no display, no GUI, no click-through:
+  `pqwave --extract`, `pqwave --exec`, and an importable Python API that returns
+  dictionaries and NumPy arrays.
+- **You click nets all day.** pqwave cross-probes with KiCad, xschem, Lepton EDA and
+  Qucs-S: click a net in the schematic, the trace appears; stamp simulated values back
+  onto the drawing.
+
+## What you get
+
+### One ingestion core, many simulators
+
+| Input | What it covers |
+|---|---|
+| `.raw` / `.qraw` | LTspice (UTF-16, `float32` data, complex AC), QSPICE, ngspice, Xyce — binary *and* ASCII |
+| `.vcd` / `.fst` / `.ghw` | mixed-signal and digital results, incl. GHDL dumps |
+| `.meas` lines | parsed and evaluated by pqwave's own engine |
+| JSON | saved sessions and eye-diagram definitions |
+
+Output is not a dead end either — `pqwave --convert` writes selected traces back out
+as **ltspice, qspice, ngspice or VCD**, so a pqwave-only workflow can feed a viewer
+you do not control.
+
+### An analysis bench, not just a plotter
+
+- **87-function registry behind a real parser**: recursive-descent infix evaluation, not a
+  `eval`. Quoted vectors (`"v(out)"`), derived components (`mag()`, `db()`, `phase()`,
+  `real()`, `imag()`), complex arithmetic, and sweep-aware references that resolve
+  against the right Monte-Carlo step.
+- **Impedance in the form you want**: toggle polar ↔ rectangular with SI prefixes,
+  straight in the cursor readout.
+- **One-click dialogs**: Bode (magnitude + phase), Nyquist, Smith (with a three-line
+  Γ / z / Z readout), polar grid, FFT, histogram, power (instantaneous and average),
+  worst-case with corner enumeration and temperature-coefficient sensitivity.
+- **Dual Y axes, up to 4 panels**, cursor pairs with delta and area readouts, marks,
+  rebindable keybindings (`~/.pqwave/keybindings.json`), and saveable view templates
+  that restore datasets, traces and axis configuration together.
+
+### Monte-Carlo that answers "so what?"
+
+```
+mc_load('runs.raw', source_type='stepped')   mc_yield('v(out)', low=1.6, high=1.8)
+mc_stats('v(out)')                           mc_sensitivity('v(out)')
+mc_param('R1', [990, 1020, 1050])           mc_histogram('v(out)', bins=50)
+mc_style('envelope', sigma=3)                mc_worst(n=5)
+mc_correlation_load('matrix.csv')            mc_generate('params.csv', runs=500, seed=1)
+```
+
+Runs are first-class objects: filter them, nominate one as nominal, scatter a
+measurement against a parameter, or open the correlation-matrix editor and write the
+correlations back into the next generator run. The full walkthrough is in
+**[docs/monte_carlo/guide.md](docs/monte_carlo/guide.md)**.
+
+### Mixed-signal you can actually read
+
+Digital and bus traces decode from VCD/FST/GHW with configurable thresholds, bus
+slicing (`data[7:4]`), per-trace lane heights, and a genuine **eye diagram** renderer
+driven by a saved JSON definition — so an analog transient and its bus traffic share
+one X axis.
+
+### A control plane you can script
+
+```python
+from pqwave.session.api import SessionAPI
+
+s = SessionAPI()
+s.load("tests/bridge.raw")      # {'file_type': 'raw', 'n_points': 4015,
+                                #  'n_variables': 5, 'signals': [...]}
+s.add("v(ac_p)")                # 'v(ac_p)'   -> the trace name
+s.measure("pp(v(ac_p))")        # {'pp(v(ac_p))': 100.12586975097656}
+```
+
+Methods return the domain result and raise on failure; the `{"ok": ...}` envelope
+belongs to the command layer (`ReplExecutor`, `--exec`) that the REPL and the EDA
+bridges drive.
 
 ```bash
-# Start pqwave with xschem server on default port
-pqwave --xschem-port 2026
-
-# Start pqwave with xschem server disabled
-pqwave --no-xschem-server simulation.raw
-
-# Send command to existing pqwave server
-pqwave --xschem-send "table_set /path/to/sim.raw"
+pqwave --exec "load('runs.raw')"              # one command -> its real JSON payload
+pqwave --exec "load('r.raw'); add('v(out)')"  # ';' chains run for their side effects
+pqwave --extract sim.raw v(out),v(in) -ngspice filtered.raw    # headless trace extract
 ```
 
-### Running Tests
+Every GUI action goes through the same registry of 85 `@api_command` operations, so
+the REPL, the CLI, the bridges and your own scripts cannot drift away from the
+application. `pqwave --help-commands` lists them; a coverage test fails the build if a
+new command ships undocumented.
+
+### Round-trip with your schematic editor
+
+| Editor | Path in | Path out |
+|---|---|---|
+| **KiCad** | IPC API, net/part selection | control bar, highlight |
+| **xschem** | GAW *and* JSON over TCP (Alt+G) | cross-probe + **value back-annotation** onto the sheet |
+| **Lepton EDA** | Scheme server + file watcher | menu additions, cross-probe, stale-bytecode detection |
+| **Qucs-S** | one-click hook into its Ngspice setting | every simulation opens automatically |
+| **QSPICE** | `.qsch` launch + `.qraw` pickup | — |
+
+Multi-window routing is real: several pqwave windows register themselves, and a
+`table_set`/`copyvar` command lands on the window that owns that raw file.
+
+### Natural language, no cloud required
+
+`pqwave --setup-llm` points the chat panel at any OpenAI-compatible endpoint,
+including a local model server. Intents that match a template resolve
+**deterministically with no model at all**, so the common cases are instant, offline
+and predictable; only free-form phrasings fall through to the model.
+
+### Built for the sizes real sims produce
+
+A tiered renderer picks per trace: `PlotDataItem` with anti-aliasing under 500K
+points, a static `PlotCurveItem` with AA off and manual downsampling to 1600 above
+that, plus a 30 ms view-box throttle. 16 M-point transients pan and zoom without
+fighting the toolkit — and `skipFiniteCheck=True` keeps validation where it belongs,
+in the simulation, not in the paint path.
+
+---
+
+## How it compares
+
+Cells describe what each tool is documented to do. pqwave's column is verifiable from
+this repository; the others are generalities about closed tools and I would rather be
+correct than clever — open an issue if a cell is wrong.
+
+| | **pqwave** | LTspice | QSPICE | xschem `graph` | GTKWave |
+|---|---|---|---|---|---|
+| License | **MIT, full source** | proprietary freeware | proprietary freeware | open source | open source |
+| Opens another vendor's raw file | **4 simulators + ASCII** | its own | its own | ngspice-oriented | no (VCD) |
+| Runs with no display / CI | **yes** | no | no | no | partly |
+| Scriptable from Python | **yes, importable** | no | no | no | no (Tcl) |
+| Bode / Nyquist / Smith / polar dialogs | **all four** | AC traces only | AC traces only | no | no |
+| 31 measurement operators + 87 functions | **yes** | `.meas` subset | `.meas` subset | no | no |
+| Monte-Carlo: yield, correlation matrix, sensitivity | **yes** | no | no | no | no |
+| Digital VCD / FST / GHW + eye diagram | **yes** | own sim only | own sim only | no | yes (its specialty) |
+| Cross-probe + back-annotate a schematic | **4 editors** | own schematic | own schematic | own sheet | no |
+| Natural-language / REPL control | **yes** | no | no | no | no |
+
+**The short version:** the simulator's plotter is a viewer with an expression field.
+pqwave is an analysis front end that happens to also be a viewer — and unlike them, it
+is a library you can call.
+
+---
+
+## Install
 
 ```bash
-# Run all tests via --test flag
-python pqwave.py --test
-
-# Run tests with verbose output
-python pqwave.py --test --verbose
-
-# Run tests with debug output
-python pqwave.py --test --debug
+git clone https://github.com/niuniuaba/pqwave.git && cd pqwave
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt          # or: pip install -e .
 ```
 
-Test results are displayed with pass/fail status for each test file, followed by a summary.
+Needs Python ≥ 3.8, PyQt6, pyqtgraph, NumPy, SciPy, spicelib, eyediagram. Optional:
+`pip install -e ".[dev]"` for tests/lint, `".[headless]"` for matplotlib export.
 
-### Basic Workflow
-1. **Open File**: Use File → Open or command line
-2. **Select Dataset**: Choose from available simulation runs
-3. **Choose Variable**: Select from Vector combo box
-4. **Set X-Axis**: Click X button to set X-axis variable
-5. **Add Traces**: Click Y1 or Y2 to add traces
-6. **Adjust View**: Use logarithmic scale or manual ranges as needed
-
-## 🧪 Qucs-S Integration
-
-pqwave integrates with [Qucs-S](https://github.com/ra3xdh/qucs_s) as an automatic waveform viewer. After one-click setup, every simulation you run in Qucs-S opens its results in pqwave — with traceable output files in a `simulation/` directory next to your schematic.
-
-**Key features:**
-- **Zero-config simulation hook**: No C++ changes to Qucs-S — uses the existing "Ngspice executable" setting
-- **Schematic-traceable outputs**: `bridge.sch` → `simulation/bridge.cir` → `simulation/bridge.tran1.raw`
-- **Non-invasive**: Qucs-S's built-in diagrams continue to work normally
-
-**Quick setup:**
-1. In pqwave: **File → Qucs-S Bridge → Connect** → OK
-2. In Qucs-S: simulate any schematic — pqwave opens automatically
-
-Or via CLI: `pqwave --setup-qucs-integration`
-
-For details, troubleshooting, and manual setup, see [Qucs-S Integration Guide](docs/qucs/user-guide.md).
-
-## 📡 Xschem Integration
-
-pqwave integrates with [xschem](https://xschem.sourceforge.io/) schematic editor as an external waveform viewer. With proper configuration, you can click nets in xschem and send them directly to pqwave for visualization.
-
-**Key features:**
-- **Seamless integration**: Appears in xschem's viewer selection dialog (Alt+G)
-- **Single-instance server**: Only one pqwave server runs, preventing multiple windows
-- **Advanced protocol**: Supports both GAW-style commands and JSON for back-annotation
-- **Color-coded traces**: Nets are plotted with distinct colors matching xschem highlighting
-
-**Quick setup:**
-1. Add pqwave to `sim(spicewave)` array in your `xschemrc` file
-2. Restart xschem
-3. Select nets and press Alt+G to choose "pqwave viewer"
-
-For configuration instructions and advanced features like back-annotation, see the [Xschem Bridge](docs/xschem/) documentation and the `XschemCrossProbeClient` class in `pqwave/bridge/xschem/cross_probe.py`.
-
-## 🔧 Architecture
-
-```
-pqwave/
-├── __init__.py              # package exports (lazy, PEP 562), __version__
-├── _version.py              # single source of truth for the version string
-├── main.py                  # CLI entry point (argparse, logging, bridges)
-├── logging_config.py        # standard logging configuration
-├── test_runner.py           # --test : runs each test file under pytest, isolated
-├── models/                  # RawFile, Dataset/Variable, Trace, ExprEvaluator,
-│                            # ApplicationState, raw_converter, mc_collection,
-│                            # vcdfile, fst_adapter, ghw_adapter
-├── analysis/                # pure NumPy engines: bode, nyquist, smith, polar,
-│                            # histogram, correlation, power_analyzer,
-│                            # worst_case, multi_run
-├── ui/                      # Qt widgets: MainWindow, PlotWidget, PanelGrid,
-│                            # TraceManager, AxisManager, dialogs, REPL
-├── bridge/                  # EDA tool integrations
-│   ├── xschem/              #   TCP server, cross-probe, control bar, file watcher
-│   ├── kicad/               #   IPC API bridge + control bar
-│   ├── lepton/              #   Scheme server + cross-probe
-│   ├── qucs_s/              #   one-click waveform-viewer hook
-│   └── qspice/              #   QSPICE launcher / .qsch handling
-├── digital/                 # VCD, eye diagram, bus slicing, threshold config
-├── measure/                 # .meas script parser and measure engine
-├── session/                 # SessionAPI: Qt-free orchestrator (@api_command)
-├── llm/                     # natural-language → command translation
-├── templates/               # view-template save/apply
-├── utils/                   # ColorManager, LogAxisItem, ThrottledPlotItem, …
-└── tests/                   # the test suite (~70 files, ~950 tests)
-```
-
-Dependency direction is one-way: **ui → analysis / models / digital / session → utils**.
-`models/`, `analysis/` and `session/` stay Qt-free so they work headless and in the REPL.
-
-Simulation result files and the larger performance captures live in the top-level
-`tests/` directory (git-ignored, except the small fixtures the suite needs); the
-Python test suite itself is `pqwave/tests/`.
-
-## 🧪 Running the tests
+## Command line
 
 ```bash
-pytest                       # whole suite (testpaths points at pqwave/tests/)
+pqwave file.raw                 # open it            pqwave --debug file.raw
+pqwave --exec "load('a.raw')"   # run commands, exit pqwave --extract in.raw v(out) -qspice out.qraw
+pqwave --version                # 0.3.4             pqwave --test   # full suite, isolated
+```
+
+Flags: `--version` `--test` `--debug` `--verbose` `--quiet` `--log-file FILE`
+`--xschem-port PORT` `--no-xschem-server` `--xschem-send CMD` `--xschem-ba-port PORT`
+`--extract` `--convert` `--qspice-bridge` `--sch-path` `--qucs-bridge`
+`--setup-qucs-integration` `--connect` `--exec` `--setup-llm` `--help-commands`
+
+## Development
+
+```bash
+pytest                      # ~960 tests, ~11 s, one process
 pytest pqwave/tests/test_bode.py -q
-python pqwave.py --test      # each test file in its own subprocess
+python pqwave.py --test     # each test file in its own subprocess
+make lint                   # flake8 + mypy
+make format                 # black — see the note below
+make test-isolated
 ```
 
-`pqwave/tests/conftest.py` provides the single QApplication the suite shares and
-resets the `ApplicationState` / `WindowRegistry` singletons between tests, so the
-whole suite runs in one process. Bridge tests that need a TCP socket skip with an
-explicit reason where binding is not permitted.
+`pqwave/tests/conftest.py` owns the shared `QApplication` and resets the
+`ApplicationState` / `WindowRegistry` singletons, so the suite runs in one process
+without order dependence. Tests that need TCP loopback or a git-ignored data capture
+skip with a stated reason rather than fail.
+
+**Formatting:** black is the declared formatter but has never been run repo-wide, so
+`make format` will rewrite nearly every file. Treat that as its own
+`style: run black` commit, never fold it into a fix. `AGENTS.md` records the current
+lint/type baselines so nobody has to rediscover them.
+
+## Documentation
+
+| Topic | Where |
+|---|---|
+| Monte-Carlo guide | [docs/monte_carlo/guide.md](docs/monte_carlo/guide.md) |
+| Session/REPL API | [docs/cli-api-prd.md](docs/cli-api-prd.md) |
+| Back-annotation | [docs/back-annotation.md](docs/back-annotation.md) |
+| xschem integration | [docs/xschem_integration.md](docs/xschem_integration.md) |
+| KiCad bridge | [docs/kicad/guide.md](docs/kicad/guide.md) · [lessons learned](docs/kicad/lessons-learned.md) |
+| Qucs-S bridge | [docs/qucs/guide.html](docs/qucs/guide.html) |
+| Mixed-signal | [docs/mixed_signal_prd.md](docs/mixed_signal_prd.md) · [gap analysis](docs/mixed_signal_gap.md) |
+| Accepted specs / design history | `openspec/specs/`, `docs/superpowers/` |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
