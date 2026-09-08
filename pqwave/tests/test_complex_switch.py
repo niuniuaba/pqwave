@@ -8,9 +8,9 @@ import time
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer
 
-def test_complex_to_real_switch():
+def _check_complex_to_real_switch():
     """Test that auto-ranging works after switching from complex to real data."""
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
 
     from pqwave.ui.main_window import MainWindow
     from pqwave.models.trace import AxisAssignment
@@ -120,5 +120,16 @@ def test_complex_to_real_switch():
     return result == 0
 
 if __name__ == "__main__":
-    success = test_complex_to_real_switch()
+    success = _check_complex_to_real_switch()
     sys.exit(0 if success else 1)
+
+
+def test_complex_to_real_switch():
+    # pytest entry point for the legacy checks in _check_complex_to_real_switch.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_complex_switch.py` working unchanged.
+    assert _check_complex_to_real_switch() is True, (
+        "checks failed -- see captured stdout for the failing step")

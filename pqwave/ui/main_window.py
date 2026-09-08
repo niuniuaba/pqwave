@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 MainWindow - Main application window orchestrating all UI components.
 
@@ -13,7 +12,6 @@ import sys
 import time
 import os
 import re
-import traceback
 import json
 import socket
 from typing import Optional, Tuple
@@ -37,7 +35,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
 )
 from PyQt6.QtCore import Qt as QtCore_Qt
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal, pyqtSlot, QObject
+from PyQt6.QtCore import QTimer, pyqtSignal, pyqtSlot, QObject
 from PyQt6.QtGui import QColor, QFont
 
 from pqwave.models.state import (
@@ -60,7 +58,7 @@ from pqwave.ui.menu_manager import MenuManager
 from pqwave.ui.control_panel import ControlPanel
 from pqwave.ui.mc_control_bar import MCControlBar
 from pqwave.ui.plot_widget import PlotWidget
-from pqwave.ui.trace_manager import TraceManager, SelectableItemSample
+from pqwave.ui.trace_manager import TraceManager
 from pqwave.ui.settings_widget import SettingsWidget
 from pqwave.ui.axis_manager import AxisManager
 from pqwave.ui.panel_grid import PanelGrid
@@ -68,7 +66,6 @@ from pqwave.ui.mark_panel import MarkPanel
 from pqwave.utils.colors import ColorManager
 from pqwave.utils.impedance_format import format_complex
 from pqwave.logging_config import get_logger
-from pqwave.bridge.xschem.window_registry import get_registry
 from pqwave.ui.keybinding_manager import KeyBindingManager
 from pqwave.ui.keybindings_dialog import KeyBindingsDialog
 from pqwave.ui.functions_help_dialog import FunctionsHelpDialog
@@ -1427,7 +1424,6 @@ class MainWindow(QMainWindow):
 
     def _run_xschem_pipeline(self, sch_path: str):
         """Export -> post-process -> ngspice -> load .raw."""
-        import os as _os
 
         if self._xschem_simulating:
             self.chat_panel.append_output(
@@ -1456,8 +1452,8 @@ class MainWindow(QMainWindow):
                     )
                 else:
                     self.chat_panel.append_output(
-                        f"[xschem] Simulation launched in terminal.\n"
-                        f"Waiting for .raw output...\n"
+                        "[xschem] Simulation launched in terminal.\n"
+                        "Waiting for .raw output...\n"
                     )
                     return
             if result["raw_file"]:
@@ -1692,8 +1688,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Integration Configured",
-                f"Qucs-S will use pqwave as its waveform viewer.\n\n"
-                f"⚠  Restart Qucs-S for the change to take effect.",
+                "Qucs-S will use pqwave as its waveform viewer.\n\n"
+                "⚠  Restart Qucs-S for the change to take effect.",
             )
             self.qucs_control_bar.refresh()
         else:
@@ -2412,9 +2408,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Not Yet Implemented",
-                f"AC and transient worst-case analysis are not yet implemented. "
-                f"Only operating point (.op) is supported. "
-                f"The analysis will proceed with .op parsing.",
+                "AC and transient worst-case analysis are not yet implemented. "
+                "Only operating point (.op) is supported. "
+                "The analysis will proceed with .op parsing.",
             )
         netlist_path = dlg.get_netlist_path()
 
@@ -2525,7 +2521,7 @@ class MainWindow(QMainWindow):
                             "corner": i,
                             "components": corner.copy(),
                             "output": None,
-                            "stderr": f"timeout after 60s",
+                            "stderr": "timeout after 60s",
                         }
                     )
                 except FileNotFoundError:
@@ -3196,7 +3192,7 @@ class MainWindow(QMainWindow):
             f"Window {self.window_id} table_set is_for_this_window: {is_for_this}"
         )
         if not is_for_this:
-            logger.info(f"Ignoring table_set, not for this window")
+            logger.info("Ignoring table_set, not for this window")
             return
         # Update client-window mapping
         self.state.window_registry.set_window_for_client(client_addr, self.window_id)
@@ -3250,7 +3246,7 @@ class MainWindow(QMainWindow):
         if not self._is_command_for_this_window(
             client_addr, connection_state, raw_file=current_raw_file
         ):
-            logger.info(f"Ignoring copyvar, not for this window")
+            logger.info("Ignoring copyvar, not for this window")
             return
 
         # Parse color
@@ -3278,7 +3274,7 @@ class MainWindow(QMainWindow):
         logger.info(f"Current X variable: {x_var}")
         if x_var is None:
             logger.error(
-                f"Cannot add trace: no X variable set (raw file loaded but no X variable?)"
+                "Cannot add trace: no X variable set (raw file loaded but no X variable?)"
             )
             return
 
@@ -3314,7 +3310,7 @@ class MainWindow(QMainWindow):
         if not self._is_command_for_this_window(
             client_addr, connection_state, raw_file=raw_file
         ):
-            logger.debug(f"Ignoring open_file, not for this window")
+            logger.debug("Ignoring open_file, not for this window")
             return
         self.state.window_registry.set_window_for_client(client_addr, self.window_id)
         resolved = self._resolve_raw_path(raw_file)
@@ -3356,7 +3352,7 @@ class MainWindow(QMainWindow):
             connection_state,
             raw_file=connection_state.get("current_raw_file"),
         ):
-            logger.debug(f"Ignoring add_trace, not for this window")
+            logger.debug("Ignoring add_trace, not for this window")
             return
 
         # If raw file not yet loaded, queue command for later processing
@@ -3392,7 +3388,7 @@ class MainWindow(QMainWindow):
         # Get current X variable
         x_var = self._get_current_x_var()
         if x_var is None:
-            logger.error(f"Cannot add trace: no X variable set (raw file not loaded?)")
+            logger.error("Cannot add trace: no X variable set (raw file not loaded?)")
             self._send_xschem_response(
                 client_addr,
                 connection_state,
@@ -3445,7 +3441,7 @@ class MainWindow(QMainWindow):
             connection_state,
             raw_file=connection_state.get("current_raw_file"),
         ):
-            logger.debug(f"Ignoring remove_trace, not for this window")
+            logger.debug("Ignoring remove_trace, not for this window")
             return
 
         # If raw file not yet loaded, queue command for later processing
@@ -3498,7 +3494,7 @@ class MainWindow(QMainWindow):
             connection_state,
             raw_file=connection_state.get("current_raw_file"),
         ):
-            logger.debug(f"Ignoring get_data_point, not for this window")
+            logger.debug("Ignoring get_data_point, not for this window")
             return
 
         # If raw file not yet loaded, queue command for later processing
@@ -3622,7 +3618,6 @@ class MainWindow(QMainWindow):
         logger.warning(f"Invalid command received: {error_message} - {command_dict}")
         # Extract client info from command dict
         client_addr = command_dict.get("_client_addr", "unknown")
-        connection_state = command_dict.get("_connection_state", {})
         command_id = command_dict.get("id")
 
         # Only send response for JSON commands (those with an ID)
@@ -3670,7 +3665,7 @@ class MainWindow(QMainWindow):
             # accept the command (this window can load the file)
             if self.raw_file is None:
                 logger.debug(
-                    f"  raw_file not mapped, this window has no raw file, accepting"
+                    "  raw_file not mapped, this window has no raw file, accepting"
                 )
                 return True
 
@@ -3705,7 +3700,7 @@ class MainWindow(QMainWindow):
             True if response sent successfully, False otherwise.
         """
         if self.state.wave_cmd_handler is None:
-            logger.warning(f"Cannot send response: wave_cmd_handler not available")
+            logger.warning("Cannot send response: wave_cmd_handler not available")
             return False
 
         response = {"status": status}
@@ -4773,13 +4768,25 @@ class MainWindow(QMainWindow):
                 self._on_eye_diagram_settings_changed
             )
             self._settings_widget.destroyed.connect(
-                lambda: setattr(self, "_settings_widget", None)
+                self._on_settings_widget_destroyed
             )
 
         # Show and raise the widget
         self._settings_widget.show()
         self._settings_widget.raise_()
         self._settings_widget.activateWindow()
+
+    def _on_settings_widget_destroyed(self, *_ignored) -> None:
+        """Forget the settings widget once it is destroyed, so it is rebuilt.
+
+        This was `lambda: setattr(self, "_settings_widget", None)`. A lambda like
+        this closes over the *cell* holding `self` in `show_settings`'s frame, and
+        the destroyed signal fires later, from the Qt event loop, after that frame
+        is gone -- on Python 3.14 the cell has been cleared by then and the call
+        raises `NameError: cannot access free variable 'self'`. A bound method
+        holds the reference directly, so it stays valid.
+        """
+        self._settings_widget = None
 
     def _on_plot_title_changed(self, title: str):
         """Handle plot title changes."""
@@ -5485,7 +5492,6 @@ class MainWindow(QMainWindow):
     @pyqtSlot(object)
     def _on_function_selected(self, info):
         """Insert a function, constant, or operator at the current cursor position."""
-        from pqwave.ui.function_registry import FunctionInfo
 
         trace_expr = self.control_panel.trace_expr
         cursor = trace_expr.cursorPosition()
@@ -6084,7 +6090,7 @@ class MainWindow(QMainWindow):
             wave_receiver = self.state.wave_cmd_handler.wave_receiver
             if wave_receiver is None:
                 logger.warning(
-                    f"Cannot send data_point_update: wave receiver not available"
+                    "Cannot send data_point_update: wave receiver not available"
                 )
                 continue
 

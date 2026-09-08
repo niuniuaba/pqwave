@@ -155,7 +155,10 @@ def _parse_header_variables(raw_bytes: bytes):
             continue
         idx = int(parts[0])
         name = parts[1]
-        var_type_raw = parts[2]
+        # parts[2] is the declared type column; it is intentionally not used,
+        # because pqwave infers the type from the variable name below (the raw
+        # header's column is unreliable across QSPICE/LTspice/ngspice).
+        var_type_raw = parts[2]  # noqa: F841
 
         # Determine variable type
         name_lower = name.lower()
@@ -692,7 +695,7 @@ class RawFile:
 
         self.raw_data = None
         logger.info(
-            f"Released spicelib raw_data; data retained in memmap/column_stack"
+            "Released spicelib raw_data; data retained in memmap/column_stack"
         )
 
     def get_variable_names(self, dataset_idx=0):

@@ -13,18 +13,14 @@ import sys
 import os
 import argparse
 import socket
-import json
 from PyQt6.QtWidgets import QApplication
 
+from pqwave._version import __version__
 from pqwave.ui.main_window import MainWindow
 from pqwave.logging_config import setup_logging
 from pqwave.bridge.xschem.wave_receiver import WaveReceiver, WaveCommandHandler
 from pqwave.models.state import ApplicationState
-from pqwave.models.raw_converter import (
-    extract_traces_to_raw,
-    write_raw_file,
-    FORMAT_CONFIG,
-)
+from pqwave.models.raw_converter import extract_traces_to_raw, write_raw_file
 from pqwave.models.rawfile import RawFile
 from pqwave.models.expression import ExprEvaluator
 from pqwave.models.trace import Trace
@@ -433,7 +429,8 @@ def _run_setup_llm() -> int:
     from PyQt6.QtWidgets import QApplication
     from pqwave.llm.setup import show_setup_dialog
 
-    app = QApplication(sys.argv)
+    # Held in a local on purpose: a QApplication must outlive the dialog.
+    app = QApplication(sys.argv)  # noqa: F841
     show_setup_dialog()
     return 0
 
@@ -572,10 +569,10 @@ def _run_setup_qucs_integration() -> int:
             pqwave_exe=pqwave_exe,
             pqwave_params=pqwave_params,
         )
-        print(f"\n✓ Configuration applied.")
+        print("\n✓ Configuration applied.")
         print(f"  Backup saved to: {backup}")
         print(
-            f"\nOpen Qucs-S and simulate any schematic — results will open in pqwave automatically."
+            "\nOpen Qucs-S and simulate any schematic — results will open in pqwave automatically."
         )
         return 0
     except Exception as e:
@@ -684,7 +681,10 @@ def main():
     parser.add_argument(
         "--setup-llm", action="store_true", help="Open the LLM backend setup wizard"
     )
-    parser.add_argument("--version", "-v", action="version", version="pqwave 0.3.1")
+    parser.add_argument(
+        "--version", "-v", action="version",
+        version=f"pqwave {__version__}",
+    )
 
     # Testing and debugging arguments
     parser.add_argument(

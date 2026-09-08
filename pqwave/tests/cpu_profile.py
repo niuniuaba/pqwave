@@ -77,7 +77,7 @@ def profile_stages(filepath: str) -> dict:
     print(f'Stage 2b: preprocess_raw_file         {timings["preprocess"]:.3f}s')
 
     # Stage 3: Full RawFile.parse()
-    print(f'\n--- Stage 3: RawFile.parse() (full pipeline) ---')
+    print('\n--- Stage 3: RawFile.parse() (full pipeline) ---')
     t0 = time.perf_counter()
     rf = RawFile(filepath)
     t1 = time.perf_counter()
@@ -98,7 +98,7 @@ def profile_stages(filepath: str) -> dict:
     print(f'  -> raw_data is None: {rf.raw_data is None}')
 
     # Stage 4: Dataset instantiation
-    print(f'\n--- Stage 4: Dataset() ---')
+    print('\n--- Stage 4: Dataset() ---')
     t0 = time.perf_counter()
     dataset = Dataset(rf, dataset_idx=0)
     t1 = time.perf_counter()
@@ -106,7 +106,7 @@ def profile_stages(filepath: str) -> dict:
     print(f'Stage 4: Dataset()                    {timings["dataset_init"]:.3f}s')
 
     # Stage 5: get_variable_data repeated calls (cache test)
-    print(f'\n--- Stage 5: get_variable_data repeated calls (with cache) ---')
+    print('\n--- Stage 5: get_variable_data repeated calls (with cache) ---')
     t0 = time.perf_counter()
     for _ in range(5):
         for name in var_names[:5]:
@@ -122,7 +122,7 @@ def profile_stages(filepath: str) -> dict:
 
     # Stage 6: Complex derivation if applicable
     if ds.get('_is_ac_or_complex', False):
-        print(f'\n--- Stage 6: Complex derivation ---')
+        print('\n--- Stage 6: Complex derivation ---')
         t0 = time.perf_counter()
         for var in ds['variables'][:5]:
             vname = var['name']
@@ -134,10 +134,10 @@ def profile_stages(filepath: str) -> dict:
         timings['complex_derive_5'] = t1 - t0
         print(f'Stage 6: derive 5 complex vars     {timings["complex_derive_5"]:.3f}s')
     else:
-        print(f'\n--- Stage 6: N/A (not AC/complex) ---')
+        print('\n--- Stage 6: N/A (not AC/complex) ---')
 
     # Stage 7: ExprEvaluator
-    print(f'\n--- Stage 7: ExprEvaluator ---')
+    print('\n--- Stage 7: ExprEvaluator ---')
     evaluator = ExprEvaluator(rf, 0)
     print(f'  n_points: {evaluator.n_points:,}')
 
@@ -183,7 +183,7 @@ def profile_stages(filepath: str) -> dict:
 def profile_cprofile(filepath: str):
     """Run cProfile on full RawFile.parse()."""
     print(f'\n{"="*70}')
-    print(f'cProfile: RawFile.parse()')
+    print('cProfile: RawFile.parse()')
     print(f'{"="*70}')
 
     gc.collect()
@@ -199,7 +199,7 @@ def profile_cprofile(filepath: str):
 
     # Top by tottime
     print(f'{"="*70}')
-    print(f'cProfile: Top by tottime (self time)')
+    print('cProfile: Top by tottime (self time)')
     print(f'{"="*70}')
     s2 = io.StringIO()
     ps2 = pstats.Stats(pr, stream=s2).sort_stats('tottime')

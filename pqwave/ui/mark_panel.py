@@ -9,7 +9,6 @@ This module provides a standalone dialog that displays mark coordinates
 """
 
 import csv
-import io
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,

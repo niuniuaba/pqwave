@@ -17,7 +17,7 @@ from pqwave.ui.plot_widget import PlotWidget
 
 def test_mouse_mapping():
     """Test mouse coordinate mapping."""
-    app = QApplication([])
+    app = QApplication.instance() or QApplication([])
 
     print("Creating PlotWidget...")
     plot_widget = PlotWidget()
@@ -69,19 +69,24 @@ def test_mouse_mapping():
     # Call again
     plot_widget._on_mouse_moved(scene_pos)
 
-    if emitted_coords:
-        x, y1, y2 = emitted_coords[0]
-        print(f"Emitted coordinates: x={x}, y1={y1}, y2={y2}")
-        # Check that coordinates are close to original view pos
-        assert abs(x - 5.0) < 0.1, f"X coordinate mismatch: {x} vs 5.0"
-        assert abs(y1 - 0.5) < 0.1, f"Y1 coordinate mismatch: {y1} vs 0.5"
-        print("✓ Mouse mapping works")
-    else:
-        print("✗ No coordinates emitted")
+    # A test that only prints on failure passes silently, so assert instead.
+    assert emitted_coords, "PlotWidget emitted no mouse_moved signal"
+
+    x, y1, y2 = emitted_coords[0]
+    print(f"Emitted coordinates: x={x}, y1={y1}, y2={y2}")
+
+    # Round-trip identity: view -> scene -> handler must recover the *same* view
+    # coordinates that were mapped out. The previous expectation hardcoded
+    # x=5.0 / y1=0.5; y=0.5 was simply wrong for this data (view_y is the
+    # midpoint of the auto-ranged sin() axis, i.e. ~1.5e-4, not 0.5).
+    assert abs(x - view_x) < 1e-6, f"X coordinate mismatch: {x} vs {view_x}"
+    assert abs(y1 - view_y) < 1e-6, f"Y1 coordinate mismatch: {y1} vs {view_y}"
+
+    # Y2 is empty (only one curve was plotted), so it must report NaN.
+    assert np.isnan(y2), f"Expected NaN Y2 with no Y2 curve, got {y2}"
+    print("✓ Mouse mapping works")
 
     plot_widget.close()
-    app.quit()
-    return True
 
 if __name__ == "__main__":
     print("=" * 60)

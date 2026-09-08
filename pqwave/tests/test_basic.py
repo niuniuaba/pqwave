@@ -40,20 +40,24 @@ def main():
         test_main_function,
     ]
 
-    results = []
+    # The checks signal success by returning normally and failure by raising,
+    # so tally them that way. The previous `sum(results)` added up a list of
+    # None values and died with a TypeError before reporting anything.
+    failures = []
     for test in tests:
-        results.append(test())
+        try:
+            test()
+        except Exception as exc:  # report-and-continue is the point here
+            print(f"✗ {test.__name__} failed: {exc}")
+            failures.append(test.__name__)
 
     print("=" * 40)
-    passed = sum(results)
-    total = len(results)
-
-    if passed == total:
-        print(f"✓ All {total} tests passed!")
-        return 0
-    else:
-        print(f"✗ {total - passed} of {total} tests failed")
+    total = len(tests)
+    if failures:
+        print(f"✗ {len(failures)} of {total} tests failed: {', '.join(failures)}")
         return 1
+    print(f"✓ All {total} tests passed!")
+    return 0
 
 
 if __name__ == "__main__":

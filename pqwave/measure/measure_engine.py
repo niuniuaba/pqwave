@@ -16,7 +16,6 @@ from typing import Callable
 
 import numpy as np
 
-from pqwave.ui.measure_registry import lookup_measure
 
 try:
     from pqwave.ui.fft_engine import (
@@ -344,9 +343,18 @@ def _measure_max_at(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
 
 
 def _measure_rise_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
+    """Rise time between two levels, in seconds.
+
+    `threshold`, when given, is the *lower* level as an absolute voltage and
+    overrides `low_pct`; the upper level still comes from `high_pct`. With no
+    `threshold` the default 10%/90% pair is used, so existing callers are
+    unaffected. Previously the value was read out of kwargs and thrown away, so
+    `rise_time(v(out), threshold=0)` silently measured the default interval.
+    """
+    explicit_low = "threshold" in kwargs
     threshold = (
         _parse_value(kwargs.pop("threshold", ""))
-        if "threshold" in kwargs
+        if explicit_low
         else (np.min(y) + np.max(y)) / 2
     )
     rise_n = int(_parse_value(kwargs.pop("rise", "1"))) if "rise" in kwargs else 1
@@ -354,7 +362,7 @@ def _measure_rise_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
     high_pct = float(kwargs.pop("high_pct", "90")) / 100.0
 
     y_min, y_max = np.min(y), np.max(y)
-    low_level = y_min + low_pct * (y_max - y_min)
+    low_level = float(threshold) if explicit_low else y_min + low_pct * (y_max - y_min)
     high_level = y_min + high_pct * (y_max - y_min)
 
     low_cross = _find_crossings(x, y, low_level, "rise")
@@ -370,12 +378,19 @@ def _measure_rise_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
 
 
 def _measure_fall_time(x: np.ndarray, y: np.ndarray, kwargs: dict) -> float:
+    """Fall time between two levels. `threshold` is the *upper* level (absolute
+    volts) and overrides `high_pct`; defaults are unchanged when it is absent."""
+    explicit_high = "threshold" in kwargs
+    if explicit_high:
+        threshold = _parse_value(kwargs.pop("threshold", ""))
+    else:
+        threshold = None
     fall_n = int(_parse_value(kwargs.pop("fall", "1"))) if "fall" in kwargs else 1
     high_pct = float(kwargs.pop("high_pct", "90")) / 100.0
     low_pct = float(kwargs.pop("low_pct", "10")) / 100.0
 
     y_min, y_max = np.min(y), np.max(y)
-    high_level = y_min + high_pct * (y_max - y_min)
+    high_level = float(threshold) if explicit_high else y_min + high_pct * (y_max - y_min)
     low_level = y_min + low_pct * (y_max - y_min)
 
     high_cross = _find_crossings(x, y, high_level, "fall")

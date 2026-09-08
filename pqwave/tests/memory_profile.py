@@ -77,7 +77,7 @@ def profile_rawfile(filepath: str):
     _, rss_before, _ = snapshot("before load")
 
     # ---- Stage 1: RawFile.parse() ----
-    print(f"\n--- Stage 1: RawFile.parse() ---")
+    print("\n--- Stage 1: RawFile.parse() ---")
     rf = RawFile(filepath)
     _, rss1, snap1 = snapshot("after RawFile.parse()")
 
@@ -106,7 +106,7 @@ def profile_rawfile(filepath: str):
     print(f"  raw_data is None: {rf.raw_data is None}")
 
     # ---- Stage 2: Dataset instantiation ----
-    print(f"\n--- Stage 2: Dataset() ---")
+    print("\n--- Stage 2: Dataset() ---")
     dataset = Dataset(rf, dataset_idx=0)
     _, rss2, _ = snapshot("after Dataset")
     print(f"  Dataset variables: {dataset.n_variables}")
@@ -119,7 +119,7 @@ def profile_rawfile(filepath: str):
         print(f"  Variable[0] shares matrix base: {shares_base}")
 
     # ---- Stage 3: get_variable_data cache behavior ----
-    print(f"\n--- Stage 3: get_variable_data cache ---")
+    print("\n--- Stage 3: get_variable_data cache ---")
     if ds['variables']:
         test_var = ds['variables'][0]['name']
         arrays = []
@@ -132,7 +132,7 @@ def profile_rawfile(filepath: str):
         print(f"  Called get_variable_data('{test_var}') 5 times")
         print(f"  Unique array objects: {unique_ids}")
         if unique_ids == 1:
-            print(f"  Cache working: same view returned every time")
+            print("  Cache working: same view returned every time")
         else:
             print(f"  ** WASTE: {unique_ids} DISTINCT arrays of {fmt_bytes(per_var_bytes)}")
 
@@ -144,7 +144,7 @@ def profile_rawfile(filepath: str):
 
     # ---- Stage 4: Complex data derivation ----
     if ds.get('_is_ac_or_complex', False):
-        print(f"\n--- Stage 4: Complex data derivation (AC mode) ---")
+        print("\n--- Stage 4: Complex data derivation (AC mode) ---")
 
         for var in ds['variables'][:5]:
             vname = var['name']
@@ -165,10 +165,10 @@ def profile_rawfile(filepath: str):
         print(f"\n  For all {n_vars} variables:")
         print(f"    Derived arrays total (mag/real/imag/ph): {fmt_bytes(estimated_all)}")
     else:
-        print(f"\n--- Stage 4: N/A (not AC/complex) ---")
+        print("\n--- Stage 4: N/A (not AC/complex) ---")
 
     # ---- Stage 5: ExprEvaluator ----
-    print(f"\n--- Stage 5: ExprEvaluator ---")
+    print("\n--- Stage 5: ExprEvaluator ---")
     evaluator = ExprEvaluator(rf, 0)
 
     test_exprs = []
@@ -206,8 +206,8 @@ def profile_rawfile(filepath: str):
     print(f"  File size: {fmt_bytes(file_size)}")
     print(f"  RSS / file ratio: {final_rss / file_size:.2f}x")
     print(f"  RSS increase from start: {fmt_bytes(final_rss - rss_before)}")
-    print(f"")
-    print(f"  Known memory consumers:")
+    print("")
+    print("  Known memory consumers:")
     print(f"    column_stack / memmap matrix:      {fmt_bytes(matrix_bytes):>12}")
     per_var_approx = matrix_bytes / n_vars if n_vars > 0 else 0
     print(f"    Per variable (avg):                {fmt_bytes(int(per_var_approx)):>12}")

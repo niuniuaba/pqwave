@@ -9,7 +9,6 @@ Pure-numpy module with no Qt dependencies, callable from both UI and CLI.
 
 from __future__ import annotations
 
-from typing import Optional
 
 import numpy as np
 

@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QCompleter,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QStringListModel, QEvent
-from PyQt6.QtGui import QFont, QKeyEvent
+from PyQt6.QtGui import QFont
 
 
 class ChatPanel(QWidget):

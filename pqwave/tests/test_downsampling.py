@@ -12,11 +12,14 @@ Usage:
 This test verifies the fix for issues.md No.6 (performance improvement).
 """
 
+import os
 import sys
+
 sys.path.insert(0, '.')
 
 import argparse
 import numpy as np
+import pytest
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QApplication
 
@@ -44,7 +47,30 @@ def _get_displayed_count(item):
     return len(ds.x) if ds else 0
 
 
-def test_autodownsample_reduces_points(x, y, label):
+def _select_curve():
+    """Curve under test: a real trace if requested, else a synthetic sine.
+
+    Standalone runs use --datafile/--trace_name; under pytest the same two
+    inputs come from PQWAVE_TEST_DATAFILE / PQWAVE_TEST_TRACE_NAME so a plain
+    `pytest` invocation still runs against deterministic synthetic data.
+    """
+    path = os.environ.get("PQWAVE_TEST_DATAFILE")
+    trace = os.environ.get("PQWAVE_TEST_TRACE_NAME")
+    if path and trace:
+        return load_real_data(path, trace)
+    return load_synthetics()
+
+
+@pytest.fixture(scope="module")
+def curve():
+    app = QApplication.instance() or QApplication(sys.argv)
+    assert app is not None, "a QApplication is required to lay out the ViewBox"
+    return _select_curve()
+
+
+def test_autodownsample_reduces_points(curve):
+    """Verify autoDownsample reduces the number of rendered points."""
+    x, y, label = curve
     """Verify autoDownsample reduces the number of rendered points."""
     N = len(x)
     item, pw = _make_item(x, y)
@@ -63,8 +89,9 @@ def test_autodownsample_reduces_points(x, y, label):
     print(f"PASS: {label} full view — {displayed:,} / {N:,} points ({ratio*100:.1f}%), factor={item._adsLastValue}")
 
 
-def test_autodownsample_adapts_to_zoom(x, y, label):
+def test_autodownsample_adapts_to_zoom(curve):
     """Verify autoDownsample adjusts factor based on visible X range."""
+    x, y, label = curve
     N = len(x)
     item, pw = _make_item(x, y)
 
@@ -139,6 +166,7 @@ if __name__ == '__main__':
         print("  Example: python test_downsampling.py --datafile tests/SMPS.qraw --trace_name 'I(R1)'")
         print()
 
-    test_autodownsample_reduces_points(x, y, label)
-    test_autodownsample_adapts_to_zoom(x, y, label)
+    payload = (x, y, label)
+    test_autodownsample_reduces_points(payload)
+    test_autodownsample_adapts_to_zoom(payload)
     print("All downsampling tests passed.")

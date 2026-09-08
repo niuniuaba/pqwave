@@ -26,7 +26,7 @@ def qapp():
     yield app
 
 
-def test_server_start_stop():
+def test_server_start_stop(require_loopback):
     """Test that server can start and stop cleanly."""
     server = WaveReceiver(port=2023)
     handler = WaveCommandHandler()
@@ -138,7 +138,7 @@ def test_command_handler_invalid_command(qapp):
     assert 'unknown_command' in received[0][1]
 
 
-def test_server_integration_table_set(qapp):
+def test_server_integration_table_set(qapp, require_loopback):
     """Integration test: server receives gaw-style table_set command."""
     server = WaveReceiver(port=2024)
     handler = WaveCommandHandler()
@@ -172,7 +172,7 @@ def test_server_integration_table_set(qapp):
     assert received[0][1] == '/path/to/integration.raw'
 
 
-def test_server_integration_copyvar(qapp):
+def test_server_integration_copyvar(qapp, require_loopback):
     """Integration test: server receives gaw-style copyvar command."""
     server = WaveReceiver(port=2025)
     handler = WaveCommandHandler()

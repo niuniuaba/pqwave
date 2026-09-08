@@ -66,15 +66,17 @@ class XschemBridge(SchematicBridge):
         """Xschem SPICE output is clean — no fixes needed."""
         return []
 
-    def probe_net(self, net_name: str) -> None:
-        self._ensure_cross_probe().probe_net(net_name)
+    def probe_net(self, net_name: str) -> bool:
+        """Highlight *net_name*; False when xschem did not acknowledge."""
+        return self._ensure_cross_probe().probe_net(net_name)
 
-    def probe_part(self, ref: str, pin: Optional[str] = None) -> None:
-        cp = self._ensure_cross_probe()
-        cp.probe_part(ref, pin)
+    def probe_part(self, ref: str, pin: Optional[str] = None) -> bool:
+        """Highlight *ref* (optionally a pin); False when unacknowledged."""
+        return self._ensure_cross_probe().probe_part(ref, pin)
 
-    def clear_probe(self) -> None:
-        self._ensure_cross_probe().clear()
+    def clear_probe(self) -> bool:
+        """Drop all highlights; False when xschem did not acknowledge."""
+        return self._ensure_cross_probe().clear()
 
     def detect_tool(self) -> Optional[str]:
         try:

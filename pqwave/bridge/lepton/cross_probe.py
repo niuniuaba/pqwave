@@ -5,6 +5,9 @@ Does NOT silently install the Scheme server. The caller must explicitly
 call install_scheme_server() after obtaining user consent.
 """
 
+from __future__ import annotations  # keeps `str | None` legal on the declared 3.8 floor
+
+import glob
 import os
 import shutil
 import socket
@@ -12,6 +15,11 @@ import subprocess
 import threading
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
+
+
+# Root of Guile's auto-compile cache. Left unexpanded and resolved at call time
+# so tests can redirect it without touching a real home directory.
+GUILE_CCACHE_ROOT = "~/.cache/guile/ccache"
 
 
 def _get_package_scm_path() -> str:
@@ -35,6 +43,26 @@ def _get_gafrc_path() -> str:
     return os.path.join(_get_user_config_dir(), "gafrc")
 
 
+def _guile_go_path(scm_path: str) -> str | None:
+    """Return the compiled ``.go`` companion for *scm_path*, if one exists.
+
+    Guile nests the bytecode under a per-release directory such as
+    ``~/.cache/guile/ccache/3.0-LE-8-4.7``. Matching on the ABI string that was
+    current when this was written silently finds nothing on any other Guile
+    release, so every ccache subdirectory is searched instead.
+
+    ``GUILE_CCACHE_ROOT`` is resolved at call time so callers and tests can
+    redirect it without touching a real home directory.
+    """
+    root = os.path.expanduser(GUILE_CCACHE_ROOT)
+    scm_abs = os.path.abspath(scm_path)
+    for abi_dir in sorted(glob.glob(os.path.join(root, "*"))):
+        candidate = os.path.join(abi_dir, scm_abs.lstrip("/") + ".go")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def _check_guile_cache_stale(scm_path: str) -> bool:
     """Return True if *scm_path* has no compiled ``.go`` cache or the
     ``.go`` is older than the ``.scm`` source.
@@ -48,17 +76,16 @@ def _check_guile_cache_stale(scm_path: str) -> bool:
     except OSError:
         return False  # source doesn't exist — nothing to check
 
-    cache_root = os.path.expanduser(
-        "~/.cache/guile/ccache/3.0-LE-8-4.7")
-    scm_abs = os.path.abspath(scm_path)
-    go_path = os.path.join(cache_root, scm_abs.lstrip("/") + ".go")
+    go_path = _guile_go_path(scm_path)
+    if go_path is None:
+        # No .go file at all — source was never compiled, or cache was
+        # cleared.  Not stale (will be compiled on next load).
+        return False
 
     try:
         go_mtime = os.path.getmtime(go_path)
         return scm_mtime > go_mtime
     except OSError:
-        # No .go file at all — source was never compiled, or cache was
-        # cleared.  Not stale (will be compiled on next load).
         return False
 
 

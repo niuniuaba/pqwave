@@ -15,9 +15,9 @@ from PyQt6.QtWidgets import (
     QFontComboBox, QSpinBox, QColorDialog, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QColor
 
-from pqwave.models.state import AxisId, ApplicationState, ViewboxTheme, THEME_COLORS, FontConfig, EyeDiagramConfig
+from pqwave.models.state import AxisId, ApplicationState, ViewboxTheme, FontConfig, EyeDiagramConfig
 from pqwave.ui.axis_manager import AxisManager
 
 
@@ -828,7 +828,7 @@ class SettingsWidget(QWidget):
         """Open QColorDialog and update the font color."""
         fc = getattr(self.state, key)
         current = QColor(fc.color) if fc.color else QColor()
-        color = QColorDialog.getColor(current, self, f"Select Font Color")
+        color = QColorDialog.getColor(current, self, "Select Font Color")
         if color.isValid():
             fc.color = color.name()
             self._update_color_button(key)

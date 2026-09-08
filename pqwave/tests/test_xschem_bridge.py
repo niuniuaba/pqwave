@@ -6,54 +6,88 @@ import pytest
 from pqwave.bridge.xschem.bridge import XschemBridge
 
 
-class TestXschemBridgeExport:
-    def test_export_netlist_success(self):
-        bridge = XschemBridge()
-        fake_netlist = "* SPICE netlist\nR1 n1 n2 1k\n.end\n"
+NETLIST = "* SPICE netlist\nR1 n1 n2 1k\n.end\n"
 
-        fake_tmpdir = "/tmp/pqwave_xschem_nl_test123"
+
+@pytest.fixture()
+def xschem_env(tmp_path, monkeypatch):
+    """A real project dir plus an isolated HOME.
+
+    The previous tests passed fake paths like `/path/to/circuit.sch` and patched
+    `os.path.exists` to True globally. export_netlist() really does
+    `os.makedirs(netlist_dir)` and simulate() really does `os.path.getmtime()`
+    on the expected .raw, so the fake paths escaped into the real filesystem
+    (`Read-only file system: '/path'`) and the blanket exists-patch made
+    nonexistent files look present. Everything here is real, under tmp_path.
+    """
+    home = tmp_path / "home"
+    (home / ".xschem").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    # local_netlist_dir 1 -> netlist lands in <sch_dir>/simulation/
+    (home / ".xschem" / "xschemrc").write_text("set local_netlist_dir 1\n")
+
+    sch_dir = tmp_path / "proj"
+    sch_dir.mkdir()
+    sch = sch_dir / "circuit.sch"
+    sch.write_text("** schematic\n")
+    netlist_dir = sch_dir / "simulation"
+    return {
+        "sch": str(sch),
+        "sch_dir": str(sch_dir),
+        "netlist_dir": str(netlist_dir),
+        "spice": str(netlist_dir / "circuit.spice"),
+        "raw": str(netlist_dir / "circuit.raw"),
+    }
+
+
+class TestXschemBridgeExport:
+    def test_export_netlist_success(self, xschem_env):
+        """xschem is driven headless and the resulting .spice is returned."""
+        bridge = XschemBridge()
+
+        def fake_run(cmd, **kwargs):
+            # xschem writes the netlist itself; emulate that side effect.
+            os.makedirs(os.path.dirname(xschem_env["spice"]), exist_ok=True)
+            with open(xschem_env["spice"], "w") as fh:
+                fh.write(NETLIST)
+            return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("shutil.which", return_value="/usr/bin/xschem"), \
-             patch("tempfile.mkdtemp", return_value=fake_tmpdir), \
-             patch("subprocess.run") as mock_run, \
-             patch("os.path.exists", return_value=True), \
-             patch("os.unlink"), \
-             patch("os.rmdir"), \
-             patch("os.listdir", return_value=[]), \
-             patch("builtins.open", MagicMock()) as mock_open:
+             patch("subprocess.run", side_effect=fake_run) as mock_run:
+            result = bridge.export_netlist(xschem_env["sch"])
 
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            mock_file = MagicMock()
-            mock_file.read.return_value = fake_netlist
-            mock_open.return_value.__enter__.return_value = mock_file
-            mock_open.return_value.__exit__ = MagicMock()
+        assert result == NETLIST
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        # -n netlist, -s spice, -x no GUI, -q quit after. The bridge deliberately
+        # does NOT pass `--tcl set netlist_dir ...` any more: overriding the
+        # user's configured netlist_dir was the behaviour removed in the
+        # streamline-eda-integrations change, and these older assertions were
+        # still demanding the deleted flags.
+        assert cmd == ["/usr/bin/xschem", "-n", "-s", "-x", "-q",
+                       xschem_env["sch"]], f"unexpected invocation: {cmd}"
+        assert "--tcl" not in cmd, "netlist_dir must not be overridden"
+        assert mock_run.call_args[1]["cwd"] == xschem_env["sch_dir"]
+        assert mock_run.call_args[1]["timeout"] == 30
 
-            result = bridge.export_netlist("/path/to/circuit.sch")
+    def test_export_netlist_raises_when_xschem_produces_nothing(self, xschem_env):
+        """returncode 0 with no .spice on disk must not silently return ''."""
+        bridge = XschemBridge()
+        with patch("shutil.which", return_value="/usr/bin/xschem"), \
+             patch("subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout="", stderr="")):
+            with pytest.raises(RuntimeError, match="no .spice file found"):
+                bridge.export_netlist(xschem_env["sch"])
 
-            assert result == fake_netlist
-            mock_run.assert_called_once()
-            call_args = mock_run.call_args[0][0]
-            assert call_args[0] == "/usr/bin/xschem"
-            # Verify --tcl flag with netlist_dir override
-            assert "--tcl" in call_args
-            tcl_idx = list(call_args).index("--tcl")
-            tcl_cmd = call_args[tcl_idx + 1]
-            assert "set netlist_dir" in tcl_cmd
-            assert fake_tmpdir in tcl_cmd
-            assert "-n" in call_args
-            assert "-s" in call_args
-            assert "-q" in call_args
-            assert "--quit" in call_args
-            assert "--netlist_type" in call_args
-            assert "spice" in call_args
-
-    def test_export_netlist_xschem_not_found(self):
+    def test_export_netlist_xschem_not_found(self, xschem_env):
         bridge = XschemBridge()
         with patch("shutil.which", return_value=None):
             with pytest.raises(FileNotFoundError, match="xschem"):
-                bridge.export_netlist("/path/to/circuit.sch")
+                bridge.export_netlist(xschem_env["sch"])
 
-    def test_export_netlist_subprocess_error(self):
+    def test_export_netlist_subprocess_error(self, xschem_env):
+        """A non-zero xschem exit becomes a RuntimeError carrying stderr."""
         bridge = XschemBridge()
         with patch("shutil.which", return_value="/usr/bin/xschem"), \
              patch("subprocess.run") as mock_run:
@@ -61,7 +95,7 @@ class TestXschemBridgeExport:
                 returncode=1, stdout="", stderr="schematic not found"
             )
             with pytest.raises(RuntimeError, match="xschem failed"):
-                bridge.export_netlist("/path/to/bad.sch")
+                bridge.export_netlist(xschem_env["sch"])
 
     def test_get_netlist_fixes_returns_empty(self):
         bridge = XschemBridge()
@@ -73,75 +107,40 @@ class TestXschemBridgeExport:
 
 
 class TestXschemBridgeSimulate:
-    def test_simulate_pipeline_success(self):
-        """Verify the full export -> post-process -> ngspice pipeline."""
+    def _two_stage_runner(self, xschem_env, sim_rc, sim_stdout, sim_stderr):
+        """Mock xschem export (writes .spice) then the simulator invocation."""
+        state = {"calls": 0}
+
+        def fake_run(cmd, **kwargs):
+            state["calls"] += 1
+            if state["calls"] == 1:
+                os.makedirs(os.path.dirname(xschem_env["spice"]), exist_ok=True)
+                with open(xschem_env["spice"], "w") as fh:
+                    fh.write(NETLIST)
+                return MagicMock(returncode=0, stdout="", stderr="")
+            with open(xschem_env["raw"], "w") as fh:
+                fh.write("raw written\n")
+            return MagicMock(returncode=sim_rc, stdout=sim_stdout,
+                             stderr=sim_stderr)
+
+        return fake_run, state
+
+    def test_simulate_pipeline_success(self, xschem_env):
+        """Full export -> post-process -> ngspice pipeline."""
         bridge = XschemBridge()
-        fake_netlist = "* test netlist\nR1 n1 n2 1k\n.end\n"
-        fake_raw = "/tmp/pqwave_test.raw"
+        fake_run, state = self._two_stage_runner(
+            xschem_env, sim_rc=0, sim_stdout="Simulation OK\n", sim_stderr="")
 
         with patch("shutil.which", return_value="/usr/bin/xschem"), \
-             patch("tempfile.mkdtemp", return_value="/tmp/pqwave_nl_test"), \
-             patch("subprocess.run") as mock_run, \
-             patch("os.path.exists", return_value=True), \
-             patch("os.unlink"), \
-             patch("os.rmdir"), \
-             patch("os.listdir", return_value=[]), \
-             patch("os.close"), \
-             patch("tempfile.mkstemp", return_value=(3, "/tmp/circuit.cir")), \
-             patch("builtins.open", MagicMock()) as mock_open:
+             patch("subprocess.run", side_effect=fake_run):
+            result = bridge.simulate(xschem_env["sch"])
 
-            mock_file = MagicMock()
-            mock_file.read.return_value = fake_netlist
-            mock_open.return_value.__enter__.return_value = mock_file
-            mock_open.return_value.__exit__ = MagicMock()
-
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="", stderr=""),
-                MagicMock(returncode=0, stdout="Simulation OK\n", stderr=""),
-            ]
-
-            result = bridge.simulate("/path/to/circuit.sch", raw_output=fake_raw)
-
-            assert result["returncode"] == 0
-            assert result["raw_file"] == fake_raw
-            assert "Simulation OK" in result["stdout"]
-            assert result["netlist"] == fake_netlist
-            assert result["fix_info"] == []
-            assert mock_run.call_count == 2
-
-    def test_simulate_ngspice_error(self):
-        """Verify ngspice failure is reported, not thrown."""
-        bridge = XschemBridge()
-        fake_netlist = "* bad circuit\n.end\n"
-
-        with patch("shutil.which", return_value="/usr/bin/xschem"), \
-             patch("tempfile.mkdtemp", return_value="/tmp/pqwave_nl_test"), \
-             patch("subprocess.run") as mock_run, \
-             patch("os.path.exists", return_value=True), \
-             patch("os.unlink"), \
-             patch("os.rmdir"), \
-             patch("os.listdir", return_value=[]), \
-             patch("os.close"), \
-             patch("tempfile.mkstemp", return_value=(3, "/tmp/circuit.cir")), \
-             patch("builtins.open", MagicMock()) as mock_open:
-
-            mock_file = MagicMock()
-            mock_file.read.return_value = fake_netlist
-            mock_open.return_value.__enter__.return_value = mock_file
-            mock_open.return_value.__exit__ = MagicMock()
-
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="", stderr=""),
-                MagicMock(returncode=1, stdout="", stderr="convergence failure"),
-            ]
-
-            result = bridge.simulate("/path/to/bad.sch")
-
-            assert result["returncode"] == 1
-            assert result["raw_file"] is None
-            assert "convergence failure" in result["stderr"]
-            assert result["netlist"] == fake_netlist
-
+        assert state["calls"] == 2, "expected one export and one simulation call"
+        assert result["returncode"] == 0
+        assert "Simulation OK" in result["stdout"]
+        assert result["raw_file"] == xschem_env["raw"], \
+            "the .raw produced by the simulator was not reported"
+        assert result["netlist"] == NETLIST
 
 import sys
 

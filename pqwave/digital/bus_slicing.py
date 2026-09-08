@@ -5,7 +5,7 @@ Supports Verilog-style syntax: bus[msb:lsb] for extraction,
 """
 
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 
 def slice_bus(bus_values: np.ndarray, msb: int, lsb: int) -> np.ndarray:

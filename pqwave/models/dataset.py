@@ -9,7 +9,7 @@ in a structured way, separate from the raw file parsing logic.
 """
 
 import numpy as np
-from typing import List, Optional, Union, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict
 
 
 class Variable:
@@ -93,6 +93,12 @@ class Variable:
 
     def __repr__(self) -> str:
         return f"Variable(name='{self.name}', index={self.index}, type='{self.type}', complex={self.is_complex})"
+
+
+if TYPE_CHECKING:                      # pragma: no cover - typing only
+    # Imported for type checkers only: RawFile imports this module at runtime, so
+    # a module-level import here would be circular.
+    from pqwave.models.rawfile import RawFile
 
 
 class Dataset:

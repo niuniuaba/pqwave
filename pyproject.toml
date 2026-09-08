@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pqwave"
-version = "0.3.4"
+dynamic = ["version"]
 authors = [
     {name = "niuniuaba", email = "liuyongjin@petalmail.com"}
 ]
@@ -53,8 +53,36 @@ Homepage = "https://github.com/niuniuaba/pqwave"
 Repository = "https://github.com/niuniuaba/pqwave.git"
 Issues = "https://github.com/niuniuaba/pqwave/issues"
 
+[tool.setuptools.dynamic]
+# Single source of truth: pqwave/_version.py
+version = {attr = "pqwave._version.__version__"}
+
 [project.scripts]
 pqwave = "pqwave.main:main"
+
+[tool.mypy]
+# `make lint` used to invoke `mypy pqwave.py pqwave/`, which aborts instantly with
+# 'Duplicate module named "pqwave"' -- the root pqwave.py wrapper and the package
+# both claim that module name -- so nothing was ever type-checked. Check the
+# package only, and carry the flags here so a bare `mypy pqwave/` behaves the same.
+files = ["pqwave"]
+exclude = ["^venv/", "^build/", "^dist/", "^docs/"]
+ignore_missing_imports = true
+# Neither pyqtgraph nor spicelib ship py.typed markers; without this every use of
+# them is reported as an import-untyped error instead of being treated as Any.
+follow_imports = "silent"
+disable_error_code = ["annotation-unchecked"]
+
+[tool.pytest.ini_options]
+testpaths = ["pqwave/tests"]
+# QT_QPA_PLATFORM=offscreen is set by pqwave/tests/conftest.py before anything
+# imports Qt, so a bare `pytest` works with no display (pytest-env is not a dep).
+filterwarnings = [
+    # A test that ends in `return False` does NOT fail under pytest; it only warns.
+    # Several legacy modules in pqwave/tests did exactly that, so their checks could
+    # never fail. Treat the warning as an error to keep that from coming back.
+    "error::pytest.PytestReturnNotNoneWarning",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -23,7 +23,7 @@ from pqwave.ui.main_window import MainWindow
 from pqwave.models.state import ApplicationState
 
 
-def test_gaw_command_short_timeout_logic():
+def _check_gaw_command_short_timeout_logic():
     """
     Test Bug 2: Verify the timeout logic in _send_command_to_server.
     
@@ -61,7 +61,7 @@ def test_gaw_command_short_timeout_logic():
     return True
 
 
-def test_json_command_long_timeout_logic():
+def _check_json_command_long_timeout_logic():
     """
     Test that JSON commands still use the longer timeout (5s) for responses.
     """
@@ -80,7 +80,7 @@ def test_json_command_long_timeout_logic():
     return True
 
 
-def test_command_queuing_and_routing():
+def _check_command_queuing_and_routing():
     """
     Test Bug 1: Commands should be queued when raw file not loaded,
     not dropped. Also tests _is_command_for_this_window logic.
@@ -113,7 +113,7 @@ def test_command_queuing_and_routing():
         raw_file='/path/to/test.raw'
     )
     
-    assert result == True, "Command should be accepted when raw_file not mapped and window has no file"
+    assert result is True, "Command should be accepted when raw_file not mapped and window has no file"
     
     # Test queuing copyvar command
     window._handle_xschem_copyvar(
@@ -248,3 +248,36 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_gaw_command_short_timeout_logic():
+    # pytest entry point for the legacy checks in _check_gaw_command_short_timeout_logic.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_xschem_bug_fixes.py` working unchanged.
+    assert _check_gaw_command_short_timeout_logic() is True, (
+        "checks failed -- see captured stdout for the failing step")
+
+
+def test_json_command_long_timeout_logic():
+    # pytest entry point for the legacy checks in _check_json_command_long_timeout_logic.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_xschem_bug_fixes.py` working unchanged.
+    assert _check_json_command_long_timeout_logic() is True, (
+        "checks failed -- see captured stdout for the failing step")
+
+
+def test_command_queuing_and_routing():
+    # pytest entry point for the legacy checks in _check_command_queuing_and_routing.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_xschem_bug_fixes.py` working unchanged.
+    assert _check_command_queuing_and_routing() is True, (
+        "checks failed -- see captured stdout for the failing step")

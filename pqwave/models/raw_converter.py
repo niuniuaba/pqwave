@@ -134,7 +134,13 @@ def extract_traces_to_raw(
         x_var_name: Custom X variable name; appended as extra variable in output
         x_var_data: Custom X variable data array (uses first trace x_data if omitted)
     """
-    config = FORMAT_CONFIG[target_format]
+    # Validate the format up front (raises KeyError for an unknown target); the
+    # per-dtype config is applied later, inside the writer.
+    if target_format not in FORMAT_CONFIG:
+        raise ValueError(
+            f"unknown target format {target_format!r}; "
+            f"expected one of {', '.join(sorted(FORMAT_CONFIG))}"
+        )
 
     if raw_file is not None:
         dataset = raw_file.datasets[dataset_idx]

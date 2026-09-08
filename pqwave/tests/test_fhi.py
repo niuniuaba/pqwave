@@ -37,12 +37,12 @@ def test_colormanager_get_next_color_skips_mark_color_used():
 
     # Next auto-assigned color must NOT be red.
     c1 = cm.get_next_color()
-    assert c1 != red, f"got duplicate red; color_index was not advanced past used"
+    assert c1 != red, "got duplicate red; color_index was not advanced past used"
 
     # Second auto-assigned should be different from the first.
     c2 = cm.get_next_color()
     assert c2 != c1, f"got same color twice: {c1}"
-    assert c2 != red, f"red leaked into second auto-assignment"
+    assert c2 != red, "red leaked into second auto-assignment"
 
     # Marking mid-palette must also work.
     cm2 = ColorManager()
@@ -51,7 +51,7 @@ def test_colormanager_get_next_color_skips_mark_color_used():
     c = cm2.get_next_color()
     assert c == cm2.palette[0], f"expected palette[0] (red), got {c}"
     c = cm2.get_next_color()
-    assert c not in (cm2.palette[1],), f"got marked green as auto-color"
+    assert c not in (cm2.palette[1],), "got marked green as auto-color"
 
 
 def test_colormanager_mark_used_multiple_then_auto_assign():
@@ -80,7 +80,7 @@ def test_colormanager_auto_assign_after_mark_used_does_not_repeat():
     c = cm.get_next_color()
     assert c == cm.palette[3], f"expected palette[3], got {c}"
     c = cm.get_next_color()
-    assert c != cm.palette[4], f"returned marked-as-used palette[4]"
+    assert c != cm.palette[4], "returned marked-as-used palette[4]"
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ def test_stamp_values_invalidates_cache_after_creating_texts():
 # Guile bytecode cache staleness
 # ---------------------------------------------------------------------------
 
-def test_guile_cache_stale_detects_newer_source():
+def test_guile_cache_stale_detects_newer_source(tmp_path, monkeypatch):
     """FHI: Guile auto-compiles ``.scm`` files to ``.go`` bytecode on first
     load and will NOT recompile when the source changes until lepton-schematic
     is restarted.  This causes edited ``pqwave-server.scm`` or
@@ -253,32 +253,81 @@ def test_guile_cache_stale_detects_newer_source():
     the source is newer than the compiled cache.  ``check_scheme_server()``
     includes ``guile_cache_stale`` in its result, and
     ``_start_lepton_connect()`` warns the user.
+
+    The cache root is redirected into tmp_path: the previous version of this
+    test created directories inside the developer's real ~/.cache/guile.
     """
-    import tempfile
     import time
-    from pqwave.bridge.lepton.cross_probe import _check_guile_cache_stale
 
-    cache_root = os.path.expanduser("~/.cache/guile/ccache/3.0-LE-8-4.7")
+    from pqwave.bridge.lepton import cross_probe
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        scm_path = os.path.join(tmpdir, "pqwave-server.scm")
-        with open(scm_path, "w") as f:
-            f.write(";; VERSION: 99\n")
+    cache_root = tmp_path / "guile-cache"
+    monkeypatch.setattr(cross_probe, "GUILE_CCACHE_ROOT", str(cache_root))
 
-        # No .go exists yet → not stale.
-        assert _check_guile_cache_stale(scm_path) is False
+    scm_dir = tmp_path / "src"
+    scm_dir.mkdir()
+    scm_path = scm_dir / "pqwave-server.scm"
+    scm_path.write_text(";; VERSION: 99\n")
 
-        # Create a fake .go older than the .scm → stale.
-        go_path = os.path.join(cache_root, scm_path.lstrip("/") + ".go")
-        os.makedirs(os.path.dirname(go_path), exist_ok=True)
-        with open(go_path, "w") as f:
-            f.write("")
-        os.utime(go_path, (time.time() - 86400, time.time() - 86400))
+    def go_path(abi="3.0-LE-8-4.7"):
+        rel = os.path.abspath(scm_path).lstrip(os.sep) + ".go"
+        return cache_root / abi / rel
 
-        assert _check_guile_cache_stale(scm_path) is True, (
-            ".scm newer than .go should be detected as stale")
+    # No .go at all -> nothing was compiled yet, so it is not stale.
+    assert cross_probe._check_guile_cache_stale(str(scm_path)) is False
 
-        # Set .go mtime to future → not stale.
-        os.utime(go_path, (time.time() + 86400, time.time() + 86400))
-        assert _check_guile_cache_stale(scm_path) is False, (
-            ".go newer than .scm should not be stale")
+    # .go older than .scm -> stale.
+    target = go_path()
+    target.parent.mkdir(parents=True)
+    target.write_text("")
+    old = time.time() - 86400
+    os.utime(target, (old, old))
+    assert cross_probe._check_guile_cache_stale(str(scm_path)) is True, (
+        ".scm newer than .go should be detected as stale")
+
+    # Touch the .scm again so it is definitively newer, then prove a fresh .go
+    # (future mtime) clears the stale flag.
+    future = time.time() + 86400
+    os.utime(target, (future, future))
+    assert cross_probe._check_guile_cache_stale(str(scm_path)) is False, (
+        ".go newer than .scm should not be stale")
+
+
+def test_guile_cache_found_for_any_guile_release(tmp_path, monkeypatch):
+    """The bytecode lookup must not be pinned to one Guile ABI directory.
+
+    It used to hardcode ``3.0-LE-8-4.7``, so on any other Guile release the
+    staleness check silently always reported "not stale".
+    """
+    import time
+
+    from pqwave.bridge.lepton import cross_probe
+
+    cache_root = tmp_path / "guile-cache"
+    monkeypatch.setattr(cross_probe, "GUILE_CCACHE_ROOT", str(cache_root))
+
+    scm_dir = tmp_path / "src"
+    scm_dir.mkdir()
+    scm_path = scm_dir / "menu-additions.scm"
+    scm_path.write_text(";; VERSION: 1\n")
+
+    abi = "3.2-LE-9-4.2"          # a release the old hardcoded name would miss
+    rel = os.path.abspath(scm_path).lstrip(os.sep) + ".go"
+    target = cache_root / abi / rel
+    target.parent.mkdir(parents=True)
+    target.write_text("")
+    old = time.time() - 86400
+    os.utime(target, (old, old))
+
+    assert cross_probe._check_guile_cache_stale(str(scm_path)) is True, (
+        f"a .go under an unexpected ABI dir ({abi}) must still be found")
+
+
+def test_guile_cache_stale_is_false_for_missing_source(tmp_path, monkeypatch):
+    """A source file that does not exist cannot be stale."""
+    from pqwave.bridge.lepton import cross_probe
+
+    monkeypatch.setattr(cross_probe, "GUILE_CCACHE_ROOT",
+                        str(tmp_path / "unused-cache"))
+    assert cross_probe._check_guile_cache_stale(
+        str(tmp_path / "nowhere.scm")) is False

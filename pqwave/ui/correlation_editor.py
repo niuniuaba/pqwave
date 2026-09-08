@@ -398,11 +398,11 @@ class CorrelationMatrixEditor(QDialog):
             # For ngspice, the preview is shown after validation below
             pass
         elif "param" in fmt:
-            preview_lines.append(f"* --- Run 0 ---")
+            preview_lines.append("* --- Run 0 ---")
             preview_lines.append(".param " + " ".join(
                 f"{name}={values[0, i]:.8g}" for i, name in enumerate(param_names)))
             if n_runs > 1:
-                preview_lines.append(f"* --- Run 1 ---")
+                preview_lines.append("* --- Run 1 ---")
                 preview_lines.append(".param " + " ".join(
                     f"{name}={values[1, i]:.8g}" for i, name in enumerate(param_names)))
             preview_lines.append(f"... ({n_runs} runs total)")

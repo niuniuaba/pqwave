@@ -12,7 +12,7 @@ import sys
 import os
 import subprocess
 import glob
-import importlib.util
+import importlib.util  # noqa: F401
 from typing import List, Tuple, Optional
 
 
@@ -53,25 +53,25 @@ def check_test_dependencies() -> bool:
 
     # Check for spicelib - required for many tests
     try:
-        import spicelib
+        import spicelib  # noqa: F401  (presence probe only)
     except ImportError:
         missing_deps.append('spicelib')
 
     # Check for PyQt6 - required for UI tests
     try:
-        import PyQt6
+        import PyQt6  # noqa: F401  (presence probe only)
     except ImportError:
         missing_deps.append('PyQt6')
 
     # Check for pyqtgraph
     try:
-        import pyqtgraph
+        import pyqtgraph  # noqa: F401  (presence probe only)
     except ImportError:
         missing_deps.append('pyqtgraph')
 
     # Check for numpy
     try:
-        import numpy
+        import numpy  # noqa: F401  (presence probe only)
     except ImportError:
         missing_deps.append('numpy')
 
@@ -105,19 +105,29 @@ def run_test_file(test_path: str) -> Tuple[bool, str, Optional[int]]:
         else:
             env['PYTHONPATH'] = project_root
 
-        # Get test file name for display
         test_name = os.path.basename(test_path)
 
-        # Run the test script
+        # Run the file under pytest rather than as a bare script.
+        #
+        # Executing it as a script let a module with no `__main__` block (or with
+        # checks that only print) exit 0 and be reported as "passed" while
+        # verifying nothing. pytest also turns returning a value from a test into
+        # a visible failure signal instead of a silent pass, and collects
+        # functions that pytest would otherwise never reach.
         result = subprocess.run(
-            [sys.executable, test_path],
+            [
+                sys.executable, "-m", "pytest", test_path,
+                "-q", "--no-header", "-p", "no:cacheprovider",
+                # A test that returns a bool instead of asserting must not be
+                # trusted; make that an error so it can never pass vacuously.
+                "-W", "error::pytest.PytestReturnNotNoneWarning",
+            ],
             capture_output=True,
             text=True,
             env=env,
-            timeout=30  # 30 second timeout per test
+            timeout=60  # per-file allowance; UI files need a little headroom
         )
 
-        success = result.returncode == 0
         output = result.stdout
 
         # Include stderr in output if present
@@ -126,12 +136,23 @@ def run_test_file(test_path: str) -> Tuple[bool, str, Optional[int]]:
                 output += "\n"
             output += result.stderr
 
+        # rc 5 means the glob found no tests at all -- that is a broken test
+        # file, not a success, so report it as a failure.
+        if result.returncode == 5:
+            output = ("No tests collected from this file (it is probably a "
+                      "manual script); it cannot count as passing.\n" + output)
+
+        success = result.returncode == 0
         return success, output, result.returncode
 
     except subprocess.TimeoutExpired:
-        return False, f"Test timed out after 30 seconds: {test_path}", 124
+        return False, (
+            f"{test_name} timed out after 60 seconds: {test_path}\n"
+            "A per-file timeout usually means the file is waiting on a socket or "
+            "a subprocess it never releases."
+        ), 124
     except Exception as e:
-        return False, f"Failed to run {test_path}: {e}", 1
+        return False, f"Failed to run {test_name} ({test_path}): {e}", 1
 
 
 def run_all_tests() -> int:

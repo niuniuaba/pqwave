@@ -43,6 +43,27 @@ def api_command(name: str, signature: str, help: str):
     return decorator
 
 
+def _bridge_status(sent: bool, ok_detail: str) -> dict:
+    """Map an xschem cross-probe send result onto the session-API status dict.
+
+    These commands previously returned {"status": "ok"} unconditionally, so a call
+    that never reached xschem -- no bridge connected, connection dropped -- was
+    indistinguishable from one that highlighted something on screen.
+    """
+    if sent:
+        return {"status": "ok", "message": ok_detail}
+    return {
+        "status": "error",
+        "message": "xschem did not acknowledge the command; "
+                   "is the bridge connected? (see File > Xschem Bridge)",
+    }
+
+
+# Display modes understood by the MC renderer; keep in sync with the mode
+# choices offered by ui/mc_control_bar.py.
+MC_DISPLAY_MODES = ("spaghetti", "envelope", "single")
+
+
 def get_command_registry() -> dict[str, dict]:
     """Return the full command registry (for REPL/AI discovery)."""
     return _COMMAND_REGISTRY
@@ -210,6 +231,16 @@ class SessionAPI:
 
     def mc_style(self, mode: str, sigma: float = 3.0) -> dict:
         """Set MC display mode: spaghetti, envelope, or single."""
+        # Validated before the GUI-mutation early-return, so a typo cannot reach
+        # the renderer either way: nothing downstream understands an unknown mode.
+        if mode not in MC_DISPLAY_MODES:
+            return {
+                "status": "error",
+                "message": (
+                    f"Unknown MC display mode {mode!r}; "
+                    f"expected one of {', '.join(MC_DISPLAY_MODES)}"
+                ),
+            }
         if self._on_mutation:
             self._on_mutation("mc_style", mode=mode, sigma=sigma)
             return {"status": "ok"}
@@ -222,12 +253,17 @@ class SessionAPI:
 
     def mc_nominal(self, idx: int) -> dict:
         """Set the nominal run index."""
+        mc = self._state.mc_collection
+        if mc is None and not self._on_mutation:
+            return {"status": "error", "message": "No MC data loaded"}
+        if mc is not None and not (0 <= idx < len(mc.runs)):
+            return {
+                "status": "error",
+                "message": f"Run index {idx} out of range (0..{len(mc.runs) - 1})",
+            }
         if self._on_mutation:
             self._on_mutation("mc_nominal", idx=idx)
             return {"status": "ok"}
-        mc = self._state.mc_collection
-        if mc is None:
-            return {"status": "error", "message": "No MC data loaded"}
         mc.nominal_index = idx
         return {"status": "ok"}
 
@@ -761,9 +797,8 @@ class SessionAPI:
             return {"status": "ok"}
         from pqwave.bridge.xschem.bridge import XschemBridge
 
-        bridge = XschemBridge()
-        bridge.probe_net(name)
-        return {"status": "ok"}
+        sent = XschemBridge().probe_net(name)
+        return _bridge_status(sent, f"net {name!r} highlighted")
 
     def xschem_probe_part(self, ref: str, pin: str | None = None) -> dict:
         """Highlight a component in xschem."""
@@ -772,9 +807,8 @@ class SessionAPI:
             return {"status": "ok"}
         from pqwave.bridge.xschem.bridge import XschemBridge
 
-        bridge = XschemBridge()
-        bridge.probe_part(ref, pin)
-        return {"status": "ok"}
+        sent = XschemBridge().probe_part(ref, pin)
+        return _bridge_status(sent, f"component {ref!r} highlighted")
 
     def xschem_clear(self) -> dict:
         """Clear all xschem highlights."""
@@ -783,9 +817,8 @@ class SessionAPI:
             return {"status": "ok"}
         from pqwave.bridge.xschem.bridge import XschemBridge
 
-        bridge = XschemBridge()
-        bridge.clear_probe()
-        return {"status": "ok"}
+        sent = XschemBridge().clear_probe()
+        return _bridge_status(sent, "highlights cleared")
 
     def xschem_config(self, key: str, value=None) -> dict:
         """Get or set xschem bridge configuration.
@@ -1925,7 +1958,6 @@ class SessionAPI:
     def fft_config(
         self, window: str = None, fft_size: int = None, representation: str = None
     ) -> dict:
-        from pqwave.models.state import FftConfig
 
         cfg = self._state.fft_config
         if window:

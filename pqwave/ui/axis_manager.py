@@ -13,7 +13,7 @@ import pyqtgraph as pg
 from typing import Optional, Tuple, Dict, Any
 from PyQt6.QtCore import pyqtSignal, QObject
 
-from pqwave.models.state import ApplicationState, AxisId, AxisConfig
+from pqwave.models.state import ApplicationState, AxisId
 
 
 class AxisManager(QObject):

@@ -2,59 +2,54 @@
 pqwave - A Wave Viewer for SPICE raw data using spicelib and PyQtGraph
 """
 
-__version__ = "0.3.4"
+from ._version import __version__
+
 __author__ = "niuniuaba"
 
-# Export main classes and functions (conditional imports)
-try:
-    from .models.rawfile import RawFile
-    HAS_RAWFILE = True
-except ImportError:
-    RawFile = None
-    HAS_RAWFILE = False
+__all__ = [
+    "__version__",
+    "__author__",
+    "RawFile",
+    "ExprEvaluator",
+    "MainWindow",
+    "main",
+    "SessionAPI",
+    "api_command",
+    "get_command_registry",
+]
 
-try:
-    from .models.expression import ExprEvaluator
-    HAS_EXPR = True
-except ImportError:
-    ExprEvaluator = None
-    HAS_EXPR = False
+# Heavy, optionally- unavailable names are resolved lazily (PEP 562) so that
+# `import pqwave` does not pull in PyQt6 just to read __version__, and so that a
+# missing GUI dependency does not make the whole package unimportable. This also
+# removes the previous `X = None` fallback assignments, which mypy rejected as
+# "Cannot assign to a type", and the eager `from .main import main`, which made
+# `python -m pqwave.main` warn about re-importing an already-loaded module.
+_LAZY = {
+    "RawFile": (".models.rawfile", "RawFile"),
+    "ExprEvaluator": (".models.expression", "ExprEvaluator"),
+    "MainWindow": (".ui.main_window", "MainWindow"),
+    "main": (".main", "main"),
+    "SessionAPI": (".session.api", "SessionAPI"),
+    "api_command": (".session.api", "api_command"),
+    "get_command_registry": (".session.api", "get_command_registry"),
+}
 
-# Import MainWindow from ui module
-try:
-    from .ui.main_window import MainWindow
-    HAS_MAINWINDOW = True
-except ImportError:
-    MainWindow = None
-    HAS_MAINWINDOW = False
 
-# Import main function from main module
-try:
-    from .main import main
-    HAS_MAIN = True
-except ImportError:
-    main = None
-    HAS_MAIN = False
+def __getattr__(name):
+    target = _LAZY.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+    module, attr = target
+    try:
+        value = getattr(import_module(module, __name__), attr)
+    except ImportError as exc:
+        raise AttributeError(
+            f"pqwave.{name} is unavailable: {exc}"
+        ) from exc
+    globals()[name] = value          # cache for subsequent lookups
+    return value
 
-# Import SessionAPI from session module
-try:
-    from .session.api import SessionAPI, api_command, get_command_registry
-    HAS_SESSION = True
-except ImportError:
-    SessionAPI = None
-    api_command = None
-    get_command_registry = None
-    HAS_SESSION = False
 
-# Define __all__ based on what's available
-__all__ = ['__version__', '__author__']
-if HAS_RAWFILE:
-    __all__.append('RawFile')
-if HAS_EXPR:
-    __all__.append('ExprEvaluator')
-if HAS_MAINWINDOW:
-    __all__.append('MainWindow')
-if HAS_MAIN:
-    __all__.append('main')
-if HAS_SESSION:
-    __all__.extend(['SessionAPI', 'api_command', 'get_command_registry'])
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY))

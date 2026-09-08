@@ -48,7 +48,7 @@ class TestRealMCFilesFullPipeline:
             assert raw.step_count >= 0
             # At minimum it should parse trace names
             names = raw.get_trace_names()
-            assert len(names) > 0, f"Expected trace names from QSPICE file"
+            assert len(names) > 0, "Expected trace names from QSPICE file"
         except Exception:
             # spicelib has known issues with some .qraw files
             pytest.skip("spicelib cannot parse this QSPICE file")

@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLineEdit, QTreeWidget, QTreeWidgetItem,
     QDialogButtonBox,
 )
-from PyQt6.QtCore import Qt
 
 from pqwave.ui.function_registry import FunctionInfo
 from pqwave.ui.measure_registry import get_measure_functions_by_category

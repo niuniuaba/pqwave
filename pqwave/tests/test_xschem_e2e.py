@@ -39,7 +39,7 @@ def send_gaw_command(port, command):
     except Exception as e:
         return f"Error: {e}"
 
-def test_xschem_server():
+def _check_xschem_server():
     """Test xschem server functionality."""
     print("Testing xschem integration...")
 
@@ -151,5 +151,18 @@ def test_xschem_server():
             proc.wait()
 
 if __name__ == '__main__':
-    success = test_xschem_server()
+    success = _check_xschem_server()
     sys.exit(0 if success else 1)
+
+
+def test_xschem_server(require_loopback):
+    # pytest entry point for the legacy checks in _check_xschem_server.
+    # require_loopback: this helper spawns a real pqwave server and talks to it
+    # over TCP, so it cannot run where binding is denied.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_xschem_e2e.py` working unchanged.
+    assert _check_xschem_server() is True, (
+        "checks failed -- see captured stdout for the failing step")

@@ -1,100 +1,123 @@
 #!/usr/bin/env python3
-"""Test extracted model classes"""
+"""Model-layer extraction tests: RawFile, Dataset, Variable, Trace, ApplicationState.
 
-import sys
+The original script did nothing unless a raw file path was passed on argv, so
+under any automated run it only printed an import success. It now always
+exercises the models against the bundled bridge.raw fixture.
+"""
+
 import os
+import sys
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-if __name__ == '__main__':
-    try:
-        from pqwave.models.rawfile import RawFile
-        from pqwave.models.dataset import Dataset, Variable
-        from pqwave.models.trace import Trace, AxisAssignment
-        from pqwave.models.state import ApplicationState, AxisId, AxisConfig
-        print("✓ Successfully imported all model classes")
-    except ImportError as e:
-        print(f"✗ Failed to import model classes: {e}")
-        sys.exit(1)
+from pqwave.models.dataset import Dataset, Variable  # noqa: E402
+from pqwave.models.rawfile import RawFile  # noqa: E402
+from pqwave.models.state import ApplicationState, AxisId  # noqa: E402
+from pqwave.models.trace import AxisAssignment, Trace  # noqa: E402
 
-    # Test with a sample raw file if provided
-    if len(sys.argv) > 1:
-        raw_file = sys.argv[1]
-        if os.path.exists(raw_file):
-            try:
-                rf = RawFile(raw_file)
-                print(f"✓ Successfully parsed {raw_file}")
-                print(f"  Number of datasets: {len(rf.datasets)}")
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_FIXTURE = os.path.join(_ROOT, "tests", "bridge.raw")
 
-                if rf.datasets:
-                    # Test Dataset creation
-                    ds = Dataset(rf, 0)
-                    print(f"✓ Created Dataset: {ds}")
-                    print(f"  Title: {ds.title}")
-                    print(f"  Plotname: {ds.plotname}")
-                    print(f"  Variables: {ds.n_variables}")
-                    print(f"  Points: {ds.n_points}")
 
-                    # Test variable access
-                    var_names = ds.get_variable_names(include_derived=True)
-                    print(f"  Variable names ({len(var_names)}):")
-                    for i, name in enumerate(var_names[:5]):  # Show first 5
-                        print(f"    {i+1}. {name}")
-                    if len(var_names) > 5:
-                        print(f"    ... and {len(var_names) - 5} more")
+def _dataset():
+    return Dataset(RawFile(_FIXTURE), 0)
 
-                    # Test getting a variable
-                    if var_names:
-                        var = ds.get_variable(var_names[0])
-                        if var:
-                            print(f"✓ Retrieved variable '{var_names[0]}': {var}")
-                            print(f"  Data shape: {var.data.shape}")
-                            print(f"  Is complex: {var.is_complex}")
 
-                    # Test ApplicationState
-                    state = ApplicationState()
-                    print(f"✓ Created ApplicationState: {state}")
+def test_model_imports_expose_expected_names():
+    for cls in (RawFile, Dataset, Variable, Trace, AxisAssignment,
+                ApplicationState, AxisId):
+        assert cls.__name__, f"{cls!r} has no name"
 
-                    # Add dataset to state
-                    state.add_dataset(ds)
-                    print(f"  Added dataset to state, total datasets: {len(state.datasets)}")
 
-                    # Test creating and adding a trace
-                    if ds.n_variables >= 2:
-                        x_var = ds.get_variable(var_names[0])
-                        y_var = ds.get_variable(var_names[1])
-                        if x_var and y_var:
-                            trace = Trace(
-                                name=f"Test trace",
-                                expression=f"{var_names[1]} vs {var_names[0]}",
-                                x_data=x_var.data,
-                                y_data=y_var.data,
-                                y_axis=AxisAssignment.Y1,
-                                color=(255, 0, 0),
-                                line_width=1.5
-                            )
-                            state.add_trace(trace)
-                            print(f"✓ Added trace to state, total traces: {len(state.traces)}")
-                            print(f"  Trace: {trace}")
+def test_rawfile_parses_fixture():
+    rf = RawFile(_FIXTURE)
+    assert rf.datasets, "fixture produced no datasets"
+    assert rf.get_variable_names(0), "no variables in dataset 0"
 
-                    # Test axis configuration
-                    config = state.get_axis_config(AxisId.Y1)
-                    print(f"✓ Retrieved Y1 axis config: log_mode={config.log_mode}, auto_range={config.auto_range}")
 
-                    # Test state serialization
-                    state_dict = state.to_dict()
-                    print(f"✓ State serialized to dict with keys: {list(state_dict.keys())}")
+def test_dataset_reports_shape_and_metadata():
+    ds = _dataset()
+    assert ds.n_variables > 0 and ds.n_points > 0
+    assert ds.plotname, "plot name not carried through from the raw header"
+    assert "Transient" in ds.plotname, f"unexpected plotname {ds.plotname!r}"
 
-            except Exception as e:
-                print(f"✗ Error testing models: {e}")
-                import traceback
-                traceback.print_exc()
-                sys.exit(1)
-        else:
-            print(f"✗ File not found: {raw_file}")
-    else:
-        print("ℹ No raw file provided for model test")
-        print("  Usage: python test_models.py <rawfile>")
 
-    print("\n✓ Model extraction test completed")
+def test_variable_is_a_lazy_view_not_a_copy():
+    """Variables must expose NumPy views so edits/derivatives stay cheap."""
+    ds = _dataset()
+    names = ds.get_variable_names()
+    var = ds.get_variable(names[1])
+    assert isinstance(var, Variable)
+    assert var.data.shape == (ds.n_points,), f"unexpected shape {var.data.shape}"
+    assert var.data.base is not None, (
+        "variable data is not a view into the dataset matrix (it was copied)")
+
+
+def test_derived_variables_are_available_on_request():
+    ds = _dataset()
+    base = ds.get_variable_names(include_derived=False)
+    with_derived = ds.get_variable_names(include_derived=True)
+    assert len(with_derived) >= len(base), "include_derived lost variables"
+
+
+def test_trace_dataclass_roundtrips_fields():
+    ds = _dataset()
+    names = ds.get_variable_names()
+    x_var = ds.get_variable(names[0])
+    y_var = ds.get_variable(names[1])
+    trace = Trace(
+        name="Test trace",
+        expression=f"{names[1]} vs {names[0]}",
+        x_data=x_var.data,
+        y_data=y_var.data,
+        y_axis=AxisAssignment.Y1,
+        color=(255, 0, 0),
+        line_width=1.5,
+    )
+    assert trace.y_axis is AxisAssignment.Y1
+    assert trace.color == (255, 0, 0)
+    assert trace.line_width == 1.5
+    assert len(trace.x_data) == len(trace.y_data) == ds.n_points
+
+
+def test_state_holds_datasets_traces_and_axis_config():
+    ds = _dataset()
+    state = ApplicationState()
+    state.add_dataset(ds)
+    assert len(state.datasets) >= 1, "dataset was not stored"
+
+    config = state.get_axis_config(AxisId.Y1)
+    assert config.log_mode is False, "axis config should default to linear"
+    assert config.auto_range is True, "axis config should default to auto-range"
+
+
+def test_state_serializes_to_a_restorable_dict():
+    ds = _dataset()
+    state = ApplicationState()
+    state.add_dataset(ds)
+    payload = state.to_dict()
+    assert isinstance(payload, dict) and payload, "to_dict() produced nothing"
+
+
+def main():
+    tests = [test_model_imports_expose_expected_names, test_rawfile_parses_fixture,
+             test_dataset_reports_shape_and_metadata,
+             test_variable_is_a_lazy_view_not_a_copy,
+             test_derived_variables_are_available_on_request,
+             test_trace_dataclass_roundtrips_fields,
+             test_state_holds_datasets_traces_and_axis_config,
+             test_state_serializes_to_a_restorable_dict]
+    failures = []
+    for fn in tests:
+        try:
+            fn()
+            print(f"✓ {fn.__name__}")
+        except Exception as exc:
+            print(f"✗ {fn.__name__}: {exc}")
+            failures.append(fn.__name__)
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

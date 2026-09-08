@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLineEdit, QTreeWidget, QTreeWidgetItem,
     QDialogButtonBox,
 )
-from PyQt6.QtCore import Qt
 
 from pqwave.session.api import get_command_registry
 

@@ -8,7 +8,7 @@ import numpy as np
 from pqwave.models.expression import ExprEvaluator
 from pqwave.models.rawfile import RawFile
 
-_TEST_RAW = os.path.join(os.path.dirname(__file__), '..', '..', 'tests', 'bridge', 'simulation', 'bridge.raw')
+_TEST_RAW = os.path.join(os.path.dirname(__file__), '..', '..', 'tests', 'bridge.raw')
 
 
 @pytest.fixture(scope="module")

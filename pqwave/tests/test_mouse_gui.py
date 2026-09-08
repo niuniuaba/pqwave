@@ -12,9 +12,9 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtTest import QTest
 from PyQt6.QtCore import Qt, QPoint
 
-def test_mouse_tracking_in_gui():
+def _check_mouse_tracking_in_gui():
     """Test mouse tracking in MainWindow with loaded file."""
-    app = QApplication([])
+    app = QApplication.instance() or QApplication([])
 
     from pqwave.ui.main_window import MainWindow
     window = MainWindow('tests/bridge.raw')
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     try:
-        success = test_mouse_tracking_in_gui()
+        success = _check_mouse_tracking_in_gui()
         print("\n" + "=" * 60)
         if success:
             print("Test passed!")
@@ -86,3 +86,14 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+def test_mouse_tracking_in_gui():
+    # pytest entry point for the legacy checks in _check_mouse_tracking_in_gui.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_mouse_gui.py` working unchanged.
+    assert _check_mouse_tracking_in_gui() is True, (
+        "checks failed -- see captured stdout for the failing step")

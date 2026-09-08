@@ -13,10 +13,9 @@ from __future__ import annotations
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-import numpy as np
 
 from .dataset import Dataset
-from .trace import Trace, AxisAssignment
+from .trace import Trace
 
 
 class ViewboxTheme(Enum):

@@ -753,10 +753,36 @@ class TestEngineRiseFallTime:
         assert result < 0.001
 
     def test_rise_time_with_threshold(self):
+        """An explicit `threshold` must move the lower level, not be ignored.
+
+        The old assertion (`result > 0.0`) held whether or not the threshold was
+        used, so it passed while _measure_rise_time discarded the value.
+        """
         t, y = _square_data(amp=5.0, offset=0.0, n=100000, t_stop=1.0)
         gd = _make_get_data({"v(out)": (t, y)})
-        result = evaluate_measure("rise_time(v(out), threshold=0)", gd)
-        assert result > 0.0
+        default = evaluate_measure("rise_time(v(out))", gd)
+        from_zero = evaluate_measure("rise_time(v(out), threshold=0)", gd)
+        assert from_zero > 0.0
+        # The contract under test is simply that `threshold` is *used*: it replaces
+        # the 10% lower level with 0 V, so the answer must differ from the default.
+        # Before the fix this value was popped out of kwargs and discarded, so the
+        # two results were identical and any directional assertion was moot.
+        assert from_zero != default, (
+            f"threshold=0 changed nothing ({from_zero} vs default {default}) "
+            "-- the value is being discarded again")
+
+    def test_rise_time_default_levels_unchanged_without_threshold(self):
+        t, y = _square_data(amp=5.0, offset=0.0, n=100000, t_stop=1.0)
+        gd = _make_get_data({"v(out)": (t, y)})
+        assert evaluate_measure("rise_time(v(out))", gd) < 0.001
+
+    def test_fall_time_with_threshold(self):
+        t, y = _square_data(amp=5.0, offset=0.0, n=100000, t_stop=1.0)
+        gd = _make_get_data({"v(out)": (t, y)})
+        default = evaluate_measure("fall_time(v(out))", gd)
+        # For fall_time the threshold is the *upper* level (here 5.0 V instead of
+        # the 90% level, 4.5 V), so the measured interval must move.
+        assert evaluate_measure("fall_time(v(out), threshold=5)", gd) != default
 
     def test_rise_time_custom_pct(self):
         t, y = _square_data(amp=5.0, offset=0.0, n=100000, t_stop=1.0)

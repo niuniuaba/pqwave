@@ -82,7 +82,7 @@ def profile_ui_interactions(filepath: str):
     print(f"  Y variable: {y_var} (dtype={y_data.dtype})")
 
     # ---- Stage 2: Create PlotWidget + PlotDataItem ----
-    print(f"\n--- Stage 2: Create PlotWidget + PlotDataItem ---")
+    print("\n--- Stage 2: Create PlotWidget + PlotDataItem ---")
     gc.collect()
 
     pw = pg.PlotWidget()
@@ -120,7 +120,7 @@ def profile_ui_interactions(filepath: str):
     print(f"  autoRange:             {timings['autoRange']:.3f}s")
 
     # ---- Stage 3: cProfile on autoRange ----
-    print(f"\n--- Stage 3: cProfile autoRange ---")
+    print("\n--- Stage 3: cProfile autoRange ---")
     gc.collect()
     pr = cProfile.Profile()
     pr.enable()
@@ -134,7 +134,7 @@ def profile_ui_interactions(filepath: str):
     print(s.getvalue())
 
     # ---- Stage 4: Log mode toggle ----
-    print(f"\n--- Stage 4: Log mode toggle ---")
+    print("\n--- Stage 4: Log mode toggle ---")
     for log_mode in [(True, False), (False, False), (True, True), (False, True)]:
         gc.collect()
         t0 = time.perf_counter()
@@ -147,7 +147,7 @@ def profile_ui_interactions(filepath: str):
         print(f"  {key} (3x): {timings[key]:.3f}s")
 
     # ---- Stage 5: cProfile on setLogMode ----
-    print(f"\n--- Stage 5: cProfile setLogMode (x_log, y_log) = (True, False) ---")
+    print("\n--- Stage 5: cProfile setLogMode (x_log, y_log) = (True, False) ---")
     gc.collect()
     pr2 = cProfile.Profile()
     pr2.enable()
@@ -161,7 +161,7 @@ def profile_ui_interactions(filepath: str):
     print(s2.getvalue())
 
     # ---- Stage 6: Simulate zoom (scaleBy) ----
-    print(f"\n--- Stage 6: Simulate zoom operations ---")
+    print("\n--- Stage 6: Simulate zoom operations ---")
     vb = pw.plotItem.vb
     for label, scale in [("zoom_in 0.8x", (0.8, 0.8)), ("zoom_out 1.25x", (1.25, 1.25))]:
         gc.collect()
@@ -174,7 +174,7 @@ def profile_ui_interactions(filepath: str):
         print(f"  {label} (5x): {timings[f'scaleBy {label}']:.3f}s")
 
     # ---- Stage 7: setData (update data, like switching traces) ----
-    print(f"\n--- Stage 7: setData (data update) ---")
+    print("\n--- Stage 7: setData (data update) ---")
     gc.collect()
     t0 = time.perf_counter()
     for _ in range(5):
@@ -185,7 +185,7 @@ def profile_ui_interactions(filepath: str):
     print(f"  setData 5x: {timings['setData_5x']:.3f}s")
 
     # ---- Stage 8: Add multiple traces ----
-    print(f"\n--- Stage 8: Add multiple traces ---")
+    print("\n--- Stage 8: Add multiple traces ---")
     evaluator = ExprEvaluator(rf, 0)
     all_items = [plot_item]
     t0 = time.perf_counter()
@@ -216,7 +216,7 @@ def profile_ui_interactions(filepath: str):
     print(f"  autoRange after multi:   {timings['autoRange_after_multi']:.3f}s")
 
     # ---- Stage 9: cProfile on adding a trace + autoRange ----
-    print(f"\n--- Stage 9: cProfile add trace + autoRange ---")
+    print("\n--- Stage 9: cProfile add trace + autoRange ---")
     gc.collect()
     if len(var_names) > 5:
         vname = var_names[5]

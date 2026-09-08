@@ -133,9 +133,11 @@ class TestNetlistModification:
         netlist = "R1 n1 n2 10k\nR2 n2 0 1k\n.op\n"
         corner = {"R1": 5000.0, "R2": 2000.0}
         result = modify_netlist(netlist, corner)
-        lines = [l.strip() for l in result.splitlines()]
-        assert any(l.startswith("R1") and ("5k" in l or "5000" in l) for l in lines)
-        assert any(l.startswith("R2") and ("2k" in l or "2000" in l) for l in lines)
+        lines = [line.strip() for line in result.splitlines()]
+        assert any(line.startswith("R1") and ("5k" in line or "5000" in line)
+                   for line in lines)
+        assert any(line.startswith("R2") and ("2k" in line or "2000" in line)
+                   for line in lines)
 
     def test_model_card_unchanged(self):
         from pqwave.analysis.worst_case import modify_netlist

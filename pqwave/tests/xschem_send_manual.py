@@ -14,7 +14,7 @@ def send_xschem_commands(raw_file=None):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5.0)
         sock.connect(('localhost', 2026))
-        print(f"Connected to xschem server on port 2026")
+        print("Connected to xschem server on port 2026")
 
         # Send table_set command
         if raw_file is None:

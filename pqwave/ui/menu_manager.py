@@ -9,9 +9,10 @@ menu bar, menus, toolbars, and status bar, centralizing UI element creation
 and action management.
 """
 
+from typing import Optional
+
 from PyQt6.QtWidgets import QMenuBar, QMenu, QToolBar, QStatusBar, QLabel, QStyle
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
-from PyQt6.QtCore import Qt
 
 
 class MenuManager:

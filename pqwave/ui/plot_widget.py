@@ -13,12 +13,11 @@ This module provides a PlotWidget subclass that adds:
 - Grid and styling with system theme colors
 """
 
-from typing import Optional, Tuple, Callable
-import numpy as np
+from typing import TYPE_CHECKING, Optional
 import pyqtgraph as pg
-from PyQt6.QtWidgets import QApplication, QGraphicsTextItem, QInputDialog
-from PyQt6.QtGui import QColor, QPainter, QFont
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QEvent
+from PyQt6.QtWidgets import QGraphicsTextItem, QInputDialog
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 
 from pqwave.utils.log_axis import LogAxisItem
 from pqwave.logging_config import get_logger
@@ -29,6 +28,10 @@ from pqwave.models.state import ViewboxTheme, THEME_COLORS
 # cutting CPU from ~200+ paint/sec to ~30 paint/sec during mouse drag.
 _VB_THROTTLE_MS = 30
 
+
+
+if TYPE_CHECKING:                      # pragma: no cover - typing only
+    from pqwave.models.state import ApplicationState
 
 class PlotWidget(pg.PlotWidget):
     """Enhanced PlotWidget with cursor support and dual Y-axis.
@@ -525,7 +528,6 @@ class PlotWidget(pg.PlotWidget):
         coordinates are exponent values (e.g., 3.0 for actual value 1000).
         This converts back to 10^3 = 1000 for user display.
         """
-        import math
         try:
             return 10.0 ** value
         except OverflowError:
@@ -942,7 +944,6 @@ class PlotWidget(pg.PlotWidget):
                 if self._selected_x_cursor:
                     self.move_selected_cursor(direction)
         elif direction in ('up', 'down'):
-            target = self._selected_y_cursor
             if self._selected_y_cursor == 'yA' and self.cursor_yA_line and self.cursor_yA_visible:
                 cur = self.cursor_yA_line.value()
                 step = dy if direction == 'up' else -dy  # up → increase Y
@@ -1218,8 +1219,11 @@ class PlotWidget(pg.PlotWidget):
             self._vb_queued_translate = (dx, dy)
             self._vb_update_timer.start()
         else:
-            ox, oy = self._vb_queued_translate
-            self._vb_queued_translate = (ox + dx, oy + dy)
+            if self._vb_queued_translate is None:
+                self._vb_queued_translate = (dx, dy)
+            else:
+                ox, oy = self._vb_queued_translate
+                self._vb_queued_translate = (ox + dx, oy + dy)
 
     def _throttled_vb_scaleBy(self, *args, **kwargs):
         """Intercept ViewBox.scaleBy and coalesce rapid calls."""

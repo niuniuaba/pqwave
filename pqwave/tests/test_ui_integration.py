@@ -12,7 +12,7 @@ from PyQt6.QtCore import QTimer
 
 def test_main_window():
     """Create MainWindow, load raw file, add a trace, then quit."""
-    app = QApplication([])
+    app = QApplication.instance() or QApplication([])
 
     from pqwave.ui.main_window import MainWindow
     window = MainWindow('tests/bridge.raw')
@@ -22,8 +22,8 @@ def test_main_window():
     app.processEvents()
 
     # Load initial file (bypass timer)
-    if window.initial_file:
-        window._load_initial_file()
+    if window.initial_files:
+        window._load_initial_files()
         app.processEvents()
 
     # Give time for window to initialize and load file

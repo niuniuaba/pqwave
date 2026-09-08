@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import itertools
 import re
-from typing import Any
 
 
 def enumerate_corners(components: dict[str, dict]) -> list[dict[str, float]]:

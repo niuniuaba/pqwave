@@ -183,6 +183,16 @@ Thumbs.db
 tests/*.raw
 tests/*.log
 tests/*.*
+# ...except the handful of files the suite actually opens at runtime (~6.6 MB in
+# total). Without these a fresh clone cannot run `pytest` at all, because
+# pqwave/tests/* reference them by path. Regenerate the larger performance
+# captures locally when you need them; they stay ignored on purpose.
+!tests/bridge.raw
+!tests/cdg.raw
+!tests/mixed_signal.raw
+!tests/mixed_signal.vcd
+!tests/eyediagram_demo.raw
+!tests/eyediagram_demo.json
 # Archive files
 archieves/
 

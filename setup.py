@@ -1,43 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from setuptools import setup, find_packages
+"""Legacy shim.
 
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
+All project metadata lives in ``pyproject.toml``; the version in turn comes from
+``pqwave/_version.py``. This file exists only so that tooling which still calls
+``setup.py`` keeps working. It deliberately does not restate any metadata, because
+the previous copy here pinned ``version="0.3.3"`` and an ``entry_point`` of
+``pqwave:main``, both of which silently drifted from the real package.
+"""
 
-with open("requirements.txt", "r", encoding="utf-8") as fh:
-    requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+from setuptools import setup
 
-setup(
-    name="pqwave",
-    version="0.3.3",
-    author="niuniuaba",
-    author_email="your.email@example.com",
-    description="A Wave Viewer for SPICE raw data using spicelib and PyQtGraph",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/niuniuaba/pqwave",
-    packages=find_packages(),
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: Science/Research",
-        "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-        "Operating System :: OS Independent",
-    ],
-    python_requires=">=3.8",
-    install_requires=requirements,
-    entry_points={
-        "console_scripts": [
-            "pqwave=pqwave:main",
-        ],
-    },
-    include_package_data=True,
-)
+setup()

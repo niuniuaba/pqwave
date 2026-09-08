@@ -139,6 +139,39 @@ COMMAND_SPECS = {
     "save_template":  {"needs": "none", "valid_call": "save_template('test_template')"},
     "load_template":  {"needs": "none", "valid_call": "load_template('test_template')"},
     "list_templates": {"needs": "none", "valid_call": "list_templates()"},
+
+    # Dataset management
+    "datasets": {"needs": "none",       "valid_call": "datasets()"},
+    "unload":   {"needs": "file_loaded", "valid_call": "unload(0)"},
+
+    # Monte Carlo collection lifecycle
+    "mc_load":    {"needs": "file_loaded", "valid_call": "mc_load('tests/bridge.raw', source_type='stepped')"},
+    "mc_info":    {"needs": "mc_loaded",   "valid_call": "mc_info()"},
+    "mc_nominal": {"needs": "mc_loaded",   "valid_call": "mc_nominal(0)"},
+    "mc_filter":  {"needs": "mc_loaded",   "valid_call": "mc_filter('all')"},
+    "mc_param":   {"needs": "mc_loaded",   "valid_call": "mc_param('R1', [1000.0, 1100.0])"},
+    "mc_style":   {"needs": "mc_loaded",   "valid_call": "mc_style('spaghetti', sigma=3)"},
+    "mc_stats":   {"needs": "mc_loaded",   "valid_call": "mc_stats('v(ac_p)')"},
+    "mc_worst":   {"needs": "mc_loaded",   "valid_call": "mc_worst(n=5)"},
+    "mc_yield":   {"needs": "mc_loaded",   "valid_call": "mc_yield('v(ac_p)', low=0.5, high=1.5)"},
+    "mc_sensitivity": {"needs": "mc_loaded", "valid_call": "mc_sensitivity('v(ac_p)')"},
+
+    # Monte Carlo plotting / correlation (dialog-backed, Qt required)
+    "mc_histogram":        {"needs": "mc_loaded", "valid_call": "mc_histogram('v(ac_p)', bins=50)"},
+    "mc_scatter":          {"needs": "mc_loaded", "valid_call": "mc_scatter('v(ac_p)', 'R1')"},
+    "mc_correlation_show": {"needs": "mc_loaded", "valid_call": "mc_correlation_show()"},
+    "mc_correlation_load": {"needs": "mc_loaded", "valid_call": "mc_correlation_load('/tmp/corr.csv')"},
+    "mc_correlation_edit": {"needs": "mc_loaded", "valid_call": "mc_correlation_edit()"},
+    "mc_generate":         {"needs": "none",      "valid_call": "mc_generate('/tmp/mc_params.csv', runs=100, seed=1)"},
+
+    # xschem bridge / cross-probe (no bridge connected -> graceful error dicts)
+    "xschem_connect":    {"needs": "none", "valid_call": "xschem_connect(path=None)"},
+    "xschem_disconnect": {"needs": "none", "valid_call": "xschem_disconnect()"},
+    "xschem_config":     {"needs": "none", "valid_call": "xschem_config('port')"},
+    "xschem_probe_net":  {"needs": "bridge", "valid_call": "xschem_probe_net('n_out')"},
+    "xschem_probe_part": {"needs": "bridge", "valid_call": "xschem_probe_part('R1', pin='1')"},
+    "xschem_clear":      {"needs": "bridge", "valid_call": "xschem_clear()"},
+    "xschem_simulate":   {"needs": "bridge", "valid_call": "xschem_simulate(sch_path=None)"},
 }
 
 
@@ -210,6 +243,8 @@ class TestFileIOAndInfo:
         assert "v(v_q1)" in r["result"]["signals"]
 
     def test_load_eyediagram_demo(self):
+        from pqwave.tests.conftest import fixture_path
+        fixture_path("tests/eyediagram_demo.raw")
         e = _fresh_executor()
         r = e.run_sync("load('tests/eyediagram_demo.raw')")
         assert r["ok"] is True
@@ -600,6 +635,8 @@ class TestAnalysis:
 
     def test_eye_returns_signal_and_period(self):
         e = _fresh_executor()
+        from pqwave.tests.conftest import fixture_path
+        fixture_path("tests/eyediagram_demo.raw")
         _load(e, "tests/eyediagram_demo.raw")
         r = e.run_sync("eye('V(eye)')")
         assert r["ok"] is True
@@ -607,6 +644,8 @@ class TestAnalysis:
 
     def test_eye_with_period(self):
         e = _fresh_executor()
+        from pqwave.tests.conftest import fixture_path
+        fixture_path("tests/eyediagram_demo.raw")
         _load(e, "tests/eyediagram_demo.raw")
         r = e.run_sync("eye('V(eye)', period='100n')")
         assert r["ok"] is True
@@ -1025,3 +1064,134 @@ def test_histogram_command_registered():
     from pqwave.session.api import get_command_registry
     registry = get_command_registry()
     assert "histogram" in registry, f"histogram not in {list(registry.keys())}"
+
+
+# ======================================================================
+# Dataset management: datasets() / unload()
+# ======================================================================
+
+
+class TestDatasetManagement:
+    """`ok` means the command ran; domain errors ride inside result["status"]."""
+
+    def test_datasets_empty_by_default(self):
+        e = _fresh_executor()
+        res = e.run_sync("datasets()")
+        assert res["ok"] is True
+        assert res["result"] == [], f"expected no datasets, got {res['result']}"
+
+    def test_datasets_lists_every_loaded_file(self):
+        e = _fresh_executor()
+        assert _load(e, "pqwave/tests/bridge.raw")["ok"] is True
+        assert _load(e, "pqwave/tests/cdg.raw")["ok"] is True
+        res = e.run_sync("datasets()")
+        assert res["ok"] is True
+        assert [d["idx"] for d in res["result"]] == [0, 1], \
+            f"unexpected dataset indices: {res['result']}"
+
+    def test_unload_removes_the_selected_dataset(self):
+        e = _fresh_executor()
+        _load(e, "pqwave/tests/bridge.raw")
+        res = e.run_sync("unload(0)")
+        assert res["ok"] is True, res
+        assert res["result"]["status"] == "ok"
+        assert e.run_sync("datasets()")["result"] == [], \
+            "unload() reported success but the dataset survived"
+
+    def test_unload_reports_an_out_of_range_index(self):
+        e = _fresh_executor()
+        _load(e, "pqwave/tests/bridge.raw")
+        res = e.run_sync("unload(99)")
+        body = res["result"]
+        assert body["status"] == "error", \
+            f"out-of-range index was accepted: {body}"
+        assert "99" in body["message"]
+        assert len(e.run_sync("datasets()")["result"]) == 1, \
+            "a rejected unload must not remove anything"
+
+
+# ======================================================================
+# Monte Carlo commands (headless subset)
+# ======================================================================
+
+
+class TestMonteCarloCommands:
+    def test_mc_info_without_a_collection(self):
+        e = _fresh_executor()
+        assert e.run_sync("mc_info()")["ok"] is True
+
+    def test_mc_load_then_mc_info(self):
+        e = _fresh_executor()
+        assert _load(e, "pqwave/tests/bridge.raw")["ok"] is True
+        loaded = e.run_sync(
+            "mc_load('pqwave/tests/bridge.raw', source_type='stepped')")
+        assert loaded["ok"] is True, loaded
+        assert e.run_sync("mc_info()")["ok"] is True
+
+    def test_mc_style_accepts_the_documented_modes(self):
+        e = _fresh_executor()
+        for mode in ("spaghetti", "envelope", "single"):
+            res = e.run_sync(f"mc_style('{mode}', sigma=3)")
+            assert res["ok"] is True, f"mc_style('{mode}') raised: {res}"
+
+    def test_mc_style_rejects_an_unknown_mode(self):
+        """A typo must not silently set a mode no renderer understands."""
+        e = _fresh_executor()
+        res = e.run_sync("mc_style('spagheti')")
+        body = res["result"]
+        assert body["status"] == "error", \
+            f"misspelled display mode was accepted: {body}"
+        assert "spaghetti" in body["message"], \
+            f"error should list the valid modes: {body}"
+
+    def test_mc_style_without_data_reports_no_mc_data(self):
+        """A valid mode still needs a collection; say so rather than no-op."""
+        e = _fresh_executor()
+        res = e.run_sync("mc_style('envelope', sigma=2)")
+        body = res["result"]
+        assert body["status"] == "error", f"no-op masqueraded as success: {body}"
+        assert "MC data" in body["message"]
+
+    def test_mc_nominal_reports_an_out_of_range_index(self):
+        e = _fresh_executor()
+        _load(e, "pqwave/tests/bridge.raw")
+        e.run_sync("mc_load('pqwave/tests/bridge.raw', source_type='stepped')")
+        res = e.run_sync("mc_nominal(999)")
+        assert res["result"]["status"] == "error", \
+            f"bogus nominal index accepted: {res['result']}"
+
+
+# ======================================================================
+# xschem bridge commands without a live bridge
+# ======================================================================
+
+
+class TestXschemBridgeCommands:
+    """With no xschem attached these must answer, never raise."""
+
+    @pytest.mark.parametrize("call,expect_ok", [
+        # Disconnecting while already disconnected is a no-op, not a failure.
+        ("xschem_disconnect()", True),
+        ("xschem_probe_net('n_out')", False),
+        ("xschem_probe_part('R1', pin='1')", False),
+        ("xschem_clear()", False),
+    ])
+    def test_reports_whether_xschem_acknowledged(self, call, expect_ok):
+        e = _fresh_executor()
+        res = e.run_sync(call)
+        assert isinstance(res, dict), f"{call} returned {type(res).__name__}"
+        status = res["result"]["status"]
+        assert status == ("ok" if expect_ok else "error"), (
+            f"{call} reported {status!r} with no bridge connected: {res['result']}")
+
+    def test_failed_probe_explains_the_bridge_is_absent(self):
+        e = _fresh_executor()
+        body = e.run_sync("xschem_probe_net('n_out')")["result"]
+        assert "acknowledge" in body["message"].lower(), \
+            f"unhelpful failure message: {body}"
+
+    def test_xschem_config_reads_and_writes(self):
+        e = _fresh_executor()
+        got = e.run_sync("xschem_config('port')")
+        assert got["ok"] is True, got
+        assert "result" in got

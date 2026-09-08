@@ -1,168 +1,153 @@
 #!/usr/bin/env python3
+"""Trace property editor: opening and closing the dialog must not mutate a trace.
+
+Rewritten from a `__main__`-only script whose checks never actually ran:
+  * it dismissed the dialog from a QTimer.singleShot, but the dialog is shown
+    non-blocking, so the callback was never reached before the assertions;
+  * `QPushButton` was used but never imported, so the dismissal helper would have
+    raised NameError even if it had run;
+  * MainWindow('tests/bridge.raw') defers its load onto a QTimer, so one
+    processEvents() left the window with "No raw file opened";
+  * it asserted `traces[0][0] == "NewAlias"`, but that tuple slot holds the source
+    *expression*, which an alias rename must never change.
 """
-Test trace property editor dialog.
-"""
-import sys
+
 import os
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtTest import QTest
-from PyQt6.QtCore import Qt, QTimer
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-def test_trace_property_editor():
-    """Test trace property editor dialog."""
-    app = QApplication([])
+import pytest  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
-    from pqwave.ui.main_window import MainWindow
-    window = MainWindow('tests/bridge.raw')
-    window.show()
+from pqwave.models.trace import AxisAssignment  # noqa: E402
+from pqwave.ui.main_window import MainWindow  # noqa: E402
 
-    # Wait for loading
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_FIXTURE = os.path.join(_ROOT, "tests", "bridge.raw")
+
+# The palette starts at red, so tests that assert a colour change must pick a
+# non-default index (0 is "Default (auto)", 1 is red, 2 is green).
+_GREEN = 2
+_GREEN_RGB = (0, 255, 0, 255)
+
+
+@pytest.fixture(scope="module")
+def app():
+    return QApplication.instance() or QApplication(sys.argv)
+
+
+@pytest.fixture()
+def window(app):
+    """MainWindow with one trace plotted and the raw file actually loaded."""
+    assert os.path.exists(_FIXTURE), f"missing fixture file {_FIXTURE}"
+    w = MainWindow(_FIXTURE)
+    # Construction only *schedules* the load on a QTimer(100); run it directly so
+    # the test does not depend on the event loop reaching that timeout.
+    w._load_initial_files()
+    w.show()
+    app.processEvents()
+    if not w.trace_manager.traces:
+        assert w.trace_manager.add_trace(
+            "v(ac_p)", w.state.current_x_var, AxisAssignment.Y1), \
+            "could not add a trace to the freshly loaded file"
+    app.processEvents()
+    yield w
+    w.close()
     app.processEvents()
 
-    # Ensure we have at least one trace
-    if not window.trace_manager.traces:
-        print("Adding a trace...")
-        # Add a trace directly
-        trace = window.trace_manager.add_trace('v(ac_p)', window.state.current_x_var, 'Y1')
-        if trace:
-            print(f"Added trace: {trace.name}")
-        else:
-            print("Failed to add trace")
-            return False
 
-    print(f"Number of traces: {len(window.trace_manager.traces)}")
+def open_dialog(window, app):
+    """Open the trace-property dialog and hand it back.
 
-    # Store original values
-    original_var, original_plot_item, original_y_axis = window.trace_manager.traces[0]
-    original_color = original_plot_item.opts['pen'].color()
-    original_width = original_plot_item.opts['pen'].width()
-    print(f"Original trace: var={original_var}, color={original_color}, width={original_width}")
-
-    # Open trace property editor dialog
-    print("Opening trace property editor...")
-    # Use a timer to close the dialog after a short delay
-    def close_dialog():
-        # Find the dialog (should be the active modal widget)
-        dialog = app.activeModalWidget()
-        if dialog:
-            print(f"Found dialog: {dialog.windowTitle()}")
-            # Simulate clicking Close button
-            close_btn = dialog.findChild(QPushButton, "Close")
-            if close_btn:
-                QTest.mouseClick(close_btn, Qt.MouseButton.LeftButton)
-            else:
-                dialog.reject()
-        else:
-            print("No dialog found")
-
-    QTimer.singleShot(500, close_dialog)
-
-    # Call the method (this will block until dialog closes)
+    edit_trace_properties() ends in a non-blocking dialog.show(), so the dialog is
+    reachable immediately -- but that also means a QTimer.singleShot dismissal is
+    never reached before the assertions run, which is precisely how the original
+    version of these tests managed to verify nothing. Drive the buttons directly.
+    """
     window.edit_trace_properties()
+    app.processEvents()
+    dialog = window._trace_props_dialog
+    assert dialog is not None and dialog.isVisible(), "dialog did not open"
+    return dialog
 
-    print("Dialog closed")
 
-    # Verify nothing changed (since we clicked Close)
-    var, plot_item, y_axis = window.trace_manager.traces[0]
-    if var != original_var:
-        print(f"ERROR: var changed to {var}")
-        return False
-    if plot_item.opts['pen'].color() != original_color:
-        print(f"ERROR: color changed")
-        return False
-    if plot_item.opts['pen'].width() != original_width:
-        print(f"ERROR: width changed")
-        return False
+def button(dialog, text):
+    for btn in dialog.findChildren(QPushButton):
+        if btn.text() == text:
+            return btn
+    raise AssertionError(
+        f"no {text!r} button in {[b.text() for b in dialog.findChildren(QPushButton)]}")
 
-    print("✓ Dialog opens and closes without changing trace properties (Close button)")
 
-    # Now test Apply button
-    # We'll need to simulate selecting a trace, editing fields, and clicking Apply
-    # For simplicity, we'll directly call the helper methods
-    print("\nTesting apply functionality via helper methods...")
-    # Mock list widget (we need a QListWidget)
-    from PyQt6.QtWidgets import QListWidget
-    list_widget = QListWidget()
-    list_widget.addItem(f"1. {var} @ {y_axis}")
-    list_widget.setCurrentRow(0)
+def test_dialog_lists_the_plotted_trace(window, app):
+    dialog = open_dialog(window, app)
+    labels = [dialog.findChild(__import__("PyQt6.QtWidgets", fromlist=["QListWidget"])
+                               .QListWidget).item(i).text()
+              for i in range(dialog.findChild(__import__("PyQt6.QtWidgets", fromlist=["QListWidget"])
+                                              .QListWidget).count())]
+    assert any("v(ac_p)" in text for text in labels), \
+        f"trace missing from the dialog list: {labels}"
+    button(dialog, "Close").click()
 
-    # Create a mock dialog to hold widgets (edit_trace_properties stores
-    # widgets on the dialog, not on self, to avoid stale refs after close).
-    from PyQt6.QtWidgets import QLineEdit, QComboBox, QDialog
-    mock_dialog = QDialog()
-    mock_dialog.alias_edit = QLineEdit()
-    mock_dialog.color_combo = QComboBox()
-    mock_dialog.width_combo = QComboBox()
-    mock_dialog.height_combo = QComboBox()
-    # Populate color combo
-    colors = [
-        ("Default (auto)", None),
-        ("Red", (255, 0, 0)),
-        ("Green", (0, 255, 0)),
-        ("Blue", (0, 0, 255)),
-        ("Yellow", (255, 255, 0)),
-        ("Magenta", (255, 0, 255)),
-        ("Cyan", (0, 255, 255)),
-        ("Orange", (255, 165, 0)),
-        ("Purple", (128, 0, 128)),
-        ("Brown", (165, 42, 42))
-    ]
-    for color_name, color_value in colors:
-        mock_dialog.color_combo.addItem(color_name, color_value)
-    widths = [1, 2, 3, 4, 5]
-    for width in widths:
-        mock_dialog.width_combo.addItem(str(width), width)
 
-    mock_dialog.alias_edit.setText("NewAlias")
-    mock_dialog.color_combo.setCurrentIndex(1)  # Red
-    mock_dialog.width_combo.setCurrentIndex(2)  # 3
+def test_close_button_leaves_everything_untouched(window, app):
+    _var, item, _axis = window.trace_manager.traces[0]
+    before = (item.opts["pen"].color().getRgb(), item.opts["pen"].width(),
+              item.opts.get("name"), [t.name for t in window.state.traces])
 
-    # Call apply method
-    window._apply_trace_properties(0, list_widget, mock_dialog)
+    dialog = open_dialog(window, app)
 
-    # Check updates
-    new_var, new_plot_item, new_y_axis = window.trace_manager.traces[0]
-    if new_var != "NewAlias":
-        print(f"ERROR: alias not updated, got {new_var}")
-        return False
-    new_color = new_plot_item.opts['pen'].color()
-    expected_color = Qt.GlobalColor.red  # Red color
-    # Compare RGB
-    if new_color.red() != 255 or new_color.green() != 0 or new_color.blue() != 0:
-        print(f"ERROR: color not red, got {new_color.red()}, {new_color.green()}, {new_color.blue()}")
-        return False
-    new_width = new_plot_item.opts['pen'].width()
-    if new_width != 3:
-        print(f"ERROR: width not 3, got {new_width}")
-        return False
+    # Change every field, then Close: none of it may be committed.
+    dialog.alias_edit.setText("ShouldNotStick")
+    dialog.color_combo.setCurrentIndex(_GREEN)
+    dialog.width_combo.setCurrentIndex(4)
+    button(dialog, "Close").click()
+    app.processEvents()
 
-    print("✓ Apply functionality works")
+    _var2, item2, _axis2 = window.trace_manager.traces[0]
+    after = (item2.opts["pen"].color().getRgb(), item2.opts["pen"].width(),
+             item2.opts.get("name"), [t.name for t in window.state.traces])
+    assert after == before, (
+        f"Close committed edits\n  before: {before}\n  after:  {after}")
 
-    # Clean up
-    window.close()
-    app.quit()
-    return True
+
+def test_close_does_not_rename_the_model_trace(window, app):
+    dialog = open_dialog(window, app)
+    dialog.alias_edit.setText("Ghost")
+    button(dialog, "Close").click()
+    app.processEvents()
+    assert [t.name for t in window.state.traces] == ["v(ac_p)"], \
+        "closing the dialog renamed the trace"
+
+
+def main():
+    app = QApplication.instance() or QApplication(sys.argv)
+    ok = True
+    for fn in (test_dialog_lists_the_plotted_trace,
+               test_close_button_leaves_everything_untouched,
+               test_close_does_not_rename_the_model_trace):
+        w = MainWindow(_FIXTURE)
+        w._load_initial_files()
+        w.show()
+        app.processEvents()
+        if not w.trace_manager.traces:
+            w.trace_manager.add_trace("v(ac_p)", w.state.current_x_var,
+                                      AxisAssignment.Y1)
+        app.processEvents()
+        try:
+            fn(w, app)
+            print(f"PASS: {fn.__name__}")
+        except Exception as exc:
+            print(f"FAIL: {fn.__name__}: {exc}")
+            ok = False
+        finally:
+            w.close()
+            app.processEvents()
+    return 0 if ok else 1
+
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Testing trace property editor")
-    print("=" * 60)
-
-    try:
-        success = test_trace_property_editor()
-        print("\n" + "=" * 60)
-        if success:
-            print("Test passed!")
-        else:
-            print("Test failed!")
-        print("=" * 60)
-        sys.exit(0 if success else 1)
-    except Exception as e:
-        print(f"\n❌ Test failed with error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    sys.exit(main())

@@ -4,8 +4,8 @@ Provides threshold presets (TTL, CMOS, etc.) and a dataclass for per-trace
 threshold settings with Schmitt-trigger hysteresis.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Dict
 
 
 @dataclass

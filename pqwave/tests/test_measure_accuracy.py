@@ -178,7 +178,7 @@ class TestTimingAccuracy:
         if len(rising_edges) >= 2:
             dt = t_ds[rising_edges[-1]] - t_ds[rising_edges[0]]
             # Decimation may degrade precision; log the result
-            print(f"  Full data rise time:  ~10 ns")
+            print("  Full data rise time:  ~10 ns")
             print(f"  Decimated rise time:   {dt*1e9:.2f} ns (step={step})")
 
 
@@ -316,9 +316,9 @@ class TestFunctionPrecision:
         dec_max = float(np.max(v_dec))
         if dec_max < 5.0:
             pytest.skip(
-                f"Single-point spike lost in decimation. "
-                f"This documents that sparse peaks may be missed "
-                f"on display-only data."
+                "Single-point spike lost in decimation. "
+                "This documents that sparse peaks may be missed "
+                "on display-only data."
             )
 
     def test_integral_with_decimation(self):

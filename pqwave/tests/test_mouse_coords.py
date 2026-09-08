@@ -11,9 +11,9 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from PyQt6.QtWidgets import QApplication
 from pqwave.ui.main_window import MainWindow
 
-def test_menu_manager_coordinate_label():
+def _check_menu_manager_coordinate_label():
     """Test MenuManager's coordinate label updates."""
-    app = QApplication([])
+    app = QApplication.instance() or QApplication([])
 
     # Create MainWindow
     print("Creating MainWindow...")
@@ -61,9 +61,9 @@ def test_menu_manager_coordinate_label():
     app.quit()
     return True
 
-def test_signal_connections():
+def _check_signal_connections():
     """Test that mouse signals from PlotWidget update coordinate label."""
-    app = QApplication([])
+    app = QApplication.instance() or QApplication([])
 
     print("\nTesting signal connections...")
     window = MainWindow()
@@ -104,10 +104,10 @@ if __name__ == "__main__":
 
     try:
         # Test MenuManager directly
-        test_menu_manager_coordinate_label()
+        _check_menu_manager_coordinate_label()
 
         # Test signal connections
-        test_signal_connections()
+        _check_signal_connections()
 
         print("\n" + "=" * 60)
         print("All mouse coordinate tests passed!")
@@ -118,3 +118,25 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+def test_menu_manager_coordinate_label():
+    # pytest entry point for the legacy checks in _check_menu_manager_coordinate_label.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_mouse_coords.py` working unchanged.
+    assert _check_menu_manager_coordinate_label() is True, (
+        "checks failed -- see captured stdout for the failing step")
+
+
+def test_signal_connections():
+    # pytest entry point for the legacy checks in _check_signal_connections.
+    #
+    # The helper reports pass/fail by returning a bool, but returning a value
+    # from a test does NOT fail it under pytest -- such tests would pass
+    # vacuously. This wrapper turns the bool into a real assertion while
+    # leaving `python test_mouse_coords.py` working unchanged.
+    assert _check_signal_connections() is True, (
+        "checks failed -- see captured stdout for the failing step")

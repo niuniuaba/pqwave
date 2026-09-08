@@ -149,55 +149,54 @@ pqwave integrates with [xschem](https://xschem.sourceforge.io/) schematic editor
 
 For configuration instructions and advanced features like back-annotation, see the [Xschem Bridge](docs/xschem/) documentation and the `XschemCrossProbeClient` class in `pqwave/bridge/xschem/cross_probe.py`.
 
-## 🔧 Architecture  
+## 🔧 Architecture
 
 ```
 pqwave/
-├── __init__.py              # Package exports, version
-├── main.py                  # CLI entry point (argparse, logging, test runner)
-├── logging_config.py        # Standard logging configuration
-├── test_runner.py           # Test discovery and execution engine
-├── models/                  # Data models and business logic
-│   ├── __init__.py
-│   ├── dataset.py           # Dataset class
-│   ├── expression.py        # ExprEvaluator for math expressions
-│   ├── rawfile.py           # RawFile parser for SPICE formats
-│   ├── state.py             # ApplicationState singleton
-│   └── trace.py             # Trace data model
-├── ui/                      # UI components
-│   ├── __init__.py
-│   ├── main_window.py       # MainWindow (composes all UI components)
-│   ├── plot_widget.py       # Enhanced PlotWidget with dual Y-axis & cursors
-│   ├── control_panel.py     # Dataset/vector/trace controls
-│   ├── menu_manager.py      # Menu bar and toolbar management
-│   ├── trace_manager.py     # Trace lifecycle, color assignment, legend
-│   ├── axis_manager.py      # Axis configuration, scaling, log mode
-│   └── settings_widget.py   # Application settings dialog
-├── utils/                   # Utilities
-│   ├── __init__.py
-│   ├── colors.py            # Color management for traces
-│   └── log_axis.py          # LogAxisItem for logarithmic axis display
-├── communication/           # Xschem integration layer
-│   ├── __init__.py
-│   ├── xschem_server.py     # TCP server for xschem commands
-│   ├── command_handler.py   # Command parsing and signal emission
-│   └── window_registry.py   # Window management for multi-instance support
-└── tests/                   # Test suite (16+ test files)
-    ├── __init__.py
-    ├── test_basic.py
-    ├── test_expr_evaluator.py
-    ├── test_imports.py
-    ├── test_instantiate.py
-    ├── test_integration.py
-    ├── test_log_axis.py
-    ├── test_models.py
-    ├── test_mouse_coords.py
-    ├── test_mouse_gui.py
-    ├── test_plot_widget_mouse.py
-    ├── test_rawfile.py
-    ├── test_settings.py
-    ├── test_trace_manager.py
-    ├── test_trace_prop.py
-    ├── test_trace_prop_fixed.py
-    └── test_ui_integration.py
+├── __init__.py              # package exports (lazy, PEP 562), __version__
+├── _version.py              # single source of truth for the version string
+├── main.py                  # CLI entry point (argparse, logging, bridges)
+├── logging_config.py        # standard logging configuration
+├── test_runner.py           # --test : runs each test file under pytest, isolated
+├── models/                  # RawFile, Dataset/Variable, Trace, ExprEvaluator,
+│                            # ApplicationState, raw_converter, mc_collection,
+│                            # vcdfile, fst_adapter, ghw_adapter
+├── analysis/                # pure NumPy engines: bode, nyquist, smith, polar,
+│                            # histogram, correlation, power_analyzer,
+│                            # worst_case, multi_run
+├── ui/                      # Qt widgets: MainWindow, PlotWidget, PanelGrid,
+│                            # TraceManager, AxisManager, dialogs, REPL
+├── bridge/                  # EDA tool integrations
+│   ├── xschem/              #   TCP server, cross-probe, control bar, file watcher
+│   ├── kicad/               #   IPC API bridge + control bar
+│   ├── lepton/              #   Scheme server + cross-probe
+│   ├── qucs_s/              #   one-click waveform-viewer hook
+│   └── qspice/              #   QSPICE launcher / .qsch handling
+├── digital/                 # VCD, eye diagram, bus slicing, threshold config
+├── measure/                 # .meas script parser and measure engine
+├── session/                 # SessionAPI: Qt-free orchestrator (@api_command)
+├── llm/                     # natural-language → command translation
+├── templates/               # view-template save/apply
+├── utils/                   # ColorManager, LogAxisItem, ThrottledPlotItem, …
+└── tests/                   # the test suite (~70 files, ~950 tests)
 ```
+
+Dependency direction is one-way: **ui → analysis / models / digital / session → utils**.
+`models/`, `analysis/` and `session/` stay Qt-free so they work headless and in the REPL.
+
+Simulation result files and the larger performance captures live in the top-level
+`tests/` directory (git-ignored, except the small fixtures the suite needs); the
+Python test suite itself is `pqwave/tests/`.
+
+## 🧪 Running the tests
+
+```bash
+pytest                       # whole suite (testpaths points at pqwave/tests/)
+pytest pqwave/tests/test_bode.py -q
+python pqwave.py --test      # each test file in its own subprocess
+```
+
+`pqwave/tests/conftest.py` provides the single QApplication the suite shares and
+resets the `ApplicationState` / `WindowRegistry` singletons between tests, so the
+whole suite runs in one process. Bridge tests that need a TCP socket skip with an
+explicit reason where binding is not permitted.

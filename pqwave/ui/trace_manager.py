@@ -23,8 +23,6 @@ from pqwave.models.trace import Trace, AxisAssignment
 from pqwave.models.expression import ExprEvaluator
 from pqwave.utils.colors import ColorManager
 from pqwave.utils.impedance_format import format_complex
-from pqwave.digital.digital_renderer import threshold_and_step
-from pqwave.digital.threshold_config import ThresholdConfig
 from pqwave.digital.trace_type_manager import TraceTypeManager
 from pqwave.digital.vcd_time_aligner import align_vcd_to_raw, vcd_to_step_arrays, vcd_to_uniform_grid
 from pqwave.digital.threshold_dialog import ThresholdDialog
@@ -324,7 +322,7 @@ class TraceManager(QtCore.QObject):
                 self.logger.info(f"Skipping duplicate traces: {', '.join(skipped)}")
             variables = filtered
             if not variables:
-                error_msg = f"Expression already exists as a trace"
+                error_msg = "Expression already exists as a trace"
                 self.logger.info(error_msg)
                 if error_out is not None:
                     error_out.append(error_msg)
@@ -413,7 +411,7 @@ class TraceManager(QtCore.QObject):
 
                     # Check if X and Y data have the same length
                     if len(trace_x_data) != len(y_data):
-                        self.logger.error(f"X and Y data length mismatch!")
+                        self.logger.error("X and Y data length mismatch!")
                         self.logger.error(f"    X data length: {len(trace_x_data)}")
                         self.logger.error(f"    Y data length: {len(y_data)}")
                         self.logger.warning(f"    Skipping trace for {var}")
@@ -639,7 +637,7 @@ class TraceManager(QtCore.QObject):
                     t = self.state_traces[i]
                     n_bits = t.metadata.get('bus_width', len(t.bus_signals or []))
                     legend_name = f"{var} [BUS:{n_bits}] @ {y_axis}"
-            sample = self.legend.addItem(plot_item, legend_name)
+            self.legend.addItem(plot_item, legend_name)
             # Apply bold styling to selected traces
             if i < len(self.state_traces) and self.state_traces[i].selected:
                 label = self.legend.getLabel(plot_item)
@@ -1676,7 +1674,6 @@ class TraceManager(QtCore.QObject):
             bot_v = [base_level, base_level, high, high]
         else:
             first_tx = transitions[0]
-            last_tx  = transitions[-1]
             # Start at centre of first crossing (matches surfer)
             top_t.append(first_tx)
             top_v.append(base_level)
@@ -2174,7 +2171,10 @@ class TraceManager(QtCore.QObject):
                 paren_depth += 1
                 current_expr.append(c)
             elif c == ')' and not in_quotes:
-                paren_depth -= 1
+                # Clamp at zero: a stray ')' must not push the depth negative,
+                # which would disable top-level space splitting for the rest of
+                # the string and glue later expressions into one token.
+                paren_depth = max(0, paren_depth - 1)
                 current_expr.append(c)
             elif c == ' ' and paren_depth == 0 and not in_quotes:
                 if current_expr:

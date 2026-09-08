@@ -12,9 +12,14 @@ from PyQt6.QtWidgets import QApplication, QDialog, QCheckBox
 from PyQt6.QtTest import QTest
 from PyQt6.QtCore import Qt, QTimer
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from pqwave.ui.main_window import MainWindow  # noqa: E402
+
+
 def test_settings_dialog():
     """Test settings dialog."""
-    app = QApplication([])
+    app = QApplication.instance() or QApplication([])
 
     from pqwave.ui.main_window import MainWindow
     window = MainWindow('tests/bridge.raw')
@@ -24,8 +29,8 @@ def test_settings_dialog():
     app.processEvents()
 
     # Load initial file (bypass timer)
-    if window.initial_file:
-        window._load_initial_file()
+    if window.initial_files:
+        window._load_initial_files()
         app.processEvents()
 
     print("Initial state:")
@@ -125,6 +130,35 @@ def test_settings_dialog():
     # Clean up
     window.close()
     app.quit()
+
+
+def test_tearing_down_after_showing_settings_does_not_raise():
+    """Regression: the settings-widget `destroyed` handler must survive teardown.
+
+    show_settings() connected `destroyed` to `lambda: setattr(self, ...)` — a
+    closure over the *cell* holding `self` in `show_settings`'s frame. Python 3.14
+    clears those cells when the frame is torn down, so the late-firing signal raised
+    `NameError: cannot access free variable 'self'`, which only surfaced in a full
+    suite run (attributed to whichever unrelated test's fixture happened to pump the
+    event loop at that moment). It is now a bound method.
+    """
+    import gc
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(os.path.join(PROJECT_ROOT, 'tests', 'bridge.raw'))
+    window.show()
+    app.processEvents()
+
+    window.show_settings()
+    app.processEvents()
+    assert window._settings_widget is not None, "settings widget was never created"
+
+    window.close()
+    window.deleteLater()
+    app.processEvents()
+    del window
+    gc.collect()
+    app.processEvents()
 
 if __name__ == "__main__":
     print("=" * 60)

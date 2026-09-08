@@ -63,7 +63,7 @@ def main(filepath):
     print(f"  [initial] RSS: {fmt_bytes(rss_start):>10}")
 
     # Stage 1: RawFile parse
-    print(f"\n--- Stage 1: RawFile().parse() ---")
+    print("\n--- Stage 1: RawFile().parse() ---")
     rf = RawFile(filepath)
     snap("after parse")
 
@@ -88,14 +88,14 @@ def main(filepath):
     print(f"  raw_data is None: {rf.raw_data is None}")
 
     # Stage 2: Dataset instantiation
-    print(f"\n--- Stage 2: Dataset() ---")
+    print("\n--- Stage 2: Dataset() ---")
     dataset = Dataset(rf, dataset_idx=0)
     snap("after Dataset")
     print(f"  Variables: {dataset.n_variables}")
     print(f"  Points: {dataset.n_points}")
 
     # Stage 3: Variable access (cache verification)
-    print(f"\n--- Stage 3: Variable access ---")
+    print("\n--- Stage 3: Variable access ---")
     for var in dataset.variables[:3]:
         d1 = rf.get_variable_data(var.name, 0)
         d2 = rf.get_variable_data(var.name, 0)
@@ -106,7 +106,7 @@ def main(filepath):
     snap("after variable access")
 
     # Stage 4: Complex derived data if applicable
-    print(f"\n--- Stage 4: Derived variables ---")
+    print("\n--- Stage 4: Derived variables ---")
     has_complex = False
     for var in dataset.variables:
         if var.is_complex:
@@ -115,7 +115,7 @@ def main(filepath):
             phase = var.phase
             print(f"  {var.name}: complex, mag dtype={mag.dtype}, phase dtype={phase.dtype}")
     if not has_complex:
-        print(f"  (no complex variables)")
+        print("  (no complex variables)")
     snap("after derived access")
 
     # Summary
