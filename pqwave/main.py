@@ -24,6 +24,7 @@ from pqwave.models.raw_converter import extract_traces_to_raw, write_raw_file
 from pqwave.models.rawfile import RawFile
 from pqwave.models.expression import ExprEvaluator
 from pqwave.models.trace import Trace
+from pqwave.utils.qt6ct import apply_theme
 import numpy as np
 
 
@@ -830,19 +831,19 @@ def main():
             return 1
 
     # Normal GUI startup
-    # Prevent Qt from loading GTK theme plugin which triggers portal permission
-    # checks for theme settings. When the portal denies access (snap/sandbox
-    # environments, or when D-Bus portal is unavailable), Qt's window
-    # decorations break (white title bar, no min/max/close buttons).
-    # Force these settings BEFORE QApplication is constructed:
-    #   QT_QPA_PLATFORMTHEME=''  — disable platform theme plugin (no GTK/GNOME)
-    #   QT_STYLE_OVERRIDE=Fusion — ensure Fusion style is used for widgets
-    # Fusion style provides consistent cross-platform widget rendering and
-    # does not depend on any desktop environment theming infrastructure.
+    # Do not let Qt auto-select the GTK platform theme: its settings-portal
+    # access can be denied (sandbox, no D-Bus portal), which breaks window
+    # decorations. An explicit user choice such as qt6ct is left untouched.
     os.environ.setdefault("QT_QPA_PLATFORMTHEME", "")
-    os.environ.setdefault("QT_STYLE_OVERRIDE", "Fusion")
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+
+    # The PyQt6 wheel bundles its own Qt build, so a distro qt6ct plugin can be
+    # rejected as version-incompatible. Apply the configuration in-process when
+    # the plugin did not load; Fusion remains the unthemed fallback.
+    theme_applied = apply_theme(app)
+    theme_name = os.environ.get("QT_QPA_PLATFORMTHEME", "")
+    if not theme_applied and theme_name in ("", "qt6ct"):
+        app.setStyle("Fusion")
 
     # If xschem port is busy, ask user whether to launch standalone
     if xschem_port_busy:
