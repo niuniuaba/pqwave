@@ -17,6 +17,14 @@ from PyQt6.QtCore import QObject, pyqtSignal
 logger = logging.getLogger(__name__)
 
 
+# The singleton is kept at module level, never on the class. PyQt6 builds the
+# dynamic metaobject by walking the class attributes; a half-constructed QObject
+# stored there re-enters attribute lookup and recurses until the C stack
+# overflows (SIGSEGV on the first construction).
+_registry_instance: Optional['WindowRegistry'] = None
+_registry_initialized: bool = False
+
+
 class WindowRegistry(QObject):
     """
     Singleton registry for tracking open pqwave windows.
@@ -30,22 +38,32 @@ class WindowRegistry(QObject):
         window_unregistered: Emitted when a window is unregistered
     """
 
-    _instance: Optional['WindowRegistry'] = None
-
     # Qt signals
     window_registered = pyqtSignal(str, object)  # window_id, window_ref
     window_unregistered = pyqtSignal(str)        # window_id
 
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
-        return cls._instance
+        global _registry_instance
+        if _registry_instance is None:
+            _registry_instance = super().__new__(cls)
+        return _registry_instance
+
+    def __init__(self):
+        # No attribute access on self before QObject.__init__(): sip raises (or
+        # recurses) on an uninitialised wrapper. Track state at module level.
+        global _registry_initialized
+        if _registry_initialized and _registry_instance is self:
+            return
+        super().__init__()
+        _registry_initialized = True
+        self._initialize()
 
     @classmethod
     def reset(cls):
         """Reset the singleton instance (for test isolation)."""
-        cls._instance = None
+        global _registry_instance, _registry_initialized
+        _registry_instance = None
+        _registry_initialized = False
 
     def _initialize(self):
         """Initialize registry data structures."""
